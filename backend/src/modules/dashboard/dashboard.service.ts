@@ -8,19 +8,25 @@ export class DashboardService {
   async getOverview() {
     const [
       totalCharges,
+      customCharges,
+      reusableCharges,
       paidCharges,
       pendingCharges,
       overdueCharges,
       totalSubaccounts,
-      activeSubaccounts,
-      totalSplits,
+      totalDoctors,
+      totalSuppliers,
+      totalSplitResults,
     ] = await Promise.all([
       this.prisma.charge.count(),
+      this.prisma.charge.count({ where: { chargeType: 'CUSTOM' } }),
+      this.prisma.charge.count({ where: { chargeType: 'REUSABLE' } }),
       this.prisma.charge.count({ where: { status: 'CONFIRMED' } }),
       this.prisma.charge.count({ where: { status: 'PENDING' } }),
       this.prisma.charge.count({ where: { status: 'OVERDUE' } }),
-      this.prisma.subaccount.count(),
       this.prisma.subaccount.count({ where: { active: true } }),
+      this.prisma.subaccount.count({ where: { type: 'DOCTOR', active: true } }),
+      this.prisma.subaccount.count({ where: { type: 'SUPPLIER', active: true } }),
       this.prisma.splitResult.count(),
     ]);
 
@@ -30,9 +36,29 @@ export class DashboardService {
       _sum: { value: true },
     });
 
+    // Receita distribuída para médicos
+    const doctorRevenue = await this.prisma.splitResult.aggregate({
+      where: {
+        status: 'COMPLETED',
+        receiverSubaccount: { type: 'DOCTOR' },
+      },
+      _sum: { value: true },
+    });
+
+    // Receita distribuída para fornecedores
+    const supplierRevenue = await this.prisma.splitResult.aggregate({
+      where: {
+        status: 'COMPLETED',
+        receiverSubaccount: { type: 'SUPPLIER' },
+      },
+      _sum: { value: true },
+    });
+
     return {
       charges: {
         total: totalCharges,
+        custom: customCharges,
+        reusable: reusableCharges,
         paid: paidCharges,
         pending: pendingCharges,
         overdue: overdueCharges,
@@ -41,37 +67,49 @@ export class DashboardService {
       },
       subaccounts: {
         total: totalSubaccounts,
-        active: activeSubaccounts,
+        doctors: totalDoctors,
+        suppliers: totalSuppliers,
       },
       splits: {
-        total: totalSplits,
+        total: totalSplitResults,
+        doctorRevenue: doctorRevenue._sum.value || 0,
+        supplierRevenue: supplierRevenue._sum.value || 0,
       },
     };
   }
 
-  async getVolumeBySubaccount() {
+  async getRevenueBySubaccount(type?: string) {
+    const where: Record<string, unknown> = { active: true };
+    if (type) where.type = type;
+
     const subaccounts = await this.prisma.subaccount.findMany({
-      where: { active: true },
+      where,
       select: {
         id: true,
         name: true,
+        type: true,
         balance: true,
-        _count: { select: { charges: true } },
-        charges: {
-          select: { value: true, status: true },
+        createdAt: true,
+        splitResults: {
+          select: { value: true, status: true, createdAt: true },
         },
+        _count: { select: { chargeSplits: true } },
       },
     });
 
     return subaccounts.map((sub) => ({
       id: sub.id,
       name: sub.name,
+      type: sub.type,
       balance: sub.balance,
-      totalCharges: sub._count.charges,
-      totalValue: sub.charges.reduce((sum, c) => sum + Number(c.value), 0),
-      paidValue: sub.charges
-        .filter((c) => c.status === 'CONFIRMED')
-        .reduce((sum, c) => sum + Number(c.value), 0),
+      createdAt: sub.createdAt,
+      totalCharges: sub._count.chargeSplits,
+      totalReceived: sub.splitResults
+        .filter((r) => r.status === 'COMPLETED')
+        .reduce((sum, r) => sum + Number(r.value), 0),
+      totalPending: sub.splitResults
+        .filter((r) => r.status === 'PENDING')
+        .reduce((sum, r) => sum + Number(r.value), 0),
     }));
   }
 
@@ -80,7 +118,11 @@ export class DashboardService {
       this.prisma.charge.findMany({
         take: 10,
         orderBy: { createdAt: 'desc' },
-        include: { subaccount: { select: { name: true } } },
+        include: {
+          splits: {
+            include: { subaccount: { select: { name: true, type: true } } },
+          },
+        },
       }),
       this.prisma.webhookLog.findMany({
         take: 10,

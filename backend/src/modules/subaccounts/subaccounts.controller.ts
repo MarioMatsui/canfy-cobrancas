@@ -12,13 +12,13 @@ export class SubaccountsController {
   constructor(private subaccountsService: SubaccountsService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Criar subconta' })
+  @ApiOperation({ summary: 'Criar subconta (médico, fornecedor, etc.)' })
   create(@Body() dto: CreateSubaccountDto) {
     return this.subaccountsService.create(dto);
   }
 
   @Get()
-  @ApiOperation({ summary: 'Listar subcontas' })
+  @ApiOperation({ summary: 'Listar subcontas (filtro por tipo, status, busca)' })
   findAll(@Query() query: ListSubaccountsDto) {
     return this.subaccountsService.findAll(query);
   }
@@ -27,6 +27,12 @@ export class SubaccountsController {
   @ApiOperation({ summary: 'Buscar subconta por ID' })
   findOne(@Param('id') id: string) {
     return this.subaccountsService.findOne(id);
+  }
+
+  @Get(':id/financial-history')
+  @ApiOperation({ summary: 'Histórico financeiro da subconta (splits recebidos)' })
+  getFinancialHistory(@Param('id') id: string) {
+    return this.subaccountsService.getFinancialHistory(id);
   }
 
   @Put(':id')

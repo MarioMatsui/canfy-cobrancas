@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { DashboardService } from './dashboard.service';
@@ -16,10 +16,10 @@ export class DashboardController {
     return this.dashboardService.getOverview();
   }
 
-  @Get('volume')
-  @ApiOperation({ summary: 'Volume por subconta' })
-  getVolumeBySubaccount() {
-    return this.dashboardService.getVolumeBySubaccount();
+  @Get('revenue')
+  @ApiOperation({ summary: 'Receita por subconta (filtro por tipo: DOCTOR, SUPPLIER)' })
+  getRevenue(@Query('type') type?: string) {
+    return this.dashboardService.getRevenueBySubaccount(type);
   }
 
   @Get('activity')

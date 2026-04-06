@@ -56,29 +56,26 @@ export class WebhooksProcessor {
       data: { status: 'CONFIRMED' },
     });
 
-    // Registra os split results
+    // Registra os split results baseado nos ChargeSplits
     const charge = await this.prisma.charge.findFirst({
       where: { asaasId: payment.id },
-      include: { subaccount: true },
+      include: {
+        splits: {
+          include: { subaccount: true },
+        },
+      },
     });
 
     if (charge) {
-      const rules = await this.prisma.splitRule.findMany({
-        where: { chargeSubaccountId: charge.subaccountId, active: true },
-      });
-
-      for (const rule of rules) {
-        const splitValue =
-          rule.type === 'PERCENTAGE'
-            ? (Number(rule.value) / 100) * payment.value
-            : Number(rule.value);
+      for (const split of charge.splits) {
+        const splitValue = (Number(split.percentage) / 100) * payment.value;
 
         await this.prisma.splitResult.create({
           data: {
             chargeId: charge.id,
-            receiverSubaccountId: rule.receiverSubaccountId,
+            receiverSubaccountId: split.subaccountId,
             value: splitValue,
-            type: rule.type,
+            percentage: split.percentage,
             status: 'COMPLETED',
           },
         });

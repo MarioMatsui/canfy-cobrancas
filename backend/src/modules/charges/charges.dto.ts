@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsOptional, IsEnum, IsDateString, Min } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsEnum, IsDateString, IsArray, ValidateNested, Min, Max } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -6,54 +6,80 @@ export enum BillingType {
   BOLETO = 'BOLETO',
   PIX = 'PIX',
   CREDIT_CARD = 'CREDIT_CARD',
+  DEBIT_CARD = 'DEBIT_CARD',
+  UNDEFINED = 'UNDEFINED', // Para links de pagamento (aceita múltiplos)
 }
 
-export class CreateChargeDto {
-  @ApiProperty({ description: 'ID da subconta (local)' })
+export enum ChargeType {
+  CUSTOM = 'CUSTOM',
+  REUSABLE = 'REUSABLE',
+}
+
+export class SplitRecipientDto {
+  @ApiProperty({ description: 'ID da subconta recebedora (médico ou fornecedor)' })
   @IsString()
   subaccountId!: string;
 
-  @ApiProperty({ description: 'ID do tipo de serviço (define o % de split)' })
+  @ApiProperty({ example: 70.0, description: 'Percentual do split (o restante vai para conta principal)' })
+  @IsNumber()
+  @Min(0.01)
+  @Max(99.99)
+  percentage!: number;
+}
+
+export class CreateChargeDto {
+  @ApiProperty({ enum: ChargeType, default: 'CUSTOM' })
+  @IsEnum(ChargeType)
+  chargeType!: ChargeType;
+
+  // Cliente (quem paga)
+  @ApiProperty({ example: 'João Silva' })
   @IsString()
-  serviceTypeId!: string;
+  customerName!: string;
+
+  @ApiPropertyOptional({ example: 'joao@email.com' })
+  @IsString()
+  @IsOptional()
+  customerEmail?: string;
+
+  @ApiPropertyOptional({ example: '12345678901' })
+  @IsString()
+  @IsOptional()
+  customerCpfCnpj?: string;
 
   @ApiProperty({ enum: BillingType })
   @IsEnum(BillingType)
   billingType!: BillingType;
 
-  @ApiProperty({ example: 100.0 })
+  @ApiProperty({ example: 300.0 })
   @IsNumber()
   @Min(0.01)
   value!: number;
 
-  @ApiProperty({ example: '2026-04-20' })
+  @ApiPropertyOptional({ example: '2026-04-20', description: 'Obrigatório para CUSTOM, opcional para REUSABLE' })
   @IsDateString()
-  dueDate!: string;
+  @IsOptional()
+  dueDate?: string;
 
-  @ApiPropertyOptional({ example: 'Mensalidade Abril/2026' })
+  @ApiPropertyOptional({ example: 'Consulta médica' })
   @IsString()
   @IsOptional()
   description?: string;
 
-  @ApiPropertyOptional({ example: 2.0, description: 'Multa em %' })
+  @ApiPropertyOptional({ example: 5, description: 'Máximo de parcelas (1-5 custom, 1-3 reusable)' })
   @IsNumber()
   @IsOptional()
-  fine?: number;
+  @Min(1)
+  @Max(5)
+  maxInstallments?: number;
 
-  @ApiPropertyOptional({ example: 1.0, description: 'Juros mensal em %' })
-  @IsNumber()
-  @IsOptional()
-  interest?: number;
-
-  @ApiPropertyOptional({ example: 5.0, description: 'Desconto em R$' })
-  @IsNumber()
-  @IsOptional()
-  discount?: number;
-
-  @ApiPropertyOptional({ example: 3, description: 'Dias antes do vencimento para desconto' })
-  @IsNumber()
-  @IsOptional()
-  discountDueDateLimitDays?: number;
+  // Splits - array de destinatários (fornecedor, médico, etc.)
+  // O restante automaticamente vai para a conta principal
+  @ApiProperty({ type: [SplitRecipientDto], description: 'Destinatários do split. O restante vai para conta principal.' })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SplitRecipientDto)
+  splits!: SplitRecipientDto[];
 }
 
 export class ListChargesDto {
@@ -76,10 +102,10 @@ export class ListChargesDto {
   @IsString()
   status?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ enum: ChargeType })
   @IsOptional()
-  @IsString()
-  subaccountId?: string;
+  @IsEnum(ChargeType)
+  chargeType?: ChargeType;
 
   @ApiPropertyOptional({ enum: BillingType })
   @IsOptional()
@@ -95,4 +121,9 @@ export class ListChargesDto {
   @IsOptional()
   @IsDateString()
   dateTo?: string;
+
+  @ApiPropertyOptional({ description: 'Buscar por nome do cliente' })
+  @IsOptional()
+  @IsString()
+  search?: string;
 }

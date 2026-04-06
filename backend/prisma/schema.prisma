@@ -8,6 +8,21 @@ datasource db {
 }
 
 // ==========================================
+// ENUMS
+// ==========================================
+
+enum SubaccountType {
+  DOCTOR
+  SUPPLIER
+  OTHER
+}
+
+enum ChargeType {
+  CUSTOM    // Cobrança avulsa/personalizada
+  REUSABLE  // Cobrança reutilizável (link permanente)
+}
+
+// ==========================================
 // USUÁRIOS DO PAINEL
 // ==========================================
 
@@ -24,110 +39,92 @@ model User {
 }
 
 // ==========================================
-// TIPOS DE SERVIÇO (com splits personalizáveis)
-// ==========================================
-
-model ServiceType {
-  id                  String   @id @default(uuid())
-  name                String   @unique // ex: "Atendimento Médico", "Venda de Produtos"
-  description         String?
-  splitPercentage     Decimal  @db.Decimal(5, 2) @map("split_percentage") // % que vai pro prestador/fornecedor
-  active              Boolean  @default(true)
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt @map("updated_at")
-
-  charges    Charge[]
-  splitRules SplitRule[]
-
-  @@map("service_types")
-}
-
-// ==========================================
-// SUBCONTAS ASAAS
+// SUBCONTAS ASAAS (Médicos, Fornecedores, etc.)
 // ==========================================
 
 model Subaccount {
-  id          String   @id @default(uuid())
-  asaasId     String   @unique @map("asaas_id")
-  walletId    String?  @map("wallet_id")
+  id          String          @id @default(uuid())
+  asaasId     String          @unique @map("asaas_id")
+  walletId    String?         @map("wallet_id")
   name        String
-  cpfCnpj     String   @map("cpf_cnpj")
+  cpfCnpj     String          @map("cpf_cnpj")
   email       String?
   phone       String?
-  mobilePhone String?  @map("mobile_phone")
-  active      Boolean  @default(true)
-  balance     Decimal  @default(0) @db.Decimal(12, 2)
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  mobilePhone String?         @map("mobile_phone")
+  type        SubaccountType  @default(OTHER)
+  active      Boolean         @default(true)
+  balance     Decimal         @default(0) @db.Decimal(12, 2)
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
 
-  charges              Charge[]
-  splitRulesAsCharge   SplitRule[]    @relation("SplitChargeSubaccount")
-  splitRulesAsReceiver SplitRule[]    @relation("SplitReceiverSubaccount")
-  splitResults         SplitResult[]
+  chargeSplits ChargeSplit[]
+  splitResults SplitResult[]
 
+  @@index([type])
   @@map("subaccounts")
 }
 
 // ==========================================
-// COBRANÇAS
+// COBRANÇAS (Avulsas e Reutilizáveis)
 // ==========================================
 
 model Charge {
-  id              String   @id @default(uuid())
-  asaasId         String?  @unique @map("asaas_id")
-  subaccountId    String   @map("subaccount_id")
-  serviceTypeId   String?  @map("service_type_id")
-  billingType     String   @map("billing_type") // BOLETO, PIX, CREDIT_CARD
-  value           Decimal  @db.Decimal(12, 2)
-  dueDate         DateTime @map("due_date")
-  description     String?
-  status          String   @default("PENDING") // PENDING, CONFIRMED, OVERDUE, REFUNDED, CANCELLED
-  invoiceUrl      String?  @map("invoice_url")
-  bankSlipUrl     String?  @map("bank_slip_url")
-  pixQrCode       String?  @map("pix_qr_code")
-  pixCopiaECola   String?  @map("pix_copia_e_cola")
-  splitPercentage Decimal? @db.Decimal(5, 2) @map("split_percentage") // snapshot do % no momento da cobrança
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id              String     @id @default(uuid())
+  asaasId         String?    @unique @map("asaas_id")
+  chargeType      ChargeType @default(CUSTOM) @map("charge_type")
 
-  subaccount   Subaccount    @relation(fields: [subaccountId], references: [id])
-  serviceType  ServiceType?  @relation(fields: [serviceTypeId], references: [id])
+  // Cliente (quem paga)
+  customerName    String     @map("customer_name")
+  customerEmail   String?    @map("customer_email")
+  customerCpfCnpj String?   @map("customer_cpf_cnpj")
+  customerAsaasId String?    @map("customer_asaas_id")
+
+  billingType     String     @map("billing_type") // PIX, BOLETO, CREDIT_CARD, DEBIT_CARD, UNDEFINED
+  value           Decimal    @db.Decimal(12, 2)
+  dueDate         DateTime?  @map("due_date")
+  description     String?
+  status          String     @default("PENDING") // PENDING, CONFIRMED, OVERDUE, REFUNDED, CANCELLED
+  maxInstallments Int        @default(1) @map("max_installments")
+  isActive        Boolean    @default(true) @map("is_active") // para reutilizáveis
+
+  // Dados de pagamento retornados pelo Asaas
+  invoiceUrl      String?    @map("invoice_url")
+  bankSlipUrl     String?    @map("bank_slip_url")
+  pixQrCode       String?    @map("pix_qr_code")
+  pixCopiaECola   String?    @map("pix_copia_e_cola")
+
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  splits       ChargeSplit[]
   splitResults SplitResult[]
 
   @@index([status])
-  @@index([subaccountId])
-  @@index([serviceTypeId])
+  @@index([chargeType])
   @@index([dueDate])
+  @@index([isActive])
   @@map("charges")
 }
 
 // ==========================================
-// REGRAS DE SPLIT
+// SPLIT POR COBRANÇA (múltiplos destinatários)
 // ==========================================
 
-model SplitRule {
-  id                   String   @id @default(uuid())
-  serviceTypeId        String?  @map("service_type_id")
-  chargeSubaccountId   String   @map("charge_subaccount_id")
-  receiverSubaccountId String   @map("receiver_subaccount_id")
-  type                 String   // PERCENTAGE, FIXED
-  value                Decimal  @db.Decimal(12, 4)
-  description          String?
-  active               Boolean  @default(true)
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
+model ChargeSplit {
+  id           String  @id @default(uuid())
+  chargeId     String  @map("charge_id")
+  subaccountId String  @map("subaccount_id")
+  percentage   Decimal @db.Decimal(5, 2)
 
-  serviceType        ServiceType? @relation(fields: [serviceTypeId], references: [id])
-  chargeSubaccount   Subaccount   @relation("SplitChargeSubaccount", fields: [chargeSubaccountId], references: [id])
-  receiverSubaccount Subaccount   @relation("SplitReceiverSubaccount", fields: [receiverSubaccountId], references: [id])
+  charge     Charge     @relation(fields: [chargeId], references: [id], onDelete: Cascade)
+  subaccount Subaccount @relation(fields: [subaccountId], references: [id])
 
-  @@index([serviceTypeId])
-  @@index([chargeSubaccountId])
-  @@map("split_rules")
+  @@index([chargeId])
+  @@map("charge_splits")
 }
 
 // ==========================================
-// RESULTADOS DE SPLIT (histórico)
+// RESULTADOS DE SPLIT (histórico real)
 // ==========================================
 
 model SplitResult {
@@ -135,7 +132,7 @@ model SplitResult {
   chargeId             String   @map("charge_id")
   receiverSubaccountId String   @map("receiver_subaccount_id")
   value                Decimal  @db.Decimal(12, 2)
-  type                 String   // PERCENTAGE, FIXED
+  percentage           Decimal  @db.Decimal(5, 2)
   status               String   @default("PENDING") // PENDING, COMPLETED, FAILED
   createdAt            DateTime @default(now()) @map("created_at")
 
@@ -143,7 +140,22 @@ model SplitResult {
   receiverSubaccount Subaccount @relation(fields: [receiverSubaccountId], references: [id])
 
   @@index([chargeId])
+  @@index([receiverSubaccountId])
   @@map("split_results")
+}
+
+// ==========================================
+// CONFIGURAÇÕES PARAMETRIZÁVEIS
+// ==========================================
+
+model Setting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
 }
 
 // ==========================================

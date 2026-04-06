@@ -1,6 +1,5 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { CreateSplitRuleDto, ListSplitRulesDto } from './splits.dto';
 
 @Injectable()
 export class SplitsService {
@@ -8,86 +7,82 @@ export class SplitsService {
 
   constructor(private prisma: PrismaService) {}
 
-  async createRule(dto: CreateSplitRuleDto) {
-    // Valida que as subcontas existem
-    const [chargeSubaccount, receiverSubaccount] = await Promise.all([
-      this.prisma.subaccount.findUnique({ where: { id: dto.chargeSubaccountId } }),
-      this.prisma.subaccount.findUnique({ where: { id: dto.receiverSubaccountId } }),
-    ]);
-
-    if (!chargeSubaccount) throw new NotFoundException('Subconta de cobrança não encontrada');
-    if (!receiverSubaccount) throw new NotFoundException('Subconta recebedora não encontrada');
-
-    // Valida que splits percentuais não passam de 100%
-    if (dto.type === 'PERCENTAGE') {
-      const existingRules = await this.prisma.splitRule.findMany({
-        where: { chargeSubaccountId: dto.chargeSubaccountId, type: 'PERCENTAGE', active: true },
-      });
-      const totalPercent = existingRules.reduce((sum, r) => sum + Number(r.value), 0) + dto.value;
-      if (totalPercent > 100) {
-        throw new BadRequestException(`Total de splits percentuais excede 100% (atual: ${totalPercent}%)`);
-      }
-    }
-
-    const rule = await this.prisma.splitRule.create({
-      data: {
-        chargeSubaccountId: dto.chargeSubaccountId,
-        receiverSubaccountId: dto.receiverSubaccountId,
-        type: dto.type,
-        value: dto.value,
-        description: dto.description,
-      },
-      include: { receiverSubaccount: { select: { name: true } } },
-    });
-
-    this.logger.log(`Regra de split criada: ${rule.id}`);
-    return rule;
-  }
-
-  async findAllRules(query: ListSplitRulesDto) {
-    const { chargeSubaccountId, active } = query;
-
-    const where: Record<string, unknown> = {};
-    if (chargeSubaccountId) where.chargeSubaccountId = chargeSubaccountId;
-    if (active !== undefined) where.active = active;
-
-    return this.prisma.splitRule.findMany({
-      where,
+  async getSplitsByCharge(chargeId: string) {
+    const charge = await this.prisma.charge.findUnique({
+      where: { id: chargeId },
       include: {
-        chargeSubaccount: { select: { name: true } },
-        receiverSubaccount: { select: { name: true } },
+        splits: {
+          include: { subaccount: { select: { id: true, name: true, type: true } } },
+        },
+        splitResults: {
+          include: { receiverSubaccount: { select: { id: true, name: true, type: true } } },
+        },
       },
-      orderBy: { createdAt: 'desc' },
     });
+    if (!charge) throw new NotFoundException('Cobrança não encontrada');
+
+    const totalSplitPercent = charge.splits.reduce((sum, s) => sum + Number(s.percentage), 0);
+    const mainAccountPercent = 100 - totalSplitPercent;
+    const mainAccountValue = (Number(charge.value) * mainAccountPercent) / 100;
+
+    return {
+      chargeId: charge.id,
+      chargeValue: charge.value,
+      splits: charge.splits.map((s) => ({
+        subaccountId: s.subaccountId,
+        subaccountName: s.subaccount.name,
+        subaccountType: s.subaccount.type,
+        percentage: s.percentage,
+        calculatedValue: (Number(charge.value) * Number(s.percentage)) / 100,
+      })),
+      mainAccount: {
+        percentage: mainAccountPercent,
+        calculatedValue: mainAccountValue,
+      },
+      splitResults: charge.splitResults,
+    };
   }
 
-  async deleteRule(id: string) {
-    const rule = await this.prisma.splitRule.findUnique({ where: { id } });
-    if (!rule) throw new NotFoundException('Regra de split não encontrada');
-    return this.prisma.splitRule.update({ where: { id }, data: { active: false } });
-  }
-
-  async getSplitResultsByCharge(chargeId: string) {
-    return this.prisma.splitResult.findMany({
-      where: { chargeId },
-      include: { receiverSubaccount: { select: { name: true } } },
-    });
-  }
-
-  async getSplitHistory(query: ListSplitRulesDto) {
+  async getSplitHistory(subaccountId?: string) {
     const where: Record<string, unknown> = {};
-    if (query.chargeSubaccountId) {
-      where.charge = { subaccountId: query.chargeSubaccountId };
+    if (subaccountId) {
+      where.receiverSubaccountId = subaccountId;
     }
 
     return this.prisma.splitResult.findMany({
       where,
       include: {
-        charge: { select: { asaasId: true, value: true, status: true } },
-        receiverSubaccount: { select: { name: true } },
+        charge: { select: { asaasId: true, value: true, status: true, customerName: true, description: true } },
+        receiverSubaccount: { select: { name: true, type: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
+  }
+
+  async getRevenueBySubaccount() {
+    const subaccounts = await this.prisma.subaccount.findMany({
+      where: { active: true },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        splitResults: {
+          select: { value: true, status: true },
+        },
+      },
+    });
+
+    return subaccounts.map((sub) => ({
+      id: sub.id,
+      name: sub.name,
+      type: sub.type,
+      totalReceived: sub.splitResults
+        .filter((r) => r.status === 'COMPLETED')
+        .reduce((sum, r) => sum + Number(r.value), 0),
+      totalPending: sub.splitResults
+        .filter((r) => r.status === 'PENDING')
+        .reduce((sum, r) => sum + Number(r.value), 0),
+    }));
   }
 }

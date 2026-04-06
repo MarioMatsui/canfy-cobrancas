@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Query, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, Delete, Patch, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ChargesService } from './charges.service';
@@ -12,7 +12,7 @@ export class ChargesController {
   constructor(private chargesService: ChargesService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Criar cobrança' })
+  @ApiOperation({ summary: 'Criar cobrança (avulsa ou reutilizável) com splits' })
   create(@Body() dto: CreateChargeDto) {
     return this.chargesService.create(dto);
   }
@@ -21,6 +21,12 @@ export class ChargesController {
   @ApiOperation({ summary: 'Listar cobranças' })
   findAll(@Query() query: ListChargesDto) {
     return this.chargesService.findAll(query);
+  }
+
+  @Get('reusable')
+  @ApiOperation({ summary: 'Listar cobranças reutilizáveis (links permanentes)' })
+  getReusable() {
+    return this.chargesService.getReusableCharges();
   }
 
   @Get(':id')
@@ -35,9 +41,9 @@ export class ChargesController {
     return this.chargesService.cancel(id);
   }
 
-  @Post(':id/resend')
-  @ApiOperation({ summary: 'Reenviar notificação' })
-  resend(@Param('id') id: string) {
-    return this.chargesService.resend(id);
+  @Patch(':id/toggle')
+  @ApiOperation({ summary: 'Ativar/desativar cobrança reutilizável' })
+  toggleActive(@Param('id') id: string) {
+    return this.chargesService.toggleActive(id);
   }
 }

@@ -1,8 +1,8 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SplitsService } from './splits.service';
-import { CreateSplitRuleDto, ListSplitRulesDto } from './splits.dto';
+import { ListSplitsDto } from './splits.dto';
 
 @ApiTags('Splits')
 @ApiBearerAuth()
@@ -11,33 +11,21 @@ import { CreateSplitRuleDto, ListSplitRulesDto } from './splits.dto';
 export class SplitsController {
   constructor(private splitsService: SplitsService) {}
 
-  @Post('rules')
-  @ApiOperation({ summary: 'Criar regra de split' })
-  createRule(@Body() dto: CreateSplitRuleDto) {
-    return this.splitsService.createRule(dto);
-  }
-
-  @Get('rules')
-  @ApiOperation({ summary: 'Listar regras de split' })
-  findAllRules(@Query() query: ListSplitRulesDto) {
-    return this.splitsService.findAllRules(query);
-  }
-
-  @Delete('rules/:id')
-  @ApiOperation({ summary: 'Desativar regra de split' })
-  deleteRule(@Param('id') id: string) {
-    return this.splitsService.deleteRule(id);
-  }
-
   @Get('charges/:chargeId')
-  @ApiOperation({ summary: 'Ver splits de uma cobrança' })
+  @ApiOperation({ summary: 'Ver splits de uma cobrança (com cálculo automático da conta principal)' })
   getSplitsByCharge(@Param('chargeId') chargeId: string) {
-    return this.splitsService.getSplitResultsByCharge(chargeId);
+    return this.splitsService.getSplitsByCharge(chargeId);
   }
 
   @Get('history')
-  @ApiOperation({ summary: 'Histórico de splits' })
-  getHistory(@Query() query: ListSplitRulesDto) {
-    return this.splitsService.getSplitHistory(query);
+  @ApiOperation({ summary: 'Histórico de splits realizados' })
+  getHistory(@Query() query: ListSplitsDto) {
+    return this.splitsService.getSplitHistory(query.subaccountId);
+  }
+
+  @Get('revenue')
+  @ApiOperation({ summary: 'Receita por subconta (médicos e fornecedores)' })
+  getRevenue() {
+    return this.splitsService.getRevenueBySubaccount();
   }
 }

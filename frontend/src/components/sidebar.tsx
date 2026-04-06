@@ -8,17 +8,17 @@ import {
   Receipt,
   GitBranch,
   Webhook,
-  Layers,
+  Settings,
   LogOut,
 } from 'lucide-react';
 
 const menuItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/service-types', label: 'Tipos de Serviço', icon: Layers },
   { href: '/subaccounts', label: 'Subcontas', icon: Users },
   { href: '/charges', label: 'Cobranças', icon: Receipt },
   { href: '/splits', label: 'Splits', icon: GitBranch },
   { href: '/webhooks', label: 'Webhooks', icon: Webhook },
+  { href: '/settings', label: 'Configurações', icon: Settings },
 ];
 
 export function Sidebar() {

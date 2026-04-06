@@ -1,6 +1,12 @@
-import { IsString, IsEmail, IsOptional, IsBoolean, IsNumber, Min } from 'class-validator';
+import { IsString, IsEmail, IsOptional, IsBoolean, IsNumber, IsEnum, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type, Transform } from 'class-transformer';
+
+export enum SubaccountTypeDto {
+  DOCTOR = 'DOCTOR',
+  SUPPLIER = 'SUPPLIER',
+  OTHER = 'OTHER',
+}
 
 export class CreateSubaccountDto {
   @ApiProperty({ example: 'João Silva' })
@@ -10,6 +16,10 @@ export class CreateSubaccountDto {
   @ApiProperty({ example: '12345678901' })
   @IsString()
   cpfCnpj!: string;
+
+  @ApiProperty({ enum: SubaccountTypeDto, default: 'OTHER', description: 'Tipo: DOCTOR, SUPPLIER ou OTHER' })
+  @IsEnum(SubaccountTypeDto)
+  type!: SubaccountTypeDto;
 
   @ApiProperty({ example: 'joao@email.com' })
   @IsEmail()
@@ -98,4 +108,9 @@ export class ListSubaccountsDto {
   @Transform(({ value }) => value === 'true')
   @IsBoolean()
   active?: boolean;
+
+  @ApiPropertyOptional({ enum: SubaccountTypeDto })
+  @IsOptional()
+  @IsEnum(SubaccountTypeDto)
+  type?: SubaccountTypeDto;
 }

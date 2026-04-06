@@ -37,15 +37,16 @@ export class SubaccountsService {
         email: dto.email,
         phone: dto.phone,
         mobilePhone: dto.mobilePhone,
+        type: dto.type,
       },
     });
 
-    this.logger.log(`Subconta criada: ${subaccount.id} (Asaas: ${asaasAccount.id})`);
+    this.logger.log(`Subconta criada: ${subaccount.name} (${subaccount.type}) — Asaas: ${asaasAccount.id}`);
     return subaccount;
   }
 
   async findAll(query: ListSubaccountsDto) {
-    const { page = 1, limit = 20, search, active } = query;
+    const { page = 1, limit = 20, search, active, type } = query;
     const skip = (page - 1) * limit;
 
     const where: Record<string, unknown> = {};
@@ -56,34 +57,62 @@ export class SubaccountsService {
         { cpfCnpj: { contains: search } },
       ];
     }
-    if (active !== undefined) {
-      where.active = active;
-    }
+    if (active !== undefined) where.active = active;
+    if (type) where.type = type;
 
     const [data, total] = await Promise.all([
-      this.prisma.subaccount.findMany({ where, skip, take: limit, orderBy: { createdAt: 'desc' } }),
+      this.prisma.subaccount.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          _count: { select: { chargeSplits: true, splitResults: true } },
+        },
+      }),
       this.prisma.subaccount.count({ where }),
     ]);
 
-    return {
-      data,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async findOne(id: string) {
-    const subaccount = await this.prisma.subaccount.findUnique({ where: { id } });
+    const subaccount = await this.prisma.subaccount.findUnique({
+      where: { id },
+      include: {
+        _count: { select: { chargeSplits: true, splitResults: true } },
+      },
+    });
     if (!subaccount) throw new NotFoundException('Subconta não encontrada');
     return subaccount;
+  }
+
+  async getFinancialHistory(id: string) {
+    await this.findOne(id);
+
+    const splitResults = await this.prisma.splitResult.findMany({
+      where: { receiverSubaccountId: id },
+      include: {
+        charge: { select: { id: true, asaasId: true, value: true, status: true, customerName: true, description: true, createdAt: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+
+    const totalReceived = splitResults
+      .filter((s) => s.status === 'COMPLETED')
+      .reduce((sum, s) => sum + Number(s.value), 0);
+
+    const totalPending = splitResults
+      .filter((s) => s.status === 'PENDING')
+      .reduce((sum, s) => sum + Number(s.value), 0);
+
+    return { splitResults, totalReceived, totalPending };
   }
 
   async update(id: string, dto: UpdateSubaccountDto) {
     const subaccount = await this.findOne(id);
 
-    // Atualiza no Asaas
     if (subaccount.asaasId) {
       await this.asaas.put(`/accounts/${subaccount.asaasId}`, dto);
     }
