@@ -24,6 +24,25 @@ model User {
 }
 
 // ==========================================
+// TIPOS DE SERVIÇO (com splits personalizáveis)
+// ==========================================
+
+model ServiceType {
+  id                  String   @id @default(uuid())
+  name                String   @unique // ex: "Atendimento Médico", "Venda de Produtos"
+  description         String?
+  splitPercentage     Decimal  @db.Decimal(5, 2) @map("split_percentage") // % que vai pro prestador/fornecedor
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  charges    Charge[]
+  splitRules SplitRule[]
+
+  @@map("service_types")
+}
+
+// ==========================================
 // SUBCONTAS ASAAS
 // ==========================================
 
@@ -54,26 +73,30 @@ model Subaccount {
 // ==========================================
 
 model Charge {
-  id             String   @id @default(uuid())
-  asaasId        String?  @unique @map("asaas_id")
-  subaccountId   String   @map("subaccount_id")
-  billingType    String   @map("billing_type") // BOLETO, PIX, CREDIT_CARD
-  value          Decimal  @db.Decimal(12, 2)
-  dueDate        DateTime @map("due_date")
-  description    String?
-  status         String   @default("PENDING") // PENDING, CONFIRMED, OVERDUE, REFUNDED, CANCELLED
-  invoiceUrl     String?  @map("invoice_url")
-  bankSlipUrl    String?  @map("bank_slip_url")
-  pixQrCode      String?  @map("pix_qr_code")
-  pixCopiaECola  String?  @map("pix_copia_e_cola")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  id              String   @id @default(uuid())
+  asaasId         String?  @unique @map("asaas_id")
+  subaccountId    String   @map("subaccount_id")
+  serviceTypeId   String?  @map("service_type_id")
+  billingType     String   @map("billing_type") // BOLETO, PIX, CREDIT_CARD
+  value           Decimal  @db.Decimal(12, 2)
+  dueDate         DateTime @map("due_date")
+  description     String?
+  status          String   @default("PENDING") // PENDING, CONFIRMED, OVERDUE, REFUNDED, CANCELLED
+  invoiceUrl      String?  @map("invoice_url")
+  bankSlipUrl     String?  @map("bank_slip_url")
+  pixQrCode       String?  @map("pix_qr_code")
+  pixCopiaECola   String?  @map("pix_copia_e_cola")
+  splitPercentage Decimal? @db.Decimal(5, 2) @map("split_percentage") // snapshot do % no momento da cobrança
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   subaccount   Subaccount    @relation(fields: [subaccountId], references: [id])
+  serviceType  ServiceType?  @relation(fields: [serviceTypeId], references: [id])
   splitResults SplitResult[]
 
   @@index([status])
   @@index([subaccountId])
+  @@index([serviceTypeId])
   @@index([dueDate])
   @@map("charges")
 }
@@ -84,6 +107,7 @@ model Charge {
 
 model SplitRule {
   id                   String   @id @default(uuid())
+  serviceTypeId        String?  @map("service_type_id")
   chargeSubaccountId   String   @map("charge_subaccount_id")
   receiverSubaccountId String   @map("receiver_subaccount_id")
   type                 String   // PERCENTAGE, FIXED
@@ -93,9 +117,11 @@ model SplitRule {
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
 
-  chargeSubaccount   Subaccount @relation("SplitChargeSubaccount", fields: [chargeSubaccountId], references: [id])
-  receiverSubaccount Subaccount @relation("SplitReceiverSubaccount", fields: [receiverSubaccountId], references: [id])
+  serviceType        ServiceType? @relation(fields: [serviceTypeId], references: [id])
+  chargeSubaccount   Subaccount   @relation("SplitChargeSubaccount", fields: [chargeSubaccountId], references: [id])
+  receiverSubaccount Subaccount   @relation("SplitReceiverSubaccount", fields: [receiverSubaccountId], references: [id])
 
+  @@index([serviceTypeId])
   @@index([chargeSubaccountId])
   @@map("split_rules")
 }

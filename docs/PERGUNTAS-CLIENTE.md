@@ -52,9 +52,9 @@
 
 | # | Pergunta | Respondida? | Resposta |
 |---|----------|-------------|----------|
-| 1 | API Asaas | ❌ | — |
-| 2 | Regras de split | ❌ | — |
-| 3 | Volume de subcontas | ❌ | — |
+| 1 | API Asaas | ✅ | Já possui conta Asaas. Aguardando API key. |
+| 2 | Regras de split | ✅ | 2 tipos de serviço: Atendimento médico (15% pro médico) e Venda de produtos (70% pro fornecedor). Percentuais personalizáveis. |
+| 3 | Volume de subcontas | ✅ | Começa com 2, pretende 20+ em 1 ano (crescimento exponencial) |
 | 4 | Recorrência | ❌ | — |
 | 5 | Notificações | ❌ | — |
 | 6 | Usuários painel | ❌ | — |

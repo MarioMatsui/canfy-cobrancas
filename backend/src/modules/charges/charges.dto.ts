@@ -13,6 +13,10 @@ export class CreateChargeDto {
   @IsString()
   subaccountId!: string;
 
+  @ApiProperty({ description: 'ID do tipo de serviço (define o % de split)' })
+  @IsString()
+  serviceTypeId!: string;
+
   @ApiProperty({ enum: BillingType })
   @IsEnum(BillingType)
   billingType!: BillingType;

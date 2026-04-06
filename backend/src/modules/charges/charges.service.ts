@@ -27,9 +27,15 @@ export class ChargesService {
     });
     if (!subaccount) throw new NotFoundException('Subconta não encontrada');
 
-    // Busca regras de split ativas para esta subconta
+    // Busca o tipo de serviço para obter o % de split
+    const serviceType = await this.prisma.serviceType.findUnique({
+      where: { id: dto.serviceTypeId },
+    });
+    if (!serviceType) throw new NotFoundException('Tipo de serviço não encontrado');
+
+    // Busca regras de split ativas para este tipo de serviço + subconta
     const splitRules = await this.prisma.splitRule.findMany({
-      where: { chargeSubaccountId: subaccount.id, active: true },
+      where: { chargeSubaccountId: subaccount.id, serviceTypeId: serviceType.id, active: true },
       include: { receiverSubaccount: true },
     });
 
@@ -60,11 +66,13 @@ export class ChargesService {
       data: {
         asaasId: asaasCharge.id,
         subaccountId: subaccount.id,
+        serviceTypeId: serviceType.id,
         billingType: dto.billingType,
         value: dto.value,
         dueDate: new Date(dto.dueDate),
         description: dto.description,
         status: asaasCharge.status,
+        splitPercentage: serviceType.splitPercentage,
         invoiceUrl: asaasCharge.invoiceUrl,
         bankSlipUrl: asaasCharge.bankSlipUrl,
         pixQrCode: asaasCharge.pixQrCode,
@@ -97,7 +105,10 @@ export class ChargesService {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: { subaccount: { select: { name: true } } },
+        include: {
+          subaccount: { select: { name: true } },
+          serviceType: { select: { name: true, splitPercentage: true } },
+        },
       }),
       this.prisma.charge.count({ where }),
     ]);
@@ -110,6 +121,7 @@ export class ChargesService {
       where: { id },
       include: {
         subaccount: true,
+        serviceType: true,
         splitResults: true,
       },
     });

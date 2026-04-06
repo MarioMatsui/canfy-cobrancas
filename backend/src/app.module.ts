@@ -11,6 +11,7 @@ import { SplitsModule } from './modules/splits/splits.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { SyncModule } from './modules/sync/sync.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { ServiceTypesModule } from './modules/service-types/service-types.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     SubaccountsModule,
     ChargesModule,
     SplitsModule,
+    ServiceTypesModule,
     WebhooksModule,
     SyncModule,
     DashboardModule,
