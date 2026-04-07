@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, XCircle, Link2, Receipt, X } from 'lucide-react';
+import { Plus, XCircle, Link2, Receipt, X } from 'lucide-react';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';

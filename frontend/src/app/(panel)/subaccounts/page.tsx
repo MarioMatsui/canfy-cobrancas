@@ -83,8 +83,9 @@ export default function SubaccountsPage() {
       resetForm();
       queryClient.invalidateQueries({ queryKey: ['subaccounts'] });
     },
-    onError: (error: any) => {
-      const msg = error.response?.data?.details?.errors?.[0]?.description || error.response?.data?.message || 'Erro ao criar subconta';
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { details?: { errors?: { description?: string }[] }; message?: string } } };
+      const msg = err.response?.data?.details?.errors?.[0]?.description || err.response?.data?.message || 'Erro ao criar subconta';
       toast.error(msg);
     },
   });
