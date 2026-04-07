@@ -4,9 +4,11 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
+import { useAuth } from '@/contexts/auth';
 
 export default function LoginPage() {
   const router = useRouter();
+  const { refetchUser } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -19,6 +21,7 @@ export default function LoginPage() {
       const { data } = await api.post('/auth/login', { email, password });
       localStorage.setItem('token', data.access_token);
       toast.success('Login realizado com sucesso!');
+      await refetchUser();
       router.push('/dashboard');
     } catch {
       toast.error('Email ou senha inválidos');
