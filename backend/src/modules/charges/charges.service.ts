@@ -68,6 +68,7 @@ export class ChargesService {
         billingType: dto.billingType === 'UNDEFINED' ? 'UNDEFINED' : dto.billingType,
         chargeType: 'DETACHED', // Não vinculada a customer
         value: dto.value,
+        dueDateLimitDays: 10,
         maxInstallmentCount: dto.maxInstallments || 3,
         split: asaasSplits,
       });
@@ -118,6 +119,19 @@ export class ChargesService {
       }
 
       const asaasCharge = await this.asaas.post<AsaasCharge>('/payments', asaasPayload);
+
+      // Buscar PIX QR Code se billing type for PIX
+      if (dto.billingType === 'PIX' && asaasCharge.id) {
+        try {
+          const pixData = await this.asaas.get<{ encodedImage: string; payload: string }>(
+            `/payments/${asaasCharge.id}/pixQrCode`,
+          );
+          asaasCharge.pixQrCode = pixData.encodedImage;
+          asaasCharge.pixCopiaECola = pixData.payload;
+        } catch (e) {
+          this.logger.warn(`Não foi possível buscar PIX QR Code para ${asaasCharge.id}`);
+        }
+      }
 
       charge = await this.prisma.charge.create({
         data: {

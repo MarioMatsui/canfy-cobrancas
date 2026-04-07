@@ -52,7 +52,7 @@ export default function SettingsPage() {
     mutationFn: async (entries: Array<{ key: string; value: string }>) => {
       for (const entry of entries) {
         const existing = settings?.find((s) => s.key === entry.key);
-        await api.put('/settings', {
+        await api.post('/settings', {
           key: entry.key,
           value: entry.value,
           description: existing?.description || settingLabels[entry.key]?.label || '',

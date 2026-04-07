@@ -1,7 +1,7 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
-import { Plus, Search, ToggleLeft, ToggleRight, History, Stethoscope, Package, Users as UsersIcon } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Plus, Search, ToggleLeft, ToggleRight, History, Stethoscope, Package, Users as UsersIcon, X } from 'lucide-react';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
@@ -47,10 +47,22 @@ const typeConfig: Record<SubaccountType, { label: string; icon: React.ElementTyp
 };
 
 export default function SubaccountsPage() {
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<SubaccountType | ''>('');
   const [page, setPage] = useState(1);
   const [historyId, setHistoryId] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+
+  // Form state
+  const [formName, setFormName] = useState('');
+  const [formCpfCnpj, setFormCpfCnpj] = useState('');
+  const [formEmail, setFormEmail] = useState('');
+  const [formType, setFormType] = useState<SubaccountType>('DOCTOR');
+  const [formPhone, setFormPhone] = useState('');
+  const [formMobilePhone, setFormMobilePhone] = useState('');
+  const [formBirthDate, setFormBirthDate] = useState('');
+  const [formIncomeValue, setFormIncomeValue] = useState('');
 
   const { data, isLoading, refetch } = useQuery<PaginatedResponse>({
     queryKey: ['subaccounts', page, search, typeFilter],
@@ -63,6 +75,48 @@ export default function SubaccountsPage() {
     queryFn: () => api.get(`/subaccounts/${historyId}/financial-history`).then((r) => r.data),
     enabled: !!historyId,
   });
+
+  const createMutation = useMutation({
+    mutationFn: (payload: Record<string, unknown>) => api.post('/subaccounts', payload),
+    onSuccess: () => {
+      toast.success('Subconta criada com sucesso!');
+      resetForm();
+      queryClient.invalidateQueries({ queryKey: ['subaccounts'] });
+    },
+    onError: (error: any) => {
+      const msg = error.response?.data?.details?.errors?.[0]?.description || error.response?.data?.message || 'Erro ao criar subconta';
+      toast.error(msg);
+    },
+  });
+
+  const resetForm = () => {
+    setShowForm(false);
+    setFormName('');
+    setFormCpfCnpj('');
+    setFormEmail('');
+    setFormType('DOCTOR');
+    setFormPhone('');
+    setFormMobilePhone('');
+    setFormBirthDate('');
+    setFormIncomeValue('');
+  };
+
+  const handleCreate = () => {
+    if (!formName || !formCpfCnpj || !formEmail) {
+      toast.error('Preencha nome, CPF/CNPJ e email');
+      return;
+    }
+    createMutation.mutate({
+      name: formName,
+      cpfCnpj: formCpfCnpj.replace(/\D/g, ''),
+      email: formEmail,
+      type: formType,
+      phone: formPhone || undefined,
+      mobilePhone: formMobilePhone || formPhone || undefined,
+      birthDate: formBirthDate || undefined,
+      incomeValue: formIncomeValue ? parseFloat(formIncomeValue) : undefined,
+    });
+  };
 
   const toggleActive = async (id: string) => {
     try {
@@ -84,11 +138,85 @@ export default function SubaccountsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Subcontas</h1>
           <p className="text-gray-500 mt-1">Gerencie médicos, fornecedores e subcontas Asaas</p>
         </div>
-        <button className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+        <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
           <Plus size={20} />
           Nova Subconta
         </button>
       </div>
+
+      {/* Formulário de criação */}
+      {showForm && (
+        <div className="bg-white rounded-xl border p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Nova Subconta</h2>
+            <button onClick={resetForm} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+          </div>
+
+          {/* Tipo */}
+          <div className="flex gap-3">
+            {(['DOCTOR', 'SUPPLIER', 'OTHER'] as SubaccountType[]).map((t) => {
+              const cfg = typeConfig[t];
+              const Icon = cfg.icon;
+              return (
+                <button key={t} onClick={() => setFormType(t)}
+                  className={`flex-1 p-3 rounded-lg border-2 transition-colors text-center ${formType === t ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
+                  <Icon size={20} className="mx-auto mb-1" />
+                  <div className="text-sm font-medium">{cfg.label}</div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Nome *</label>
+              <input value={formName} onChange={(e) => setFormName(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="Dr. João Silva" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">CPF/CNPJ *</label>
+              <input value={formCpfCnpj} onChange={(e) => setFormCpfCnpj(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="000.000.000-00" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+              <input type="email" value={formEmail} onChange={(e) => setFormEmail(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="email@exemplo.com" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-4 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Telefone</label>
+              <input value={formPhone} onChange={(e) => setFormPhone(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="11999999999" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Celular</label>
+              <input value={formMobilePhone} onChange={(e) => setFormMobilePhone(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="11999999999" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Data de Nasc.</label>
+              <input type="date" value={formBirthDate} onChange={(e) => setFormBirthDate(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Renda mensal</label>
+              <input type="number" step="0.01" value={formIncomeValue} onChange={(e) => setFormIncomeValue(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="5000" />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3">
+            <button onClick={resetForm} className="px-4 py-2 text-gray-600 hover:text-gray-800">Cancelar</button>
+            <button onClick={handleCreate} disabled={createMutation.isPending}
+              className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
+              {createMutation.isPending ? 'Criando...' : 'Criar Subconta'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Filtros */}
       <div className="flex gap-4">

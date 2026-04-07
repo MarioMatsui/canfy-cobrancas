@@ -57,8 +57,8 @@ export class DashboardService {
     return {
       charges: {
         total: totalCharges,
-        custom: customCharges,
-        reusable: reusableCharges,
+        customCount: customCharges,
+        reusableCount: reusableCharges,
         paid: paidCharges,
         pending: pendingCharges,
         overdue: overdueCharges,
@@ -66,14 +66,15 @@ export class DashboardService {
         paidValue: paidValue._sum.value || 0,
       },
       subaccounts: {
-        total: totalSubaccounts,
-        doctors: totalDoctors,
-        suppliers: totalSuppliers,
+        total: totalSubaccounts + totalDoctors + totalSuppliers,
+        active: totalSubaccounts,
+        doctorCount: totalDoctors,
+        supplierCount: totalSuppliers,
       },
-      splits: {
-        total: totalSplitResults,
+      revenue: {
         doctorRevenue: doctorRevenue._sum.value || 0,
         supplierRevenue: supplierRevenue._sum.value || 0,
+        mainAccountRevenue: 0,
       },
     };
   }
