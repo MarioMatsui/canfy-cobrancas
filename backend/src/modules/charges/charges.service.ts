@@ -63,13 +63,14 @@ export class ChargesService {
 
     if (dto.chargeType === 'REUSABLE') {
       // Cria link de pagamento reutilizável no Asaas
+      const useInstallment = dto.maxInstallments && dto.maxInstallments > 1;
       const paymentLink = await this.asaas.post<AsaasPaymentLink>('/paymentLinks', {
         name: dto.description || 'Cobrança reutilizável',
         billingType: dto.billingType === 'UNDEFINED' ? 'UNDEFINED' : dto.billingType,
-        chargeType: 'DETACHED', // Não vinculada a customer
+        chargeType: useInstallment ? 'INSTALLMENT' : 'DETACHED',
         value: dto.value,
         dueDateLimitDays: 10,
-        maxInstallmentCount: dto.maxInstallments || 3,
+        ...(useInstallment && { maxInstallmentCount: dto.maxInstallments }),
         split: asaasSplits,
       });
 
