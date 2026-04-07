@@ -14,7 +14,7 @@ export class AuthService {
     return crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
   }
 
-  async register(email: string, password: string, name: string) {
+  async register(email: string, password: string, name: string, role: 'ADMIN' | 'ATTENDANT' = 'ATTENDANT') {
     const salt = crypto.randomBytes(32).toString('hex');
     const hashedPassword = this.hashPassword(password, salt);
 
@@ -24,11 +24,12 @@ export class AuthService {
         password: hashedPassword,
         salt,
         name,
+        role,
       },
     });
 
-    const token = this.jwtService.sign({ sub: user.id, email: user.email });
-    return { access_token: token, user: { id: user.id, email: user.email, name: user.name } };
+    const token = this.jwtService.sign({ sub: user.id, email: user.email, role: user.role });
+    return { access_token: token, user: { id: user.id, email: user.email, name: user.name, role: user.role } };
   }
 
   async login(email: string, password: string) {
@@ -44,14 +45,14 @@ export class AuthService {
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
-    const token = this.jwtService.sign({ sub: user.id, email: user.email });
-    return { access_token: token, user: { id: user.id, email: user.email, name: user.name } };
+    const token = this.jwtService.sign({ sub: user.id, email: user.email, role: user.role });
+    return { access_token: token, user: { id: user.id, email: user.email, name: user.name, role: user.role } };
   }
 
   async validateUser(userId: string) {
     return this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, email: true, name: true },
+      select: { id: true, email: true, name: true, role: true },
     });
   }
 }

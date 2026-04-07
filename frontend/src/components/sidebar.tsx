@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
@@ -10,19 +11,26 @@ import {
   Webhook,
   Settings,
   LogOut,
+  UserCog,
 } from 'lucide-react';
+import { useAuth } from '@/contexts/auth';
 
-const menuItems = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/subaccounts', label: 'Subcontas', icon: Users },
-  { href: '/charges', label: 'Cobranças', icon: Receipt },
-  { href: '/splits', label: 'Splits', icon: GitBranch },
-  { href: '/webhooks', label: 'Webhooks', icon: Webhook },
-  { href: '/settings', label: 'Configurações', icon: Settings },
+const allMenuItems = [
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'ATTENDANT'] },
+  { href: '/subaccounts', label: 'Subcontas', icon: Users, roles: ['ADMIN'] },
+  { href: '/charges', label: 'Cobranças', icon: Receipt, roles: ['ADMIN', 'ATTENDANT'] },
+  { href: '/splits', label: 'Splits', icon: GitBranch, roles: ['ADMIN', 'ATTENDANT'] },
+  { href: '/webhooks', label: 'Webhooks', icon: Webhook, roles: ['ADMIN'] },
+  { href: '/users', label: 'Usuários', icon: UserCog, roles: ['ADMIN'] },
+  { href: '/settings', label: 'Configurações', icon: Settings, roles: ['ADMIN', 'ATTENDANT'] },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { user } = useAuth();
+  const role = user?.role || 'ATTENDANT';
+
+  const menuItems = allMenuItems.filter((item) => item.roles.includes(role));
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -32,7 +40,7 @@ export function Sidebar() {
   return (
     <aside className="w-64 bg-gray-900 text-white min-h-screen flex flex-col">
       <div className="p-6 border-b border-gray-800">
-        <h1 className="text-xl font-bold">AsaasSplit</h1>
+        <Image src="/logo-canfy.svg" alt="Canfy" width={150} height={48} className="brightness-100" />
         <p className="text-gray-400 text-sm mt-1">Gestão de Pagamentos</p>
       </div>
 
@@ -57,6 +65,12 @@ export function Sidebar() {
       </nav>
 
       <div className="p-4 border-t border-gray-800">
+        {user && (
+          <div className="px-4 py-2 mb-2">
+            <p className="text-sm font-medium text-gray-300 truncate">{user.name}</p>
+            <p className="text-xs text-gray-500">{role === 'ADMIN' ? 'Administrador' : 'Atendimento'}</p>
+          </div>
+        )}
         <button
           onClick={handleLogout}
           className="flex items-center gap-3 px-4 py-3 rounded-lg text-gray-300 hover:bg-gray-800 hover:text-white w-full transition-colors"
