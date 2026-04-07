@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, ToggleLeft, ToggleRight, History, Stethoscope, Package, Users as UsersIcon, X, Link2 } from 'lucide-react';
+import { Plus, Search, ToggleLeft, ToggleRight, History, Stethoscope, Package, Users as UsersIcon, X, Link2, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
@@ -152,6 +152,17 @@ export default function SubaccountsPage() {
       refetch();
     } catch {
       toast.error('Erro ao atualizar status');
+    }
+  };
+
+  const deleteSubaccount = async (id: string, name: string) => {
+    if (!confirm(`Tem certeza que deseja excluir "${name}"? Esta ação não pode ser desfeita.`)) return;
+    try {
+      await api.delete(`/subaccounts/${id}`);
+      toast.success('Subconta excluída');
+      refetch();
+    } catch {
+      toast.error('Erro ao excluir subconta');
     }
   };
 
@@ -381,6 +392,13 @@ export default function SubaccountsPage() {
                           title={sub.active ? 'Desativar' : 'Ativar'}
                         >
                           {sub.active ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}
+                        </button>
+                        <button
+                          onClick={() => deleteSubaccount(sub.id, sub.name)}
+                          className="text-gray-400 hover:text-red-600 transition-colors"
+                          title="Excluir"
+                        >
+                          <Trash2 size={18} />
                         </button>
                       </div>
                     </td>

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SubaccountsService } from './subaccounts.service';
@@ -51,6 +51,12 @@ export class SubaccountsController {
   @ApiOperation({ summary: 'Ativar/desativar subconta' })
   toggleActive(@Param('id') id: string) {
     return this.subaccountsService.toggleActive(id);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Excluir subconta' })
+  remove(@Param('id') id: string) {
+    return this.subaccountsService.remove(id);
   }
 
   @Post('sync')

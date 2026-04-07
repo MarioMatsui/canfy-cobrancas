@@ -165,6 +165,11 @@ export class SubaccountsService {
     });
   }
 
+  async remove(id: string) {
+    await this.findOne(id);
+    return this.prisma.subaccount.delete({ where: { id } });
+  }
+
   async syncFromAsaas() {
     const response = await this.asaas.get<{ data: Array<{ id: string; walletId: string; name: string; cpfCnpj: string; email: string }> }>('/accounts');
 
