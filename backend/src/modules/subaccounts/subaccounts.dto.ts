@@ -59,6 +59,17 @@ export class CreateSubaccountDto {
   @IsString()
   @IsOptional()
   province?: string;
+
+  @ApiPropertyOptional({ example: '1985-06-15', description: 'Data de nascimento (obrigatório para pessoa física)' })
+  @IsString()
+  @IsOptional()
+  birthDate?: string;
+
+  @ApiPropertyOptional({ example: 5000, description: 'Renda/faturamento mensal (obrigatório para abertura de conta)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  incomeValue?: number;
 }
 
 export class UpdateSubaccountDto {

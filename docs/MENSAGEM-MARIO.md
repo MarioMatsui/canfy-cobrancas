@@ -7,27 +7,55 @@ Olá, Mario! Muito obrigado pela confiança, estou muito empolgado com o projeto
 
 ---
 
-## Mensagem 2 — Resposta após receber o modelo de negócio
+## Mensagem 2 — Resposta após receber o modelo de negócio detalhado
 
-Perfeito, Mario! Muito obrigado pelas informações, ficou bem claro o modelo de negócio. 👏
+Perfeito, Mario! Muito obrigado pelo detalhamento, ficou extremamente claro o modelo de negócio. 👏
 
-Já adaptei toda a arquitetura do sistema com base no que você descreveu:
-
-✅ **Tipos de Serviço** — Criei um módulo específico para gerenciar os tipos de serviço:
-- **Atendimento Médico** → split de 15% para o médico
-- **Venda de Produtos** → split de 70% para o fornecedor
-- Percentuais **100% editáveis** a qualquer momento pelo painel
-- Você pode criar novos tipos de serviço quando quiser
-
-✅ **Cobranças inteligentes** — Ao gerar uma cobrança, basta selecionar o tipo de serviço e o split já é aplicado automaticamente
-
-✅ **Subcontas** — Preparado para começar com as 2 subcontas e escalar tranquilamente para 20, 50, 100+
+Já adaptei **toda a arquitetura** do sistema com base no que você descreveu. Vou resumir o que já está implementado:
 
 ---
 
-Para eu avançar com a integração real da API e os testes, preciso de:
+### ✅ Cobranças Avulsas (Personalizadas)
+- Cobrança individual para um cliente específico (nome, email, CPF/CNPJ)
+- **Multi-split por cobrança**: você define fornecedor + percentual, médico + percentual
+- O **restante vai automaticamente para a conta principal**
+- Exemplo: R$300 → 70% fornecedor, 5% médico, 25% conta principal
+- Aceita: PIX, boleto, cartão de crédito, cartão de débito
+- Parcelamento de até **5x** (configurável)
+
+### ✅ Cobranças Reutilizáveis (Links Permanentes)
+- Link de pagamento fixo (ex: "Consulta R$99")
+- Pode ser **usado múltiplas vezes** — funciona como um checkout
+- Split pré-configurado (ex: 15% médico, 85% conta principal)
+- Parcelamento de até **3x** (configurável)
+- Ativar/desativar a qualquer momento
+
+### ✅ Subcontas com Tipos
+- Cada subconta é classificada como: **Médico**, **Fornecedor** ou **Outro**
+- Filtros por tipo na listagem
+- **Histórico financeiro individual** por subconta (splits recebidos, pendentes, valores)
+
+### ✅ Dashboard Completo
+- Receita por **médico**, por **fornecedor** e da **conta principal**
+- Contadores de cobranças avulsas vs. reutilizáveis
+- Status das cobranças (pendentes, pagas, atrasadas)
+- Breakdown por subconta com valores recebidos e pendentes
+
+### ✅ Configurações Parametrizáveis
+- Percentual padrão para médicos e fornecedores
+- Parcelas máximas por tipo de cobrança
+- Valor padrão para cobranças reutilizáveis
+- Tudo editável pelo painel sem mexer em código
+
+---
+
+Para eu avançar com a **integração real da API Asaas** e os testes de ponta a ponta, preciso de:
 
 📌 **Sua API Key do Asaas** (sandbox/teste de preferência)
+- Pode ser a de sandbox (ambiente de teste) — assim eu configuro tudo sem afetar nada real
+- Preciso dela para: criar clientes, gerar cobranças, configurar splits e testar webhooks
+
+Assim que eu tiver a chave, já consigo fazer o deploy inicial pra você testar ao vivo! 🚀
 - Se tiver a de sandbox, me envie que já começo os testes
 - Se só tiver a de produção, posso criar uma conta sandbox minha para desenvolvimento e depois migrar
 

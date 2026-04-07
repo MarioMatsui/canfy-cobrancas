@@ -14,7 +14,7 @@ export class SubaccountsService {
 
   async create(dto: CreateSubaccountDto) {
     // Cria subconta no Asaas
-    const asaasAccount = await this.asaas.post<{ id: string; walletId: string }>('/accounts', {
+    const asaasPayload: Record<string, unknown> = {
       name: dto.name,
       cpfCnpj: dto.cpfCnpj,
       email: dto.email,
@@ -25,7 +25,12 @@ export class SubaccountsService {
       address: dto.address,
       addressNumber: dto.addressNumber,
       province: dto.province,
-    });
+    };
+
+    if (dto.birthDate) asaasPayload.birthDate = dto.birthDate;
+    if (dto.incomeValue) asaasPayload.incomeValue = dto.incomeValue;
+
+    const asaasAccount = await this.asaas.post<{ id: string; walletId: string }>('/accounts', asaasPayload);
 
     // Persiste localmente
     const subaccount = await this.prisma.subaccount.create({

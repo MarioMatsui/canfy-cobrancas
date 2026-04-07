@@ -100,8 +100,11 @@ export class ChargesService {
         throw new BadRequestException('Data de vencimento é obrigatória para cobranças avulsas');
       }
 
+      // Busca ou cria customer no Asaas
+      const customerId = await this.findOrCreateCustomer(dto);
+
       const asaasPayload: Record<string, unknown> = {
-        customer: dto.customerCpfCnpj, // Asaas aceita CPF/CNPJ para criar customer on-the-fly
+        customer: customerId,
         billingType: dto.billingType,
         value: dto.value,
         dueDate: dto.dueDate,
@@ -111,7 +114,7 @@ export class ChargesService {
 
       if (dto.maxInstallments && dto.maxInstallments > 1) {
         asaasPayload.installmentCount = dto.maxInstallments;
-        asaasPayload.installmentValue = dto.value / dto.maxInstallments;
+        asaasPayload.installmentValue = +(dto.value / dto.maxInstallments).toFixed(2);
       }
 
       const asaasCharge = await this.asaas.post<AsaasCharge>('/payments', asaasPayload);
@@ -123,6 +126,7 @@ export class ChargesService {
           customerName: dto.customerName,
           customerEmail: dto.customerEmail,
           customerCpfCnpj: dto.customerCpfCnpj,
+          customerAsaasId: customerId,
           billingType: dto.billingType,
           value: dto.value,
           dueDate: new Date(dto.dueDate),
@@ -250,5 +254,27 @@ export class ChargesService {
       const totalSplit = charge.splits.reduce((sum, s) => sum + Number(s.percentage), 0);
       return { ...charge, mainAccountPercentage: 100 - totalSplit };
     });
+  }
+
+  private async findOrCreateCustomer(dto: CreateChargeDto): Promise<string> {
+    // Tenta buscar cliente existente por CPF/CNPJ
+    if (dto.customerCpfCnpj) {
+      const existing = await this.asaas.get<{ data: Array<{ id: string }> }>(
+        `/customers?cpfCnpj=${dto.customerCpfCnpj}`,
+      );
+      if (existing.data.length > 0) {
+        return existing.data[0].id;
+      }
+    }
+
+    // Cria novo customer no Asaas
+    const customer = await this.asaas.post<{ id: string }>('/customers', {
+      name: dto.customerName,
+      email: dto.customerEmail,
+      cpfCnpj: dto.customerCpfCnpj,
+    });
+
+    this.logger.log(`Customer criado no Asaas: ${customer.id} (${dto.customerName})`);
+    return customer.id;
   }
 }
