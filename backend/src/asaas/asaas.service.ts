@@ -67,4 +67,34 @@ export class AsaasService {
   async delete<T>(path: string): Promise<T> {
     return this.request<T>('DELETE', path);
   }
+
+  async requestWithApiKey<T>(method: string, path: string, apiKey: string, body?: unknown): Promise<T> {
+    const url = `${this.apiUrl}${path}`;
+    this.logger.debug(`${method} ${url} (custom apiKey)`);
+
+    const options: RequestInit = {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        access_token: apiKey,
+      },
+    };
+
+    if (body && (method === 'POST' || method === 'PUT')) {
+      options.body = JSON.stringify(body);
+    }
+
+    const response = await fetch(url, options);
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      this.logger.error(`Asaas API error: ${response.status}`, error);
+      throw new HttpException(
+        { message: 'Erro na comunicação com o Asaas', details: error },
+        response.status >= 500 ? HttpStatus.BAD_GATEWAY : HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    return response.json() as Promise<T>;
+  }
 }

@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, HttpException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AsaasService } from '../../asaas/asaas.service';
 import { CreateSubaccountDto, UpdateSubaccountDto, ListSubaccountsDto, LinkExistingSubaccountDto } from './subaccounts.dto';
@@ -30,13 +30,50 @@ export class SubaccountsService {
     if (dto.birthDate) asaasPayload.birthDate = dto.birthDate;
     if (dto.incomeValue) asaasPayload.incomeValue = dto.incomeValue;
 
-    const asaasAccount = await this.asaas.post<{ id: string; walletId: string }>('/accounts', asaasPayload);
+    let asaasAccount: { id: string; walletId: string; apiKey?: string };
 
-    // Persiste localmente
+    try {
+      asaasAccount = await this.asaas.post<{ id: string; walletId: string; apiKey?: string }>('/accounts', asaasPayload);
+    } catch (error) {
+      // Se o email já está em uso no Asaas, tenta reativar subconta soft-deleted
+      if (dto.email && error instanceof HttpException) {
+        const errorResponse = error.getResponse() as { details?: { errors?: Array<{ code: string; description: string }> } };
+        const emailInUse = errorResponse?.details?.errors?.some(
+          (e) => e.description?.includes('já está em uso'),
+        );
+
+        if (emailInUse) {
+          const deleted = await this.prisma.subaccount.findFirst({
+            where: { email: dto.email, deletedAt: { not: null } },
+          });
+
+          if (deleted) {
+            const reactivated = await this.prisma.subaccount.update({
+              where: { id: deleted.id },
+              data: {
+                name: dto.name,
+                cpfCnpj: dto.cpfCnpj,
+                phone: dto.phone,
+                mobilePhone: dto.mobilePhone,
+                type: dto.type,
+                active: true,
+                deletedAt: null,
+              },
+            });
+            this.logger.log(`Subconta reativada: ${reactivated.name} (${reactivated.email}) — Asaas: ${reactivated.asaasId}`);
+            return reactivated;
+          }
+        }
+      }
+      throw error;
+    }
+
+    // Persiste localmente (inclui apiKey para referência futura)
     const subaccount = await this.prisma.subaccount.create({
       data: {
         asaasId: asaasAccount.id,
         walletId: asaasAccount.walletId,
+        apiKey: asaasAccount.apiKey || null,
         name: dto.name,
         cpfCnpj: dto.cpfCnpj,
         email: dto.email,
@@ -51,9 +88,9 @@ export class SubaccountsService {
   }
 
   async linkExisting(dto: LinkExistingSubaccountDto) {
-    // Verifica se já existe localmente
+    // Verifica se já existe localmente (ativa)
     const existing = await this.prisma.subaccount.findFirst({
-      where: { OR: [{ walletId: dto.walletId }, { asaasId: dto.walletId }] },
+      where: { OR: [{ walletId: dto.walletId }, { asaasId: dto.walletId }], deletedAt: null },
     });
     if (existing) {
       throw new BadRequestException(`Subconta "${existing.name}" já está vinculada com este ID`);
@@ -86,7 +123,7 @@ export class SubaccountsService {
     const { page = 1, limit = 20, search, active, type } = query;
     const skip = (page - 1) * limit;
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { deletedAt: null };
     if (search) {
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
@@ -114,8 +151,8 @@ export class SubaccountsService {
   }
 
   async findOne(id: string) {
-    const subaccount = await this.prisma.subaccount.findUnique({
-      where: { id },
+    const subaccount = await this.prisma.subaccount.findFirst({
+      where: { id, deletedAt: null },
       include: {
         _count: { select: { chargeSplits: true, splitResults: true } },
       },
@@ -166,8 +203,15 @@ export class SubaccountsService {
   }
 
   async remove(id: string) {
-    await this.findOne(id);
-    return this.prisma.subaccount.delete({ where: { id } });
+    const subaccount = await this.findOne(id);
+
+    const updated = await this.prisma.subaccount.update({
+      where: { id },
+      data: { deletedAt: new Date(), active: false },
+    });
+
+    this.logger.log(`Subconta removida (soft delete): ${subaccount.name} — Asaas: ${subaccount.asaasId}`);
+    return updated;
   }
 
   async syncFromAsaas() {

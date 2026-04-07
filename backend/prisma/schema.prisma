@@ -52,6 +52,7 @@ model Subaccount {
   id          String          @id @default(uuid())
   asaasId     String          @unique @map("asaas_id")
   walletId    String?         @map("wallet_id")
+  apiKey      String?         @map("api_key")
   name        String
   cpfCnpj     String          @map("cpf_cnpj")
   email       String?
@@ -60,6 +61,7 @@ model Subaccount {
   type        SubaccountType  @default(OTHER)
   active      Boolean         @default(true)
   balance     Decimal         @default(0) @db.Decimal(12, 2)
+  deletedAt   DateTime?       @map("deleted_at")
   createdAt   DateTime        @default(now()) @map("created_at")
   updatedAt   DateTime        @updatedAt @map("updated_at")
 
