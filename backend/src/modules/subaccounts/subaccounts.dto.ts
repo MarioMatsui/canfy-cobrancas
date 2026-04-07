@@ -125,3 +125,14 @@ export class ListSubaccountsDto {
   @IsEnum(SubaccountTypeDto)
   type?: SubaccountTypeDto;
 }
+
+export class LinkExistingSubaccountDto {
+  @ApiProperty({ example: '4bfce8c3-ebfb-4a6c-955d-bc585ab4ef82', description: 'Wallet ID ou Account ID da conta Asaas existente' })
+  @IsString()
+  walletId!: string;
+
+  @ApiPropertyOptional({ enum: SubaccountTypeDto, default: 'OTHER', description: 'Tipo: DOCTOR, SUPPLIER ou OTHER' })
+  @IsOptional()
+  @IsEnum(SubaccountTypeDto)
+  type?: SubaccountTypeDto;
+}

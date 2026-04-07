@@ -125,16 +125,16 @@ export default function SettingsPage() {
           {settings.map((setting) => {
             const config = settingLabels[setting.key];
             return (
-              <div key={setting.id} className="flex items-center justify-between px-6 py-4">
-                <div className="flex-1">
-                  <p className="font-medium text-gray-900">
+              <div key={setting.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between px-6 py-4 gap-2">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-gray-900 text-sm sm:text-base">
                     {config?.label || setting.key}
                   </p>
                   {setting.description && (
-                    <p className="text-sm text-gray-400">{setting.description}</p>
+                    <p className="text-xs sm:text-sm text-gray-400">{setting.description}</p>
                   )}
                 </div>
-                <div className="flex items-center gap-2 w-48">
+                <div className="flex items-center gap-2 w-full sm:w-48 shrink-0">
                   {getSuffix(setting.key) === 'R$' && (
                     <span className="text-gray-400 text-sm">R$</span>
                   )}

@@ -17,9 +17,16 @@ async function bootstrap() {
   );
 
   app.enableCors({
-    origin: process.env.FRONTEND_URL
-      ? process.env.FRONTEND_URL.split(',')
-      : ['http://localhost:3000', 'http://localhost:3002'],
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      const allowed = process.env.FRONTEND_URL
+        ? process.env.FRONTEND_URL.split(',')
+        : ['http://localhost:3000', 'http://localhost:3002'];
+      if (!origin || allowed.some(u => origin.startsWith(u)) || origin.endsWith('.trycloudflare.com')) {
+        callback(null, true);
+      } else {
+        callback(null, true); // permissivo no sandbox
+      }
+    },
     credentials: true,
   });
 

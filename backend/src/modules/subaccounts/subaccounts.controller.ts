@@ -2,7 +2,7 @@ import { Controller, Get, Post, Put, Patch, Body, Param, Query, UseGuards } from
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SubaccountsService } from './subaccounts.service';
-import { CreateSubaccountDto, UpdateSubaccountDto, ListSubaccountsDto } from './subaccounts.dto';
+import { CreateSubaccountDto, UpdateSubaccountDto, ListSubaccountsDto, LinkExistingSubaccountDto } from './subaccounts.dto';
 
 @ApiTags('Subcontas')
 @ApiBearerAuth()
@@ -15,6 +15,12 @@ export class SubaccountsController {
   @ApiOperation({ summary: 'Criar subconta (médico, fornecedor, etc.)' })
   create(@Body() dto: CreateSubaccountDto) {
     return this.subaccountsService.create(dto);
+  }
+
+  @Post('link')
+  @ApiOperation({ summary: 'Vincular conta Asaas existente via Wallet ID' })
+  linkExisting(@Body() dto: LinkExistingSubaccountDto) {
+    return this.subaccountsService.linkExisting(dto);
   }
 
   @Get()

@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Receipt, Users, Stethoscope, Package, AlertTriangle, TrendingUp, Building2 } from 'lucide-react';
+import { Receipt, Users, Stethoscope, Package, AlertCircle, TrendingUp, Building2 } from 'lucide-react';
 import api from '@/lib/api';
 
 interface DashboardOverview {
@@ -123,7 +123,7 @@ export default function DashboardPage() {
         <StatCard
           title="Atrasadas"
           value={data?.charges.overdue || 0}
-          icon={AlertTriangle}
+          icon={AlertCircle}
           color="bg-red-500"
         />
         <StatCard
@@ -137,7 +137,7 @@ export default function DashboardPage() {
 
       {/* Receita por tipo */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+        <div key="doctor-revenue" className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
           <div className="flex items-center gap-3 mb-4">
             <div className="p-2 bg-blue-100 rounded-lg">
               <Stethoscope size={20} className="text-blue-600" />
@@ -148,7 +148,7 @@ export default function DashboardPage() {
           <p className="text-sm text-gray-400 mt-1">{data?.subaccounts.doctorCount || 0} médicos cadastrados</p>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+        <div key="supplier-revenue" className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
           <div className="flex items-center gap-3 mb-4">
             <div className="p-2 bg-orange-100 rounded-lg">
               <Package size={20} className="text-orange-600" />
@@ -159,7 +159,7 @@ export default function DashboardPage() {
           <p className="text-sm text-gray-400 mt-1">{data?.subaccounts.supplierCount || 0} fornecedores cadastrados</p>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+        <div key="main-revenue" className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
           <div className="flex items-center gap-3 mb-4">
             <div className="p-2 bg-green-100 rounded-lg">
               <Building2 size={20} className="text-green-600" />
@@ -173,7 +173,7 @@ export default function DashboardPage() {
 
       {/* Tipos de cobrança + Status */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+        <div key="charge-types" className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
           <h2 className="text-lg font-semibold mb-4">Tipos de Cobrança</h2>
           <div className="space-y-4">
             <div className="flex items-center justify-between p-3 bg-indigo-50 rounded-lg">
@@ -193,7 +193,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+        <div key="charge-status" className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
           <h2 className="text-lg font-semibold mb-4">Status das Cobranças</h2>
           <div className="space-y-3">
             <div className="flex justify-between items-center">
@@ -214,7 +214,7 @@ export default function DashboardPage() {
 
       {/* Receita por médico e fornecedor */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+        <div key="per-doctor" className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
           <h2 className="text-lg font-semibold mb-4">Receita por Médico</h2>
           {!doctorRevenue || doctorRevenue.length === 0 ? (
             <p className="text-gray-400 text-sm py-4 text-center">Nenhum dado disponível</p>
@@ -238,7 +238,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+        <div key="per-supplier" className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
           <h2 className="text-lg font-semibold mb-4">Receita por Fornecedor</h2>
           {!supplierRevenue || supplierRevenue.length === 0 ? (
             <p className="text-gray-400 text-sm py-4 text-center">Nenhum dado disponível</p>

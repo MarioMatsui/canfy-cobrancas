@@ -1,7 +1,7 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AsaasService } from '../../asaas/asaas.service';
-import { CreateSubaccountDto, UpdateSubaccountDto, ListSubaccountsDto } from './subaccounts.dto';
+import { CreateSubaccountDto, UpdateSubaccountDto, ListSubaccountsDto, LinkExistingSubaccountDto } from './subaccounts.dto';
 
 @Injectable()
 export class SubaccountsService {
@@ -47,6 +47,38 @@ export class SubaccountsService {
     });
 
     this.logger.log(`Subconta criada: ${subaccount.name} (${subaccount.type}) — Asaas: ${asaasAccount.id}`);
+    return subaccount;
+  }
+
+  async linkExisting(dto: LinkExistingSubaccountDto) {
+    // Verifica se já existe localmente
+    const existing = await this.prisma.subaccount.findFirst({
+      where: { OR: [{ walletId: dto.walletId }, { asaasId: dto.walletId }] },
+    });
+    if (existing) {
+      throw new BadRequestException(`Subconta "${existing.name}" já está vinculada com este ID`);
+    }
+
+    // Busca nas subcontas do Asaas pela walletId
+    const accounts = await this.asaas.get<{ data: Array<{ id: string; walletId: string; name: string; cpfCnpj: string; email: string }> }>('/accounts');
+    const account = accounts.data.find((a) => a.walletId === dto.walletId || a.id === dto.walletId);
+
+    if (!account) {
+      throw new BadRequestException('Conta não encontrada no Asaas com este Wallet ID / Account ID');
+    }
+
+    const subaccount = await this.prisma.subaccount.create({
+      data: {
+        asaasId: account.id,
+        walletId: account.walletId,
+        name: account.name,
+        cpfCnpj: account.cpfCnpj,
+        email: account.email,
+        type: dto.type || 'OTHER',
+      },
+    });
+
+    this.logger.log(`Subconta vinculada: ${subaccount.name} (${subaccount.type}) — Wallet: ${account.walletId}`);
     return subaccount;
   }
 

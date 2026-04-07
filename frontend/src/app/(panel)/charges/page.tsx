@@ -116,7 +116,11 @@ export default function ChargesPage() {
       resetForm();
       queryClient.invalidateQueries({ queryKey: ['charges'] });
     },
-    onError: () => toast.error('Erro ao criar cobrança'),
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { details?: { errors?: { description?: string }[] }; message?: string } } };
+      const msg = err.response?.data?.details?.errors?.[0]?.description || err.response?.data?.message || 'Erro ao criar cobrança';
+      toast.error(msg);
+    },
   });
 
   const totalSplitPercent = splits.reduce((sum, s) => sum + s.percentage, 0);
@@ -165,6 +169,14 @@ export default function ChargesPage() {
     }
     if (chargeType === 'CUSTOM' && !dueDate) {
       toast.error('Data de vencimento obrigatória para cobranças avulsas');
+      return;
+    }
+    if (chargeType === 'CUSTOM' && !customerCpfCnpj) {
+      toast.error('CPF/CNPJ obrigatório para cobranças avulsas');
+      return;
+    }
+    if (customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
+      toast.error('Email inválido');
       return;
     }
 
@@ -229,7 +241,7 @@ export default function ChargesPage() {
           {/* Tipo de cobrança */}
           <div className="flex gap-4">
             <button
-              onClick={() => setChargeType('CUSTOM')}
+              onClick={() => { setChargeType('CUSTOM'); if (billingType === 'UNDEFINED') setBillingType('PIX'); }}
               className={`flex-1 p-4 rounded-lg border-2 transition-colors ${chargeType === 'CUSTOM' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}
             >
               <Receipt size={24} className="text-blue-600 mb-2" />
@@ -255,11 +267,11 @@ export default function ChargesPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-              <input value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)}
+              <input type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)}
                 className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="email@exemplo.com" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">CPF/CNPJ</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">CPF/CNPJ {chargeType === 'CUSTOM' ? '*' : ''}</label>
               <input value={customerCpfCnpj} onChange={(e) => setCustomerCpfCnpj(e.target.value)}
                 className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="000.000.000-00" />
             </div>
@@ -280,7 +292,7 @@ export default function ChargesPage() {
                 <option value="BOLETO">Boleto</option>
                 <option value="CREDIT_CARD">Cartão de crédito</option>
                 <option value="DEBIT_CARD">Cartão de débito</option>
-                <option value="UNDEFINED">Link (aceita múltiplos)</option>
+                {chargeType === 'REUSABLE' && <option value="UNDEFINED">Link (aceita múltiplos)</option>}
               </select>
             </div>
             {chargeType === 'CUSTOM' && (
