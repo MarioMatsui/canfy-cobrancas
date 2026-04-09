@@ -131,6 +131,21 @@ export class LinkExistingSubaccountDto {
   @IsString()
   walletId!: string;
 
+  @ApiPropertyOptional({ description: 'Nome da conta (obrigatório se conta externa)' })
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @ApiPropertyOptional({ description: 'CPF/CNPJ da conta (obrigatório se conta externa)' })
+  @IsOptional()
+  @IsString()
+  cpfCnpj?: string;
+
+  @ApiPropertyOptional({ description: 'Email da conta' })
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
   @ApiPropertyOptional({ enum: SubaccountTypeDto, default: 'OTHER', description: 'Tipo: DOCTOR, SUPPLIER ou OTHER' })
   @IsOptional()
   @IsEnum(SubaccountTypeDto)

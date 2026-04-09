@@ -101,26 +101,45 @@ export class SubaccountsService {
       throw new BadRequestException(`Subconta "${existing.name}" já está vinculada com este ID`);
     }
 
-    // Busca nas subcontas do Asaas pela walletId
-    const accounts = await this.asaas.get<{ data: Array<{ id: string; walletId: string; name: string; cpfCnpj: string; email: string }> }>('/accounts');
-    const account = accounts.data.find((a) => a.walletId === dto.walletId || a.id === dto.walletId);
+    // Tenta buscar nas subcontas do Asaas
+    let accountName = dto.name;
+    let accountCpfCnpj = dto.cpfCnpj;
+    let accountEmail = dto.email;
+    let accountAsaasId: string | null = null;
+    let accountWalletId = dto.walletId;
 
-    if (!account) {
-      throw new BadRequestException('Conta não encontrada no Asaas com este Wallet ID / Account ID');
+    try {
+      const accounts = await this.asaas.get<{ data: Array<{ id: string; walletId: string; name: string; cpfCnpj: string; email: string }> }>('/accounts');
+      const account = accounts.data.find((a) => a.walletId === dto.walletId || a.id === dto.walletId);
+
+      if (account) {
+        accountName = account.name;
+        accountCpfCnpj = account.cpfCnpj;
+        accountEmail = account.email;
+        accountAsaasId = account.id;
+        accountWalletId = account.walletId;
+      }
+    } catch (error) {
+      this.logger.warn('Erro ao buscar subcontas do Asaas, usando dados manuais', error);
+    }
+
+    // Se não encontrou no Asaas, exige dados manuais
+    if (!accountAsaasId && (!accountName || !accountCpfCnpj)) {
+      throw new BadRequestException('Conta não encontrada nas subcontas Asaas. Informe nome e CPF/CNPJ para vincular como conta externa.');
     }
 
     const subaccount = await this.prisma.subaccount.create({
       data: {
-        asaasId: account.id,
-        walletId: account.walletId,
-        name: account.name,
-        cpfCnpj: account.cpfCnpj,
-        email: account.email,
+        asaasId: accountAsaasId || `external_${accountWalletId}`,
+        walletId: accountWalletId,
+        name: accountName!,
+        cpfCnpj: accountCpfCnpj!,
+        email: accountEmail || null,
         type: dto.type || 'OTHER',
       },
     });
 
-    this.logger.log(`Subconta vinculada: ${subaccount.name} (${subaccount.type}) — Wallet: ${account.walletId}`);
+    this.logger.log(`Subconta vinculada: ${subaccount.name} (${subaccount.type}) — Wallet: ${accountWalletId}`);
     return this.sanitize(subaccount);
   }
 

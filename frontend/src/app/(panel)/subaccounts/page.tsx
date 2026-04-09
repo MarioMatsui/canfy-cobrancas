@@ -93,7 +93,7 @@ export default function SubaccountsPage() {
   });
 
   const linkMutation = useMutation({
-    mutationFn: (payload: { walletId: string; type?: string }) => api.post('/subaccounts/link', payload),
+    mutationFn: (payload: { walletId: string; name?: string; cpfCnpj?: string; email?: string; type?: string }) => api.post('/subaccounts/link', payload),
     onSuccess: () => {
       toast.success('Conta vinculada com sucesso!');
       resetForm();
@@ -142,7 +142,17 @@ export default function SubaccountsPage() {
       toast.error('Preencha o Wallet ID');
       return;
     }
-    linkMutation.mutate({ walletId: formWalletId.trim(), type: formType });
+    if (!formName.trim() || !formCpfCnpj.trim()) {
+      toast.error('Preencha o nome e CPF/CNPJ da conta');
+      return;
+    }
+    linkMutation.mutate({
+      walletId: formWalletId.trim(),
+      name: formName.trim(),
+      cpfCnpj: formCpfCnpj.replace(/\D/g, ''),
+      email: formEmail.trim() || undefined,
+      type: formType,
+    });
   };
 
   const toggleActive = async (id: string) => {
@@ -227,14 +237,30 @@ export default function SubaccountsPage() {
             <>
               <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                 <p className="text-sm text-green-800">
-                  Informe o <strong>Wallet ID</strong> da conta Asaas existente para vinculá-la ao sistema.
-                  O Wallet ID pode ser encontrado no painel Asaas da subconta.
+                  Informe o <strong>Wallet ID</strong> da conta Asaas e os dados do titular para vinculá-la ao sistema.
                 </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Wallet ID *</label>
                 <input value={formWalletId} onChange={(e) => setFormWalletId(e.target.value)}
                   className="w-full rounded-lg border px-3 py-2 text-sm font-mono" placeholder="Ex: 4bfce8c3-abcd-1234-efgh-567890123456" />
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Nome *</label>
+                  <input value={formName} onChange={(e) => setFormName(e.target.value)}
+                    className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="Nome do titular" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">CPF/CNPJ *</label>
+                  <input value={formCpfCnpj} onChange={(e) => setFormCpfCnpj(e.target.value)}
+                    className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="000.000.000-00" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                  <input type="email" value={formEmail} onChange={(e) => setFormEmail(e.target.value)}
+                    className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="email@exemplo.com" />
+                </div>
               </div>
             </>
           ) : (
