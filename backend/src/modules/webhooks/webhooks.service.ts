@@ -30,7 +30,9 @@ export class WebhooksService {
   }
 
   validateToken(token: string | undefined): void {
-    if (!this.webhookSecret) return; // Se não configurado, aceita tudo (dev)
+    if (!this.webhookSecret || this.webhookSecret === 'your_webhook_secret_here') {
+      throw new ForbiddenException('WEBHOOK_SECRET não configurado');
+    }
     if (!token || !crypto.timingSafeEqual(Buffer.from(token), Buffer.from(this.webhookSecret))) {
       throw new ForbiddenException('Token de webhook inválido');
     }

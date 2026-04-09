@@ -12,6 +12,11 @@ export class SubaccountsService {
     private asaas: AsaasService,
   ) {}
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private sanitize<T extends { apiKey?: string | null }>({ apiKey, ...rest }: T) {
+    return rest;
+  }
+
   async create(dto: CreateSubaccountDto) {
     // Cria subconta no Asaas
     const asaasPayload: Record<string, unknown> = {
@@ -61,7 +66,7 @@ export class SubaccountsService {
               },
             });
             this.logger.log(`Subconta reativada: ${reactivated.name} (${reactivated.email}) — Asaas: ${reactivated.asaasId}`);
-            return reactivated;
+            return this.sanitize(reactivated);
           }
         }
       }
@@ -84,7 +89,7 @@ export class SubaccountsService {
     });
 
     this.logger.log(`Subconta criada: ${subaccount.name} (${subaccount.type}) — Asaas: ${asaasAccount.id}`);
-    return subaccount;
+    return this.sanitize(subaccount);
   }
 
   async linkExisting(dto: LinkExistingSubaccountDto) {
@@ -116,7 +121,7 @@ export class SubaccountsService {
     });
 
     this.logger.log(`Subconta vinculada: ${subaccount.name} (${subaccount.type}) — Wallet: ${account.walletId}`);
-    return subaccount;
+    return this.sanitize(subaccount);
   }
 
   async findAll(query: ListSubaccountsDto) {
@@ -147,7 +152,7 @@ export class SubaccountsService {
       this.prisma.subaccount.count({ where }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return { data: data.map(s => this.sanitize(s)), total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async findOne(id: string) {
@@ -158,7 +163,7 @@ export class SubaccountsService {
       },
     });
     if (!subaccount) throw new NotFoundException('Subconta não encontrada');
-    return subaccount;
+    return this.sanitize(subaccount);
   }
 
   async getFinancialHistory(id: string) {
@@ -191,15 +196,17 @@ export class SubaccountsService {
       await this.asaas.put(`/accounts/${subaccount.asaasId}`, dto);
     }
 
-    return this.prisma.subaccount.update({ where: { id }, data: dto });
+    const updated = await this.prisma.subaccount.update({ where: { id }, data: dto });
+    return this.sanitize(updated);
   }
 
   async toggleActive(id: string) {
     const subaccount = await this.findOne(id);
-    return this.prisma.subaccount.update({
+    const toggled = await this.prisma.subaccount.update({
       where: { id },
       data: { active: !subaccount.active },
     });
+    return this.sanitize(toggled);
   }
 
   async remove(id: string) {
@@ -211,7 +218,7 @@ export class SubaccountsService {
     });
 
     this.logger.log(`Subconta removida (soft delete): ${subaccount.name} — Asaas: ${subaccount.asaasId}`);
-    return updated;
+    return this.sanitize(updated);
   }
 
   async syncFromAsaas() {
