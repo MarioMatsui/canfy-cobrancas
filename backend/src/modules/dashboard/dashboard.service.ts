@@ -21,7 +21,7 @@ export class DashboardService {
       this.prisma.charge.count(),
       this.prisma.charge.count({ where: { chargeType: 'CUSTOM' } }),
       this.prisma.charge.count({ where: { chargeType: 'REUSABLE' } }),
-      this.prisma.charge.count({ where: { status: 'CONFIRMED' } }),
+      this.prisma.charge.count({ where: { status: { in: ['CONFIRMED', 'RECEIVED'] } } }),
       this.prisma.charge.count({ where: { status: 'PENDING' } }),
       this.prisma.charge.count({ where: { status: 'OVERDUE' } }),
       this.prisma.subaccount.count({ where: { active: true } }),
@@ -32,7 +32,7 @@ export class DashboardService {
 
     const totalValue = await this.prisma.charge.aggregate({ _sum: { value: true } });
     const paidValue = await this.prisma.charge.aggregate({
-      where: { status: 'CONFIRMED' },
+      where: { status: { in: ['CONFIRMED', 'RECEIVED'] } },
       _sum: { value: true },
     });
 
@@ -54,6 +54,20 @@ export class DashboardService {
       _sum: { value: true },
     });
 
+    // Receita da conta principal (soma dos pagamentos recebidos menos splits)
+    const paidChargesWithSplits = await this.prisma.charge.findMany({
+      where: { status: { in: ['CONFIRMED', 'RECEIVED'] } },
+      select: {
+        value: true,
+        splits: { select: { percentage: true } },
+      },
+    });
+    const mainAccountRevenue = paidChargesWithSplits.reduce((sum, c) => {
+      const totalSplitPct = c.splits.reduce((s, sp) => s + Number(sp.percentage), 0);
+      const mainPct = (100 - totalSplitPct) / 100;
+      return sum + Number(c.value) * mainPct;
+    }, 0);
+
     return {
       charges: {
         total: totalCharges,
@@ -74,7 +88,7 @@ export class DashboardService {
       revenue: {
         doctorRevenue: doctorRevenue._sum.value || 0,
         supplierRevenue: supplierRevenue._sum.value || 0,
-        mainAccountRevenue: 0,
+        mainAccountRevenue,
       },
     };
   }

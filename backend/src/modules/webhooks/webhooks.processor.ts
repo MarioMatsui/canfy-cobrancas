@@ -51,9 +51,11 @@ export class WebhooksProcessor {
   private async handlePaymentConfirmed(payment: AsaasWebhookPayload['payment']) {
     if (!payment) return;
 
+    const status = payment.status === 'RECEIVED' ? 'RECEIVED' : 'CONFIRMED';
+
     await this.prisma.charge.updateMany({
       where: { asaasId: payment.id },
-      data: { status: 'CONFIRMED' },
+      data: { status },
     });
 
     // Registra os split results baseado nos ChargeSplits

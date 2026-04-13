@@ -12,7 +12,7 @@ export class SyncService {
     private asaas: AsaasService,
   ) {}
 
-  @Cron(CronExpression.EVERY_HOUR)
+  @Cron(CronExpression.EVERY_5_MINUTES)
   async syncChargeStatuses() {
     this.logger.log('Iniciando sincronização de status de cobranças...');
 
@@ -26,13 +26,18 @@ export class SyncService {
     let updated = 0;
     for (const charge of pendingCharges) {
       try {
-        const asaasCharge = await this.asaas.get<{ status: string }>(`/payments/${charge.asaasId}`);
+        const asaasCharge = await this.asaas.get<{ status: string; value: number }>(`/payments/${charge.asaasId}`);
         if (asaasCharge.status !== charge.status) {
           await this.prisma.charge.update({
             where: { id: charge.id },
             data: { status: asaasCharge.status },
           });
           updated++;
+
+          // Se pagamento confirmado/recebido, criar split results
+          if (['CONFIRMED', 'RECEIVED'].includes(asaasCharge.status)) {
+            await this.createSplitResults(charge.id, asaasCharge.value || Number(charge.value));
+          }
         }
       } catch (error) {
         this.logger.error(`Erro ao sincronizar cobrança ${charge.id}:`, error);
@@ -63,5 +68,33 @@ export class SyncService {
     }
 
     this.logger.log(`Saldos sincronizados para ${subaccounts.length} subcontas`);
+  }
+
+  private async createSplitResults(chargeId: string, paymentValue: number) {
+    // Verifica se já existem split results para esta cobrança
+    const existing = await this.prisma.splitResult.count({ where: { chargeId } });
+    if (existing > 0) return;
+
+    const charge = await this.prisma.charge.findUnique({
+      where: { id: chargeId },
+      include: { splits: { include: { subaccount: true } } },
+    });
+
+    if (!charge) return;
+
+    for (const split of charge.splits) {
+      const splitValue = (Number(split.percentage) / 100) * paymentValue;
+      await this.prisma.splitResult.create({
+        data: {
+          chargeId: charge.id,
+          receiverSubaccountId: split.subaccountId,
+          value: splitValue,
+          percentage: split.percentage,
+          status: 'COMPLETED',
+        },
+      });
+    }
+
+    this.logger.log(`Split results criados para cobrança ${chargeId}: ${charge.splits.length} splits`);
   }
 }

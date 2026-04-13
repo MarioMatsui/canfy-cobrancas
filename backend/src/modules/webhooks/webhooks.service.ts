@@ -33,7 +33,12 @@ export class WebhooksService {
     if (!this.webhookSecret || this.webhookSecret === 'your_webhook_secret_here') {
       throw new ForbiddenException('WEBHOOK_SECRET não configurado');
     }
-    if (!token || !crypto.timingSafeEqual(Buffer.from(token), Buffer.from(this.webhookSecret))) {
+    if (!token) {
+      throw new ForbiddenException('Token de webhook ausente');
+    }
+    const tokenBuf = Buffer.from(token);
+    const secretBuf = Buffer.from(this.webhookSecret);
+    if (tokenBuf.length !== secretBuf.length || !crypto.timingSafeEqual(tokenBuf, secretBuf)) {
       throw new ForbiddenException('Token de webhook inválido');
     }
   }
