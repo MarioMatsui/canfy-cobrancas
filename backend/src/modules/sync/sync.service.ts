@@ -36,7 +36,7 @@ export class SyncService {
 
           // Se pagamento confirmado/recebido, criar split results
           if (['CONFIRMED', 'RECEIVED'].includes(asaasCharge.status)) {
-            await this.createSplitResults(charge.id, asaasCharge.value || Number(charge.value));
+            await this.createSplitResults(charge.id, charge.asaasId!);
           }
         }
       } catch (error) {
@@ -70,7 +70,7 @@ export class SyncService {
     this.logger.log(`Saldos sincronizados para ${subaccounts.length} subcontas`);
   }
 
-  private async createSplitResults(chargeId: string, paymentValue: number) {
+  private async createSplitResults(chargeId: string, asaasId: string) {
     // Verifica se já existem split results para esta cobrança
     const existing = await this.prisma.splitResult.count({ where: { chargeId } });
     if (existing > 0) return;
@@ -82,8 +82,21 @@ export class SyncService {
 
     if (!charge) return;
 
+    // Busca os valores reais dos splits da API do Asaas (calcula sobre valor líquido)
+    let asaasSplits: Array<{ walletId: string; totalValue: number; percentualValue: number }> = [];
+    try {
+      const asaasPayment = await this.asaas.get<{ netValue: number; split: typeof asaasSplits }>(`/payments/${asaasId}`);
+      asaasSplits = asaasPayment.split || [];
+    } catch (error) {
+      this.logger.warn(`Não foi possível buscar splits reais do Asaas para ${asaasId}, usando cálculo local`);
+    }
+
     for (const split of charge.splits) {
-      const splitValue = (Number(split.percentage) / 100) * paymentValue;
+      // Usa o valor real do Asaas se disponível, caso contrário calcula sobre o gross
+      const walletId = split.subaccount?.walletId;
+      const asaasSplit = asaasSplits.find(s => s.walletId === walletId);
+      const splitValue = asaasSplit ? asaasSplit.totalValue : (Number(split.percentage) / 100) * Number(charge.value);
+
       await this.prisma.splitResult.create({
         data: {
           chargeId: charge.id,

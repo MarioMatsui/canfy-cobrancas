@@ -54,19 +54,12 @@ export class DashboardService {
       _sum: { value: true },
     });
 
-    // Receita da conta principal (soma dos pagamentos recebidos menos splits)
-    const paidChargesWithSplits = await this.prisma.charge.findMany({
-      where: { status: { in: ['CONFIRMED', 'RECEIVED'] } },
-      select: {
-        value: true,
-        splits: { select: { percentage: true } },
-      },
+    // Receita da conta principal = valor pago - splits reais (baseados em valor líquido)
+    const totalSplitValue = await this.prisma.splitResult.aggregate({
+      where: { status: 'COMPLETED' },
+      _sum: { value: true },
     });
-    const mainAccountRevenue = paidChargesWithSplits.reduce((sum, c) => {
-      const totalSplitPct = c.splits.reduce((s, sp) => s + Number(sp.percentage), 0);
-      const mainPct = (100 - totalSplitPct) / 100;
-      return sum + Number(c.value) * mainPct;
-    }, 0);
+    const mainAccountRevenue = Number(paidValue._sum.value || 0) - Number(totalSplitValue._sum.value || 0);
 
     return {
       charges: {

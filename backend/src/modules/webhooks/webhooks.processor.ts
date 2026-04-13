@@ -2,13 +2,17 @@ import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bull';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { AsaasService } from '../../asaas/asaas.service';
 import { AsaasWebhookPayload } from './webhooks.service';
 
 @Processor('webhooks')
 export class WebhooksProcessor {
   private readonly logger = new Logger(WebhooksProcessor.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private asaas: AsaasService,
+  ) {}
 
   @Process('process')
   async handleWebhookEvent(job: Job<AsaasWebhookPayload>) {
@@ -69,8 +73,19 @@ export class WebhooksProcessor {
     });
 
     if (charge) {
+      // Busca os valores reais dos splits da API do Asaas (calcula sobre valor líquido)
+      let asaasSplits: Array<{ walletId: string; totalValue: number; percentualValue: number }> = [];
+      try {
+        const asaasPayment = await this.asaas.get<{ netValue: number; split: typeof asaasSplits }>(`/payments/${payment.id}`);
+        asaasSplits = asaasPayment.split || [];
+      } catch (error) {
+        this.logger.warn(`Não foi possível buscar splits reais do Asaas para ${payment.id}`);
+      }
+
       for (const split of charge.splits) {
-        const splitValue = (Number(split.percentage) / 100) * payment.value;
+        const walletId = split.subaccount?.walletId;
+        const asaasSplit = asaasSplits.find(s => s.walletId === walletId);
+        const splitValue = asaasSplit ? asaasSplit.totalValue : (Number(split.percentage) / 100) * payment.value;
 
         await this.prisma.splitResult.create({
           data: {

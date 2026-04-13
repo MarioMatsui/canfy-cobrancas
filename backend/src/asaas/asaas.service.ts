@@ -15,6 +15,7 @@ export class AsaasService {
   private get headers(): Record<string, string> {
     return {
       'Content-Type': 'application/json',
+      'User-Agent': 'canfy-app/1.0',
       access_token: this.apiKey,
     };
   }
