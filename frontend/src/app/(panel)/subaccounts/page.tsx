@@ -16,6 +16,7 @@ interface Subaccount {
   type: SubaccountType;
   active: boolean;
   balance: number;
+  totalReceived: number;
   _count: { chargeSplits: number; splitResults: number };
   createdAt: string;
 }
@@ -358,7 +359,7 @@ export default function SubaccountsPage() {
               <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Tipo</th>
               <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">CPF/CNPJ</th>
               <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Email</th>
-              <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase">Saldo</th>
+              <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase">Receita</th>
               <th className="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase">Splits</th>
               <th className="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
               <th className="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase">Ações</th>
@@ -392,7 +393,7 @@ export default function SubaccountsPage() {
                     </td>
                     <td className="px-6 py-4 text-gray-600">{sub.cpfCnpj}</td>
                     <td className="px-6 py-4 text-gray-600">{sub.email || '—'}</td>
-                    <td className="px-6 py-4 text-right font-medium">{formatCurrency(sub.balance)}</td>
+                    <td className="px-6 py-4 text-right font-medium text-green-700">{formatCurrency(sub.totalReceived || 0)}</td>
                     <td className="px-6 py-4 text-center text-sm text-gray-500">{sub._count?.splitResults || 0}</td>
                     <td className="px-6 py-4 text-center">
                       <span

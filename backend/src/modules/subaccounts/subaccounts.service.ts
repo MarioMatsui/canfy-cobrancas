@@ -171,7 +171,19 @@ export class SubaccountsService {
       this.prisma.subaccount.count({ where }),
     ]);
 
-    return { data: data.map(s => this.sanitize(s)), total, page, limit, totalPages: Math.ceil(total / limit) };
+    // Agregar receita recebida por subconta
+    const subIds = data.map(s => s.id);
+    const splitAgg = await this.prisma.splitResult.groupBy({
+      by: ['receiverSubaccountId'],
+      where: { receiverSubaccountId: { in: subIds }, status: 'COMPLETED' },
+      _sum: { value: true },
+    });
+    const revenueMap = new Map(splitAgg.map(a => [a.receiverSubaccountId, Number(a._sum.value || 0)]));
+
+    return {
+      data: data.map(s => ({ ...this.sanitize(s), totalReceived: revenueMap.get(s.id) || 0 })),
+      total, page, limit, totalPages: Math.ceil(total / limit),
+    };
   }
 
   async findOne(id: string) {

@@ -70,6 +70,7 @@ export class ChargesService {
         chargeType: useInstallment ? 'INSTALLMENT' : 'DETACHED',
         value: dto.value,
         dueDateLimitDays: 10,
+        notificationEnabled: false,
         ...(useInstallment && { maxInstallmentCount: dto.maxInstallments }),
         split: asaasSplits,
       });
@@ -111,6 +112,7 @@ export class ChargesService {
         value: dto.value,
         dueDate: dto.dueDate,
         description: dto.description,
+        notificationDisabled: true,
         split: asaasSplits,
       };
 
