@@ -23,8 +23,12 @@ export default function LoginPage() {
       toast.success('Login realizado com sucesso!');
       await refetchUser();
       router.push('/dashboard');
-    } catch {
-      toast.error('Email ou senha inválidos');
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'response' in err) {
+        toast.error('Email ou senha inválidos');
+      } else {
+        toast.error('Erro de conexão com o servidor. Tente novamente.');
+      }
     } finally {
       setLoading(false);
     }
