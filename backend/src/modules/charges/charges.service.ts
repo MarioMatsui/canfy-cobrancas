@@ -289,6 +289,7 @@ export class ChargesService {
       name: dto.customerName,
       email: dto.customerEmail,
       cpfCnpj: dto.customerCpfCnpj,
+      notificationDisabled: true,
     });
 
     this.logger.log(`Customer criado no Asaas: ${customer.id} (${dto.customerName})`);

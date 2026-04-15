@@ -26,11 +26,16 @@ export class SyncService {
     let updated = 0;
     for (const charge of pendingCharges) {
       try {
-        const asaasCharge = await this.asaas.get<{ status: string; value: number }>(`/payments/${charge.asaasId}`);
+        const asaasCharge = await this.asaas.get<{ status: string; value: number; netValue: number }>(`/payments/${charge.asaasId}`);
         if (asaasCharge.status !== charge.status) {
+          const updateData: Record<string, unknown> = { status: asaasCharge.status };
+          // Armazena netValue quando pagamento é confirmado/recebido
+          if (['CONFIRMED', 'RECEIVED'].includes(asaasCharge.status) && asaasCharge.netValue) {
+            updateData.netValue = asaasCharge.netValue;
+          }
           await this.prisma.charge.update({
             where: { id: charge.id },
-            data: { status: asaasCharge.status },
+            data: updateData,
           });
           updated++;
 

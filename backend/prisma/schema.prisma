@@ -89,6 +89,7 @@ model Charge {
 
   billingType     String     @map("billing_type") // PIX, BOLETO, CREDIT_CARD, DEBIT_CARD, UNDEFINED
   value           Decimal    @db.Decimal(12, 2)
+  netValue        Decimal?   @db.Decimal(12, 2) @map("net_value") // Valor líquido após taxas do Asaas
   dueDate         DateTime?  @map("due_date")
   description     String?
   status          String     @default("PENDING") // PENDING, CONFIRMED, OVERDUE, REFUNDED, CANCELLED

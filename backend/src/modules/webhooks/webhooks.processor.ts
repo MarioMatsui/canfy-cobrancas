@@ -57,9 +57,18 @@ export class WebhooksProcessor {
 
     const status = payment.status === 'RECEIVED' ? 'RECEIVED' : 'CONFIRMED';
 
+    // Busca netValue da API do Asaas
+    let netValue: number | undefined;
+    try {
+      const asaasPayment = await this.asaas.get<{ netValue: number }>(`/payments/${payment.id}`);
+      netValue = asaasPayment.netValue;
+    } catch {
+      this.logger.warn(`Não foi possível buscar netValue para ${payment.id}`);
+    }
+
     await this.prisma.charge.updateMany({
       where: { asaasId: payment.id },
-      data: { status },
+      data: { status, ...(netValue !== undefined && { netValue }) },
     });
 
     // Registra os split results baseado nos ChargeSplits
@@ -76,9 +85,9 @@ export class WebhooksProcessor {
       // Busca os valores reais dos splits da API do Asaas (calcula sobre valor líquido)
       let asaasSplits: Array<{ walletId: string; totalValue: number; percentualValue: number }> = [];
       try {
-        const asaasPayment = await this.asaas.get<{ netValue: number; split: typeof asaasSplits }>(`/payments/${payment.id}`);
+        const asaasPayment = await this.asaas.get<{ split: typeof asaasSplits }>(`/payments/${payment.id}`);
         asaasSplits = asaasPayment.split || [];
-      } catch (error) {
+      } catch {
         this.logger.warn(`Não foi possível buscar splits reais do Asaas para ${payment.id}`);
       }
 

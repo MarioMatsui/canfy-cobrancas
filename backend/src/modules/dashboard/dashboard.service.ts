@@ -33,7 +33,7 @@ export class DashboardService {
     const totalValue = await this.prisma.charge.aggregate({ _sum: { value: true } });
     const paidValue = await this.prisma.charge.aggregate({
       where: { status: { in: ['CONFIRMED', 'RECEIVED'] } },
-      _sum: { value: true },
+      _sum: { value: true, netValue: true },
     });
 
     // Receita distribuída para médicos
@@ -54,12 +54,14 @@ export class DashboardService {
       _sum: { value: true },
     });
 
-    // Receita da conta principal = valor pago - splits reais (baseados em valor líquido)
+    // Receita da conta principal = valor líquido (após taxas) - splits reais
     const totalSplitValue = await this.prisma.splitResult.aggregate({
       where: { status: 'COMPLETED' },
       _sum: { value: true },
     });
-    const mainAccountRevenue = Number(paidValue._sum.value || 0) - Number(totalSplitValue._sum.value || 0);
+    // Usa netValue (descontando taxas Asaas) se disponível, senão usa value bruto
+    const paidNetValue = Number(paidValue._sum.netValue || paidValue._sum.value || 0);
+    const mainAccountRevenue = paidNetValue - Number(totalSplitValue._sum.value || 0);
 
     return {
       charges: {
