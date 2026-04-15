@@ -57,44 +57,59 @@ export class WebhooksProcessor {
 
     const status = payment.status === 'RECEIVED' ? 'RECEIVED' : 'CONFIRMED';
 
-    // Busca netValue da API do Asaas
+    // Busca detalhes completos do pagamento (netValue, paymentLink, split)
     let netValue: number | undefined;
+    let paymentLinkId: string | undefined;
+    let asaasSplits: Array<{ walletId: string; totalValue: number; percentualValue: number }> = [];
     try {
-      const asaasPayment = await this.asaas.get<{ netValue: number }>(`/payments/${payment.id}`);
+      const asaasPayment = await this.asaas.get<{
+        netValue: number;
+        paymentLink: string | null;
+        split: typeof asaasSplits;
+      }>(`/payments/${payment.id}`);
       netValue = asaasPayment.netValue;
+      paymentLinkId = asaasPayment.paymentLink || undefined;
+      asaasSplits = asaasPayment.split || [];
     } catch {
-      this.logger.warn(`Não foi possível buscar netValue para ${payment.id}`);
+      this.logger.warn(`Não foi possível buscar detalhes do pagamento ${payment.id}`);
     }
 
-    await this.prisma.charge.updateMany({
+    // Tenta encontrar a charge por asaasId direto (cobranças avulsas)
+    let charge = await this.prisma.charge.findFirst({
       where: { asaasId: payment.id },
+      include: { splits: { include: { subaccount: true } } },
+    });
+
+    // Se não encontrou, tenta pelo paymentLink (cobranças reutilizáveis)
+    if (!charge && paymentLinkId) {
+      charge = await this.prisma.charge.findFirst({
+        where: { asaasId: paymentLinkId, chargeType: 'REUSABLE' },
+        include: { splits: { include: { subaccount: true } } },
+      });
+    }
+
+    if (!charge) {
+      this.logger.warn(`Charge não encontrada para payment ${payment.id} (paymentLink: ${paymentLinkId})`);
+      return;
+    }
+
+    // Atualiza status e netValue
+    await this.prisma.charge.update({
+      where: { id: charge.id },
       data: { status, ...(netValue !== undefined && { netValue }) },
     });
 
-    // Registra os split results baseado nos ChargeSplits
-    const charge = await this.prisma.charge.findFirst({
-      where: { asaasId: payment.id },
-      include: {
-        splits: {
-          include: { subaccount: true },
-        },
-      },
-    });
-
-    if (charge) {
-      // Busca os valores reais dos splits da API do Asaas (calcula sobre valor líquido)
-      let asaasSplits: Array<{ walletId: string; totalValue: number; percentualValue: number }> = [];
-      try {
-        const asaasPayment = await this.asaas.get<{ split: typeof asaasSplits }>(`/payments/${payment.id}`);
-        asaasSplits = asaasPayment.split || [];
-      } catch {
-        this.logger.warn(`Não foi possível buscar splits reais do Asaas para ${payment.id}`);
-      }
+    // Cria split results se ainda não existem
+    const existingSplits = await this.prisma.splitResult.count({ where: { chargeId: charge.id } });
+    if (existingSplits === 0 && charge.splits.length > 0) {
+      const paymentNetValue = netValue || Number(charge.value);
 
       for (const split of charge.splits) {
         const walletId = split.subaccount?.walletId;
         const asaasSplit = asaasSplits.find(s => s.walletId === walletId);
-        const splitValue = asaasSplit ? asaasSplit.totalValue : (Number(split.percentage) / 100) * payment.value;
+        const splitValue = asaasSplit
+          ? asaasSplit.totalValue
+          : +(paymentNetValue * Number(split.percentage) / 100).toFixed(2);
 
         await this.prisma.splitResult.create({
           data: {
@@ -106,6 +121,7 @@ export class WebhooksProcessor {
           },
         });
       }
+
     }
 
     this.logger.log(`Pagamento confirmado: ${payment.id}`);
