@@ -241,7 +241,7 @@ export default function ChargesPage() {
           {/* Tipo de cobrança */}
           <div className="flex gap-4">
             <button
-              onClick={() => { setChargeType('CUSTOM'); if (billingType === 'UNDEFINED') setBillingType('PIX'); }}
+              onClick={() => setChargeType('CUSTOM')}
               className={`flex-1 p-4 rounded-lg border-2 transition-colors ${chargeType === 'CUSTOM' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}
             >
               <Receipt size={24} className="text-blue-600 mb-2" />
@@ -292,7 +292,7 @@ export default function ChargesPage() {
                 <option value="BOLETO">Boleto</option>
                 <option value="CREDIT_CARD">Cartão de crédito</option>
                 <option value="DEBIT_CARD">Cartão de débito</option>
-                {chargeType === 'REUSABLE' && <option value="UNDEFINED">Link (aceita múltiplos)</option>}
+                <option value="UNDEFINED">Link (aceita múltiplos)</option>
               </select>
             </div>
             {chargeType === 'CUSTOM' && (
