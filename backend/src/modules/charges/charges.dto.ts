@@ -75,11 +75,12 @@ export class CreateChargeDto {
 
   // Splits - array de destinatários (fornecedor, médico, etc.)
   // O restante automaticamente vai para a conta principal
-  @ApiProperty({ type: [SplitRecipientDto], description: 'Destinatários do split. O restante vai para conta principal.' })
+  @ApiPropertyOptional({ type: [SplitRecipientDto], description: 'Destinatários do split. O restante vai para conta principal. Se vazio, 100% vai para conta principal.' })
   @IsArray()
+  @IsOptional()
   @ValidateNested({ each: true })
   @Type(() => SplitRecipientDto)
-  splits!: SplitRecipientDto[];
+  splits?: SplitRecipientDto[];
 }
 
 export class ListChargesDto {

@@ -12,11 +12,6 @@ interface AsaasCharge {
   pixCopiaECola?: string;
 }
 
-interface AsaasPaymentLink {
-  id: string;
-  url: string;
-}
-
 @Injectable()
 export class ChargesService {
   private readonly logger = new Logger(ChargesService.name);
@@ -27,8 +22,9 @@ export class ChargesService {
   ) {}
 
   async create(dto: CreateChargeDto) {
+    const splits = dto.splits || [];
     // Valida que as porcentagens de split não excedem 100%
-    const totalSplitPercent = dto.splits.reduce((sum, s) => sum + s.percentage, 0);
+    const totalSplitPercent = splits.reduce((sum, s) => sum + s.percentage, 0);
     if (totalSplitPercent >= 100) {
       throw new BadRequestException(
         `Total de splits (${totalSplitPercent}%) deve ser menor que 100%. O restante vai para a conta principal.`,
@@ -36,23 +32,26 @@ export class ChargesService {
     }
 
     // Valida que todas as subcontas existem e têm walletId
-    const subaccountIds = dto.splits.map((s) => s.subaccountId);
-    const subaccounts = await this.prisma.subaccount.findMany({
-      where: { id: { in: subaccountIds }, active: true },
-    });
+    const subaccountIds = splits.map((s) => s.subaccountId);
+    let subaccounts: { id: string; name: string; walletId: string | null }[] = [];
+    if (subaccountIds.length > 0) {
+      subaccounts = await this.prisma.subaccount.findMany({
+        where: { id: { in: subaccountIds }, active: true },
+      });
 
-    if (subaccounts.length !== subaccountIds.length) {
-      throw new BadRequestException('Uma ou mais subcontas não encontradas ou inativas');
-    }
+      if (subaccounts.length !== subaccountIds.length) {
+        throw new BadRequestException('Uma ou mais subcontas não encontradas ou inativas');
+      }
 
-    const missingWallet = subaccounts.find((s) => !s.walletId);
-    if (missingWallet) {
-      throw new BadRequestException(`Subconta "${missingWallet.name}" não possui walletId do Asaas`);
+      const missingWallet = subaccounts.find((s) => !s.walletId);
+      if (missingWallet) {
+        throw new BadRequestException(`Subconta "${missingWallet.name}" não possui walletId do Asaas`);
+      }
     }
 
     // Monta payload para o Asaas
     const asaasSplits = subaccounts.map((sub) => {
-      const splitDto = dto.splits.find((s) => s.subaccountId === sub.id)!;
+      const splitDto = splits.find((s) => s.subaccountId === sub.id)!;
       return {
         walletId: sub.walletId,
         percentualValue: splitDto.percentage,
@@ -61,113 +60,75 @@ export class ChargesService {
 
     let charge;
 
-    if (dto.chargeType === 'REUSABLE') {
-      // Cria link de pagamento reutilizável no Asaas
-      const useInstallment = dto.maxInstallments && dto.maxInstallments > 1;
-      const paymentLink = await this.asaas.post<AsaasPaymentLink>('/paymentLinks', {
-        name: dto.description || 'Cobrança reutilizável',
-        billingType: dto.billingType === 'UNDEFINED' ? 'UNDEFINED' : dto.billingType,
-        chargeType: useInstallment ? 'INSTALLMENT' : 'DETACHED',
-        value: dto.value,
-        dueDateLimitDays: 10,
-        notificationEnabled: false,
-        ...(useInstallment && { maxInstallmentCount: dto.maxInstallments }),
-        split: asaasSplits,
-      });
+    // Cobrança avulsa/personalizada
+    if (!dto.dueDate) {
+      throw new BadRequestException('Data de vencimento é obrigatória para cobranças avulsas');
+    }
 
-      charge = await this.prisma.charge.create({
-        data: {
-          asaasId: paymentLink.id,
-          chargeType: 'REUSABLE',
-          customerName: dto.customerName,
-          customerEmail: dto.customerEmail,
-          customerCpfCnpj: dto.customerCpfCnpj,
-          billingType: dto.billingType,
-          value: dto.value,
-          description: dto.description,
-          maxInstallments: dto.maxInstallments || 3,
-          isActive: true,
-          invoiceUrl: paymentLink.url,
-          splits: {
-            create: dto.splits.map((s) => ({
-              subaccountId: s.subaccountId,
-              percentage: s.percentage,
-            })),
-          },
-        },
-        include: { splits: { include: { subaccount: { select: { name: true, type: true } } } } },
-      });
-    } else {
-      // Cobrança avulsa/personalizada
-      if (!dto.dueDate) {
-        throw new BadRequestException('Data de vencimento é obrigatória para cobranças avulsas');
+    // Busca ou cria customer no Asaas
+    const customerId = await this.findOrCreateCustomer(dto);
+
+    const asaasPayload: Record<string, unknown> = {
+      customer: customerId,
+      billingType: dto.billingType,
+      value: dto.value,
+      dueDate: dto.dueDate,
+      description: dto.description,
+      notificationDisabled: true,
+      ...(asaasSplits.length > 0 && { split: asaasSplits }),
+    };
+
+    if (dto.maxInstallments && dto.maxInstallments > 1) {
+      asaasPayload.installmentCount = dto.maxInstallments;
+      asaasPayload.installmentValue = +(dto.value / dto.maxInstallments).toFixed(2);
+    }
+
+    const asaasCharge = await this.asaas.post<AsaasCharge>('/payments', asaasPayload);
+
+    // Buscar PIX QR Code se billing type for PIX
+    if (dto.billingType === 'PIX' && asaasCharge.id) {
+      try {
+        const pixData = await this.asaas.get<{ encodedImage: string; payload: string }>(
+          `/payments/${asaasCharge.id}/pixQrCode`,
+        );
+        asaasCharge.pixQrCode = pixData.encodedImage;
+        asaasCharge.pixCopiaECola = pixData.payload;
+      } catch (e) {
+        this.logger.warn(`Não foi possível buscar PIX QR Code para ${asaasCharge.id}`);
       }
+    }
 
-      // Busca ou cria customer no Asaas
-      const customerId = await this.findOrCreateCustomer(dto);
-
-      const asaasPayload: Record<string, unknown> = {
-        customer: customerId,
+    charge = await this.prisma.charge.create({
+      data: {
+        asaasId: asaasCharge.id,
+        chargeType: 'CUSTOM',
+        customerName: dto.customerName,
+        customerEmail: dto.customerEmail,
+        customerCpfCnpj: dto.customerCpfCnpj,
+        customerAsaasId: customerId,
         billingType: dto.billingType,
         value: dto.value,
-        dueDate: dto.dueDate,
+        dueDate: new Date(dto.dueDate),
         description: dto.description,
-        notificationDisabled: true,
-        split: asaasSplits,
-      };
-
-      if (dto.maxInstallments && dto.maxInstallments > 1) {
-        asaasPayload.installmentCount = dto.maxInstallments;
-        asaasPayload.installmentValue = +(dto.value / dto.maxInstallments).toFixed(2);
-      }
-
-      const asaasCharge = await this.asaas.post<AsaasCharge>('/payments', asaasPayload);
-
-      // Buscar PIX QR Code se billing type for PIX
-      if (dto.billingType === 'PIX' && asaasCharge.id) {
-        try {
-          const pixData = await this.asaas.get<{ encodedImage: string; payload: string }>(
-            `/payments/${asaasCharge.id}/pixQrCode`,
-          );
-          asaasCharge.pixQrCode = pixData.encodedImage;
-          asaasCharge.pixCopiaECola = pixData.payload;
-        } catch (e) {
-          this.logger.warn(`Não foi possível buscar PIX QR Code para ${asaasCharge.id}`);
-        }
-      }
-
-      charge = await this.prisma.charge.create({
-        data: {
-          asaasId: asaasCharge.id,
-          chargeType: 'CUSTOM',
-          customerName: dto.customerName,
-          customerEmail: dto.customerEmail,
-          customerCpfCnpj: dto.customerCpfCnpj,
-          customerAsaasId: customerId,
-          billingType: dto.billingType,
-          value: dto.value,
-          dueDate: new Date(dto.dueDate),
-          description: dto.description,
-          status: asaasCharge.status,
-          maxInstallments: dto.maxInstallments || 1,
-          invoiceUrl: asaasCharge.invoiceUrl,
-          bankSlipUrl: asaasCharge.bankSlipUrl,
-          pixQrCode: asaasCharge.pixQrCode,
-          pixCopiaECola: asaasCharge.pixCopiaECola,
-          splits: {
-            create: dto.splits.map((s) => ({
-              subaccountId: s.subaccountId,
-              percentage: s.percentage,
-            })),
-          },
+        status: asaasCharge.status,
+        maxInstallments: dto.maxInstallments || 1,
+        invoiceUrl: asaasCharge.invoiceUrl,
+        bankSlipUrl: asaasCharge.bankSlipUrl,
+        pixQrCode: asaasCharge.pixQrCode,
+        pixCopiaECola: asaasCharge.pixCopiaECola,
+        splits: {
+          create: splits.map((s) => ({
+            subaccountId: s.subaccountId,
+            percentage: s.percentage,
+          })),
         },
-        include: { splits: { include: { subaccount: { select: { name: true, type: true } } } } },
-      });
-    }
+      },
+      include: { splits: { include: { subaccount: { select: { name: true, type: true } } } } },
+    });
 
     const mainAccountPercent = 100 - totalSplitPercent;
     this.logger.log(
-      `Cobrança ${dto.chargeType} criada: ${charge.id} | R$${dto.value} | Splits: ${dto.splits.length} dest. + ${mainAccountPercent}% conta principal`,
+      `Cobrança criada: ${charge.id} | R$${dto.value} | Splits: ${splits.length} dest. + ${mainAccountPercent}% conta principal`,
     );
 
     return { ...charge, mainAccountPercentage: mainAccountPercent };

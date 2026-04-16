@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, XCircle, Link2, Receipt, X } from 'lucide-react';
+import { Plus, XCircle, X } from 'lucide-react';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
@@ -77,7 +77,6 @@ export default function ChargesPage() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
   const [showForm, setShowForm] = useState(false);
 
   // Form state
@@ -93,13 +92,12 @@ export default function ChargesPage() {
   const [splits, setSplits] = useState<SplitEntry[]>([]);
 
   const { data, isLoading, refetch } = useQuery<PaginatedResponse>({
-    queryKey: ['charges', page, statusFilter, typeFilter],
+    queryKey: ['charges', page, statusFilter],
     queryFn: () =>
       api.get('/charges', {
         params: {
           page, limit: 20,
           status: statusFilter || undefined,
-          chargeType: typeFilter || undefined,
         },
       }).then((r) => r.data),
   });
@@ -159,11 +157,11 @@ export default function ChargesPage() {
   };
 
   const handleSubmit = () => {
-    if (!customerName || !value || splits.length === 0) {
-      toast.error('Preencha cliente, valor e pelo menos um split');
+    if (!customerName || !value) {
+      toast.error('Preencha nome do cliente e valor');
       return;
     }
-    if (totalSplitPercent >= 100) {
+    if (splits.length > 0 && totalSplitPercent >= 100) {
       toast.error('Total de splits deve ser menor que 100%');
       return;
     }
@@ -219,7 +217,7 @@ export default function ChargesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Cobranças</h1>
-          <p className="text-gray-500 mt-1">Cobranças avulsas e reutilizáveis com split automático</p>
+          <p className="text-gray-500 mt-1">Cobranças avulsas com split automático</p>
         </div>
         <button
           onClick={() => setShowForm(!showForm)}
@@ -238,25 +236,7 @@ export default function ChargesPage() {
             <button onClick={resetForm} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
           </div>
 
-          {/* Tipo de cobrança */}
-          <div className="flex gap-4">
-            <button
-              onClick={() => setChargeType('CUSTOM')}
-              className={`flex-1 p-4 rounded-lg border-2 transition-colors ${chargeType === 'CUSTOM' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}
-            >
-              <Receipt size={24} className="text-blue-600 mb-2" />
-              <div className="font-medium">Avulsa / Personalizada</div>
-              <div className="text-sm text-gray-500">Cobrança única com valor e splits personalizados</div>
-            </button>
-            <button
-              onClick={() => setChargeType('REUSABLE')}
-              className={`flex-1 p-4 rounded-lg border-2 transition-colors ${chargeType === 'REUSABLE' ? 'border-purple-500 bg-purple-50' : 'border-gray-200'}`}
-            >
-              <Link2 size={24} className="text-purple-600 mb-2" />
-              <div className="font-medium">Reutilizável / Link</div>
-              <div className="text-sm text-gray-500">Link permanente para uso recorrente (ex: consulta R$99)</div>
-            </button>
-          </div>
+
 
           {/* Dados do cliente */}
           <div className="grid grid-cols-3 gap-4">
@@ -271,7 +251,7 @@ export default function ChargesPage() {
                 className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="email@exemplo.com" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">CPF/CNPJ {chargeType === 'CUSTOM' ? '*' : ''}</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">CPF/CNPJ *</label>
               <input value={customerCpfCnpj} onChange={(e) => setCustomerCpfCnpj(e.target.value)}
                 className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="000.000.000-00" />
             </div>
@@ -295,20 +275,18 @@ export default function ChargesPage() {
                 <option value="UNDEFINED">Link (aceita múltiplos)</option>
               </select>
             </div>
-            {chargeType === 'CUSTOM' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Vencimento *</label>
-                <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)}
-                  className="w-full rounded-lg border px-3 py-2 text-sm" />
-              </div>
-            )}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Vencimento *</label>
+              <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2 text-sm" />
+            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Parcelas (max {chargeType === 'CUSTOM' ? 5 : 3})
+                Parcelas (max 5)
               </label>
               <select value={maxInstallments} onChange={(e) => setMaxInstallments(Number(e.target.value))}
                 className="w-full rounded-lg border px-3 py-2 text-sm">
-                {Array.from({ length: chargeType === 'CUSTOM' ? 5 : 3 }, (_, i) => i + 1).map((n) => (
+                {Array.from({ length: 5 }, (_, i) => i + 1).map((n) => (
                   <option key={n} value={n}>{n}x</option>
                 ))}
               </select>
@@ -409,12 +387,7 @@ export default function ChargesPage() {
           <option value="OVERDUE">Atrasado</option>
           <option value="CANCELLED">Cancelado</option>
         </select>
-        <select value={typeFilter} onChange={(e) => { setTypeFilter(e.target.value); setPage(1); }}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm">
-          <option value="">Todos os tipos</option>
-          <option value="CUSTOM">Avulsa</option>
-          <option value="REUSABLE">Reutilizável</option>
-        </select>
+
       </div>
 
       {/* Tabela */}
@@ -458,12 +431,18 @@ export default function ChargesPage() {
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600">{formatDate(charge.dueDate)}</td>
                   <td className="px-4 py-3 text-xs">
-                    {charge.splits.map((s, i) => (
-                      <div key={i} className={s.subaccount.type === 'DOCTOR' ? 'text-blue-600' : 'text-orange-600'}>
-                        {s.subaccount.name}: {Number(s.percentage)}%
-                      </div>
-                    ))}
-                    <div className="text-green-700 font-medium">Principal: {charge.mainAccountPercentage}%</div>
+                    {charge.splits.length > 0 ? (
+                      <>
+                        {charge.splits.map((s, i) => (
+                          <div key={i} className={s.subaccount.type === 'DOCTOR' ? 'text-blue-600' : 'text-orange-600'}>
+                            {s.subaccount.name}: {Number(s.percentage)}%
+                          </div>
+                        ))}
+                        <div className="text-green-700 font-medium">Principal: {charge.mainAccountPercentage}%</div>
+                      </>
+                    ) : (
+                      <div className="text-green-700 font-medium">100% Conta Principal</div>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <span className={`text-xs font-medium px-2 py-1 rounded-full ${statusColors[charge.status] || ''}`}>
