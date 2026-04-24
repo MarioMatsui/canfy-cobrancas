@@ -20,11 +20,18 @@ export class SplitRecipientDto {
   @IsString()
   subaccountId!: string;
 
-  @ApiProperty({ example: 70.0, description: 'Percentual do split (o restante vai para conta principal)' })
+  @ApiPropertyOptional({ example: 70.0, description: 'Percentual do split. Informe percentage OU fixedValue (não os dois).' })
   @IsNumber()
+  @IsOptional()
   @Min(0.01)
   @Max(99.99)
-  percentage!: number;
+  percentage?: number;
+
+  @ApiPropertyOptional({ example: 30.0, description: 'Valor fixo (R$) do split. Informe percentage OU fixedValue (não os dois).' })
+  @IsNumber()
+  @IsOptional()
+  @Min(0.01)
+  fixedValue?: number;
 }
 
 export class CreateChargeDto {

@@ -15,7 +15,8 @@ interface Subaccount {
 
 interface ChargeSplit {
   subaccountId: string;
-  percentage: number;
+  percentage: number | null;
+  fixedValue: number | null;
   subaccount: { name: string; type: string };
 }
 
@@ -70,7 +71,8 @@ const billingLabels: Record<string, string> = {
 
 interface SplitEntry {
   subaccountId: string;
-  percentage: number;
+  mode: 'PERCENT' | 'FIXED';
+  amount: number; // valor digitado (porcentagem 0-99.99 OU R$)
 }
 
 export default function ChargesPage() {
@@ -121,24 +123,29 @@ export default function ChargesPage() {
     },
   });
 
-  const totalSplitPercent = splits.reduce((sum, s) => sum + s.percentage, 0);
-  const mainAccountPercent = 100 - totalSplitPercent;
+  const numericValue = parseFloat(value || '0') || 0;
+  const totalSplitPercent = splits
+    .filter((s) => s.mode === 'PERCENT')
+    .reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
+  const totalFixed = splits
+    .filter((s) => s.mode === 'FIXED')
+    .reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
+  const remainingAfterFixed = Math.max(0, numericValue - totalFixed);
+  const percentValueSum = +(remainingAfterFixed * (totalSplitPercent / 100)).toFixed(2);
+  const mainAccountValue = +(numericValue - totalFixed - percentValueSum).toFixed(2);
+  const mainAccountPercent = numericValue > 0 ? +((mainAccountValue / numericValue) * 100).toFixed(2) : 0;
 
   const addSplit = () => {
-    setSplits([...splits, { subaccountId: '', percentage: 0 }]);
+    setSplits([...splits, { subaccountId: '', mode: 'PERCENT', amount: 0 }]);
   };
 
   const removeSplit = (index: number) => {
     setSplits(splits.filter((_, i) => i !== index));
   };
 
-  const updateSplit = (index: number, field: keyof SplitEntry, val: string | number) => {
+  const updateSplit = (index: number, patch: Partial<SplitEntry>) => {
     const updated = [...splits];
-    if (field === 'percentage') {
-      updated[index] = { ...updated[index], percentage: Number(val) };
-    } else {
-      updated[index] = { ...updated[index], subaccountId: val as string };
-    }
+    updated[index] = { ...updated[index], ...patch };
     setSplits(updated);
   };
 
@@ -162,7 +169,15 @@ export default function ChargesPage() {
       return;
     }
     if (splits.length > 0 && totalSplitPercent >= 100) {
-      toast.error('Total de splits deve ser menor que 100%');
+      toast.error('Total de splits percentuais deve ser menor que 100%');
+      return;
+    }
+    if (splits.length > 0 && totalFixed >= numericValue) {
+      toast.error('Total de splits com valor fixo deve ser menor que o valor da cobrança');
+      return;
+    }
+    if (splits.length > 0 && mainAccountValue <= 0) {
+      toast.error('A combinação de splits consumiria 100% do valor — sobra zero para a conta principal');
       return;
     }
     if (chargeType === 'CUSTOM' && !dueDate) {
@@ -188,7 +203,14 @@ export default function ChargesPage() {
       dueDate: dueDate || undefined,
       description: description || undefined,
       maxInstallments,
-      splits: splits.filter((s) => s.subaccountId && s.percentage > 0),
+      splits: splits
+        .filter((s) => s.subaccountId && s.amount > 0)
+        .map((s) => ({
+          subaccountId: s.subaccountId,
+          ...(s.mode === 'PERCENT'
+            ? { percentage: s.amount }
+            : { fixedValue: s.amount }),
+        })),
     });
   };
 
@@ -311,7 +333,7 @@ export default function ChargesPage() {
 
             {splits.map((split, idx) => (
               <div key={idx} className="flex items-center gap-3 mb-2">
-                <select value={split.subaccountId} onChange={(e) => updateSplit(idx, 'subaccountId', e.target.value)}
+                <select value={split.subaccountId} onChange={(e) => updateSplit(idx, { subaccountId: e.target.value })}
                   className="flex-1 rounded-lg border px-3 py-2 text-sm">
                   <option value="">Selecione (médico ou fornecedor)</option>
                   {doctors.length > 0 && (
@@ -325,11 +347,34 @@ export default function ChargesPage() {
                     </optgroup>
                   )}
                 </select>
+                <div className="flex items-center rounded-lg border overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => updateSplit(idx, { mode: 'PERCENT', amount: 0 })}
+                    className={`px-3 py-2 text-sm font-medium transition-colors ${split.mode === 'PERCENT' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    %
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updateSplit(idx, { mode: 'FIXED', amount: 0 })}
+                    className={`px-3 py-2 text-sm font-medium transition-colors ${split.mode === 'FIXED' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    R$
+                  </button>
+                </div>
                 <div className="flex items-center gap-1">
-                  <input type="number" min="0.01" max="99.99" step="0.01" value={split.percentage || ''}
-                    onChange={(e) => updateSplit(idx, 'percentage', e.target.value)}
-                    className="w-20 rounded-lg border px-2 py-2 text-sm text-center" placeholder="%" />
-                  <span className="text-gray-500 text-sm">%</span>
+                  <input
+                    type="number"
+                    min="0.01"
+                    max={split.mode === 'PERCENT' ? '99.99' : undefined}
+                    step="0.01"
+                    value={split.amount || ''}
+                    onChange={(e) => updateSplit(idx, { amount: Number(e.target.value) })}
+                    className="w-24 rounded-lg border px-2 py-2 text-sm text-center"
+                    placeholder={split.mode === 'PERCENT' ? '%' : 'R$'}
+                  />
+                  <span className="text-gray-500 text-sm w-6">{split.mode === 'PERCENT' ? '%' : 'R$'}</span>
                 </div>
                 <button onClick={() => removeSplit(idx)} className="text-red-400 hover:text-red-600">
                   <XCircle size={20} />
@@ -337,31 +382,40 @@ export default function ChargesPage() {
               </div>
             ))}
 
+            {splits.length > 0 && (
+              <p className="text-xs text-gray-500 mt-1 mb-2">
+                💡 Splits com <strong>R$</strong> (valor fixo) são descontados primeiro. Os splits com <strong>%</strong> incidem sobre o valor restante.
+              </p>
+            )}
+
             {/* Resumo do split */}
             <div className="mt-3 p-3 bg-gray-50 rounded-lg">
-              <div className="flex justify-between text-sm">
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
                 {splits.map((s, idx) => {
                   const sub = allRecipients.find((r) => r.id === s.subaccountId);
-                  return s.subaccountId ? (
-                    <span key={idx} className={`${sub?.type === 'DOCTOR' ? 'text-blue-600' : 'text-orange-600'}`}>
-                      {sub?.name}: {s.percentage}%
+                  if (!s.subaccountId) return null;
+                  const label = s.mode === 'PERCENT' ? `${s.amount}%` : formatCurrency(s.amount);
+                  return (
+                    <span key={idx} className={sub?.type === 'DOCTOR' ? 'text-blue-600' : 'text-orange-600'}>
+                      {sub?.name}: {label}
                     </span>
-                  ) : null;
+                  );
                 })}
-                <span className={`font-semibold ${mainAccountPercent < 0 ? 'text-red-600' : 'text-green-700'}`}>
+                <span className={`ml-auto font-semibold ${mainAccountValue < 0 ? 'text-red-600' : 'text-green-700'}`}>
                   Conta Principal: {mainAccountPercent.toFixed(2)}%
                 </span>
               </div>
-              {value && (
-                <div className="flex justify-between text-xs text-gray-500 mt-1">
+              {numericValue > 0 && (
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 mt-1">
                   {splits.map((s, idx) => {
                     const sub = allRecipients.find((r) => r.id === s.subaccountId);
-                    const val = (parseFloat(value) * s.percentage) / 100;
-                    return s.subaccountId ? (
-                      <span key={idx}>{sub?.name}: {formatCurrency(val)}</span>
-                    ) : null;
+                    if (!s.subaccountId) return null;
+                    const val = s.mode === 'FIXED'
+                      ? s.amount
+                      : (remainingAfterFixed * s.amount) / 100;
+                    return <span key={idx}>{sub?.name}: {formatCurrency(val)}</span>;
                   })}
-                  <span>Conta Principal: {formatCurrency((parseFloat(value || '0') * mainAccountPercent) / 100)}</span>
+                  <span className="ml-auto">Conta Principal: {formatCurrency(mainAccountValue)}</span>
                 </div>
               )}
             </div>
@@ -435,7 +489,7 @@ export default function ChargesPage() {
                       <>
                         {charge.splits.map((s, i) => (
                           <div key={i} className={s.subaccount.type === 'DOCTOR' ? 'text-blue-600' : 'text-orange-600'}>
-                            {s.subaccount.name}: {Number(s.percentage)}%
+                            {s.subaccount.name}: {s.fixedValue != null ? formatCurrency(Number(s.fixedValue)) : `${Number(s.percentage)}%`}
                           </div>
                         ))}
                         <div className="text-green-700 font-medium">Principal: {charge.mainAccountPercentage}%</div>

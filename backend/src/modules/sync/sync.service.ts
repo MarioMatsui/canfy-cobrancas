@@ -92,7 +92,7 @@ export class SyncService {
 
     // Para cobranças avulsas: busca splits reais da API do Asaas
     // Para reutilizáveis: calcula baseado no netValue (Asaas não faz split em payment links)
-    let asaasSplits: Array<{ walletId: string; totalValue: number; percentualValue: number }> = [];
+    let asaasSplits: Array<{ walletId: string; totalValue: number; percentualValue?: number; fixedValue?: number }> = [];
     if (charge.chargeType === 'CUSTOM') {
       try {
         const asaasPayment = await this.asaas.get<{ netValue: number; split: typeof asaasSplits }>(`/payments/${asaasPaymentId}`);
@@ -113,19 +113,24 @@ export class SyncService {
       }
     }
 
+    const totalFixed = charge.splits.reduce((sum, s) => sum + Number(s.fixedValue || 0), 0);
+    const remainingForPercent = netValue - totalFixed;
+
     for (const split of charge.splits) {
       const walletId = split.subaccount?.walletId;
       const asaasSplit = asaasSplits.find(s => s.walletId === walletId);
-      const splitValue = asaasSplit
-        ? asaasSplit.totalValue
-        : +(netValue * Number(split.percentage) / 100).toFixed(2);
+      const fallbackValue = split.fixedValue
+        ? Number(split.fixedValue)
+        : +(remainingForPercent * Number(split.percentage || 0) / 100).toFixed(2);
+      const splitValue = asaasSplit ? asaasSplit.totalValue : fallbackValue;
 
       await this.prisma.splitResult.create({
         data: {
           chargeId: charge.id,
           receiverSubaccountId: split.subaccountId,
           value: splitValue,
-          percentage: split.percentage,
+          percentage: split.percentage ?? null,
+          fixedValue: split.fixedValue ?? null,
           status: 'COMPLETED',
         },
       });

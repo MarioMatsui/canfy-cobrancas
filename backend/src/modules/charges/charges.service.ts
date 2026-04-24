@@ -23,11 +23,40 @@ export class ChargesService {
 
   async create(dto: CreateChargeDto) {
     const splits = dto.splits || [];
-    // Valida que as porcentagens de split não excedem 100%
-    const totalSplitPercent = splits.reduce((sum, s) => sum + s.percentage, 0);
+
+    // Valida cada split: deve ter percentage OU fixedValue, não ambos nem nenhum
+    for (const s of splits) {
+      const hasPct = s.percentage !== undefined && s.percentage !== null;
+      const hasFix = s.fixedValue !== undefined && s.fixedValue !== null;
+      if (hasPct === hasFix) {
+        throw new BadRequestException(
+          'Cada split deve ter percentage OU fixedValue (preencha exatamente um dos dois)',
+        );
+      }
+    }
+
+    // Valida que percentuais não excedem 100%
+    const totalSplitPercent = splits.reduce((sum, s) => sum + (Number(s.percentage) || 0), 0);
     if (totalSplitPercent >= 100) {
       throw new BadRequestException(
-        `Total de splits (${totalSplitPercent}%) deve ser menor que 100%. O restante vai para a conta principal.`,
+        `Total de splits percentuais (${totalSplitPercent}%) deve ser menor que 100%. O restante vai para a conta principal.`,
+      );
+    }
+
+    // Valida que valores fixos não excedem o valor da cobrança
+    const totalFixed = splits.reduce((sum, s) => sum + (Number(s.fixedValue) || 0), 0);
+    if (totalFixed >= dto.value) {
+      throw new BadRequestException(
+        `Total de splits com valor fixo (R$${totalFixed.toFixed(2)}) deve ser menor que o valor da cobrança (R$${dto.value.toFixed(2)}). O restante vai para a conta principal.`,
+      );
+    }
+
+    // Valida que fixos + percentuais sobre o restante não consomem tudo
+    const remainingAfterFixed = dto.value - totalFixed;
+    const percentValueSum = +(remainingAfterFixed * (totalSplitPercent / 100)).toFixed(2);
+    if (totalFixed + percentValueSum >= dto.value) {
+      throw new BadRequestException(
+        'A combinação de valores fixos + percentuais consumiria 100% ou mais do valor. Reduza os splits para sobrar algo para a conta principal.',
       );
     }
 
@@ -49,13 +78,18 @@ export class ChargesService {
       }
     }
 
-    // Monta payload para o Asaas
-    const asaasSplits = subaccounts.map((sub) => {
-      const splitDto = splits.find((s) => s.subaccountId === sub.id)!;
-      return {
+    // Monta payload para o Asaas (usa percentualValue OU fixedValue)
+    const asaasSplits = splits.map((splitDto) => {
+      const sub = subaccounts.find((s) => s.id === splitDto.subaccountId)!;
+      const item: { walletId: string | null; percentualValue?: number; fixedValue?: number } = {
         walletId: sub.walletId,
-        percentualValue: splitDto.percentage,
       };
+      if (splitDto.fixedValue !== undefined && splitDto.fixedValue !== null) {
+        item.fixedValue = splitDto.fixedValue;
+      } else {
+        item.percentualValue = splitDto.percentage;
+      }
+      return item;
     });
 
     let charge;
@@ -119,19 +153,21 @@ export class ChargesService {
         splits: {
           create: splits.map((s) => ({
             subaccountId: s.subaccountId,
-            percentage: s.percentage,
+            percentage: s.percentage ?? null,
+            fixedValue: s.fixedValue ?? null,
           })),
         },
       },
       include: { splits: { include: { subaccount: { select: { name: true, type: true } } } } },
     });
 
-    const mainAccountPercent = 100 - totalSplitPercent;
+    const mainAccountValue = +(dto.value - totalFixed - percentValueSum).toFixed(2);
+    const mainAccountPercentage = dto.value > 0 ? +((mainAccountValue / dto.value) * 100).toFixed(2) : 0;
     this.logger.log(
-      `Cobrança criada: ${charge.id} | R$${dto.value} | Splits: ${splits.length} dest. + ${mainAccountPercent}% conta principal`,
+      `Cobrança criada: ${charge.id} | R$${dto.value} | Splits: ${splits.length} dest. (R$${totalFixed.toFixed(2)} fixos + ${totalSplitPercent}%) → Principal: ~R$${mainAccountValue.toFixed(2)}`,
     );
 
-    return { ...charge, mainAccountPercentage: mainAccountPercent };
+    return { ...charge, mainAccountValue, mainAccountPercentage };
   }
 
   async findAll(query: ListChargesDto) {
@@ -167,10 +203,16 @@ export class ChargesService {
       this.prisma.charge.count({ where }),
     ]);
 
-    // Calcula % da conta principal para cada cobrança
+    // Calcula % e valor da conta principal para cada cobrança
     const dataWithMain = data.map((charge) => {
-      const totalSplit = charge.splits.reduce((sum, s) => sum + Number(s.percentage), 0);
-      return { ...charge, mainAccountPercentage: 100 - totalSplit };
+      const value = Number(charge.value);
+      const totalFixed = charge.splits.reduce((sum, s) => sum + Number(s.fixedValue || 0), 0);
+      const totalPct = charge.splits.reduce((sum, s) => sum + Number(s.percentage || 0), 0);
+      const remaining = value - totalFixed;
+      const pctValue = +(remaining * (totalPct / 100)).toFixed(2);
+      const mainValue = +(value - totalFixed - pctValue).toFixed(2);
+      const mainPct = value > 0 ? +((mainValue / value) * 100).toFixed(2) : 0;
+      return { ...charge, mainAccountPercentage: mainPct, mainAccountValue: mainValue };
     });
 
     return { data: dataWithMain, total, page, limit, totalPages: Math.ceil(total / limit) };
@@ -190,8 +232,14 @@ export class ChargesService {
     });
     if (!charge) throw new NotFoundException('Cobrança não encontrada');
 
-    const totalSplit = charge.splits.reduce((sum, s) => sum + Number(s.percentage), 0);
-    return { ...charge, mainAccountPercentage: 100 - totalSplit };
+    const value = Number(charge.value);
+    const totalFixed = charge.splits.reduce((sum, s) => sum + Number(s.fixedValue || 0), 0);
+    const totalPct = charge.splits.reduce((sum, s) => sum + Number(s.percentage || 0), 0);
+    const remaining = value - totalFixed;
+    const pctValue = +(remaining * (totalPct / 100)).toFixed(2);
+    const mainValue = +(value - totalFixed - pctValue).toFixed(2);
+    const mainPct = value > 0 ? +((mainValue / value) * 100).toFixed(2) : 0;
+    return { ...charge, mainAccountPercentage: mainPct, mainAccountValue: mainValue };
   }
 
   async cancel(id: string) {

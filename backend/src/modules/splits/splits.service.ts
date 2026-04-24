@@ -21,20 +21,29 @@ export class SplitsService {
     });
     if (!charge) throw new NotFoundException('Cobrança não encontrada');
 
-    const totalSplitPercent = charge.splits.reduce((sum, s) => sum + Number(s.percentage), 0);
-    const mainAccountPercent = 100 - totalSplitPercent;
-    const mainAccountValue = (Number(charge.value) * mainAccountPercent) / 100;
+    const value = Number(charge.value);
+    const totalFixed = charge.splits.reduce((sum, s) => sum + Number(s.fixedValue || 0), 0);
+    const totalPct = charge.splits.reduce((sum, s) => sum + Number(s.percentage || 0), 0);
+    const remaining = value - totalFixed;
+    const mainAccountValue = +(remaining * (1 - totalPct / 100)).toFixed(2);
+    const mainAccountPercent = value > 0 ? +((mainAccountValue / value) * 100).toFixed(2) : 0;
 
     return {
       chargeId: charge.id,
       chargeValue: charge.value,
-      splits: charge.splits.map((s) => ({
-        subaccountId: s.subaccountId,
-        subaccountName: s.subaccount.name,
-        subaccountType: s.subaccount.type,
-        percentage: s.percentage,
-        calculatedValue: (Number(charge.value) * Number(s.percentage)) / 100,
-      })),
+      splits: charge.splits.map((s) => {
+        const calculatedValue = s.fixedValue
+          ? Number(s.fixedValue)
+          : +((remaining * Number(s.percentage || 0)) / 100).toFixed(2);
+        return {
+          subaccountId: s.subaccountId,
+          subaccountName: s.subaccount.name,
+          subaccountType: s.subaccount.type,
+          percentage: s.percentage,
+          fixedValue: s.fixedValue,
+          calculatedValue,
+        };
+      }),
       mainAccount: {
         percentage: mainAccountPercent,
         calculatedValue: mainAccountValue,

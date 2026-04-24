@@ -7,7 +7,8 @@ import api from '@/lib/api';
 interface SplitHistory {
   id: string;
   value: number;
-  percentage: number;
+  percentage: number | null;
+  fixedValue: number | null;
   status: string;
   createdAt: string;
   charge: { asaasId: string; value: number; status: string; customerName: string; description: string };
@@ -86,7 +87,7 @@ export default function SplitsPage() {
               <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Recebedor</th>
               <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Cliente</th>
               <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase">Valor Cobrança</th>
-              <th className="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase">%</th>
+              <th className="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase">Tipo</th>
               <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase">Valor Split</th>
               <th className="text-center px-6 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
               <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase">Data</th>
@@ -118,7 +119,9 @@ export default function SplitsPage() {
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-600">{sr.charge.customerName}</td>
                   <td className="px-6 py-4 text-sm text-right">{formatCurrency(sr.charge.value)}</td>
-                  <td className="px-6 py-4 text-sm text-center">{Number(sr.percentage)}%</td>
+                  <td className="px-6 py-4 text-sm text-center">
+                    {sr.fixedValue != null ? `R$ fixo` : `${Number(sr.percentage)}%`}
+                  </td>
                   <td className="px-6 py-4 text-sm text-right font-semibold">{formatCurrency(sr.value)}</td>
                   <td className="px-6 py-4 text-center">
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${

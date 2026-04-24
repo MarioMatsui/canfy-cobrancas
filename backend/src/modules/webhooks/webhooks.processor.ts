@@ -60,7 +60,7 @@ export class WebhooksProcessor {
     // Busca detalhes completos do pagamento (netValue, paymentLink, split)
     let netValue: number | undefined;
     let paymentLinkId: string | undefined;
-    let asaasSplits: Array<{ walletId: string; totalValue: number; percentualValue: number }> = [];
+    let asaasSplits: Array<{ walletId: string; totalValue: number; percentualValue?: number; fixedValue?: number }> = [];
     try {
       const asaasPayment = await this.asaas.get<{
         netValue: number;
@@ -103,20 +103,24 @@ export class WebhooksProcessor {
     const existingSplits = await this.prisma.splitResult.count({ where: { chargeId: charge.id } });
     if (existingSplits === 0 && charge.splits.length > 0) {
       const paymentNetValue = netValue || Number(charge.value);
+      const totalFixed = charge.splits.reduce((sum, s) => sum + Number(s.fixedValue || 0), 0);
+      const remainingForPercent = paymentNetValue - totalFixed;
 
       for (const split of charge.splits) {
         const walletId = split.subaccount?.walletId;
         const asaasSplit = asaasSplits.find(s => s.walletId === walletId);
-        const splitValue = asaasSplit
-          ? asaasSplit.totalValue
-          : +(paymentNetValue * Number(split.percentage) / 100).toFixed(2);
+        const fallbackValue = split.fixedValue
+          ? Number(split.fixedValue)
+          : +(remainingForPercent * Number(split.percentage || 0) / 100).toFixed(2);
+        const splitValue = asaasSplit ? asaasSplit.totalValue : fallbackValue;
 
         await this.prisma.splitResult.create({
           data: {
             chargeId: charge.id,
             receiverSubaccountId: split.subaccountId,
             value: splitValue,
-            percentage: split.percentage,
+            percentage: split.percentage ?? null,
+            fixedValue: split.fixedValue ?? null,
             status: 'COMPLETED',
           },
         });

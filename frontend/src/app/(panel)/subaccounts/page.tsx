@@ -32,7 +32,8 @@ interface FinancialHistory {
   splitResults: Array<{
     id: string;
     value: number;
-    percentage: number;
+    percentage: number | null;
+    fixedValue: number | null;
     status: string;
     createdAt: string;
     charge: { id: string; customerName: string; value: number; status: string };
@@ -497,7 +498,7 @@ export default function SubaccountsPage() {
                         <tr>
                           <th className="text-left px-4 py-2">Cliente</th>
                           <th className="text-right px-4 py-2">Valor Cobrança</th>
-                          <th className="text-right px-4 py-2">%</th>
+                          <th className="text-right px-4 py-2">Tipo</th>
                           <th className="text-right px-4 py-2">Recebido</th>
                           <th className="text-center px-4 py-2">Status</th>
                           <th className="text-right px-4 py-2">Data</th>
@@ -508,7 +509,7 @@ export default function SubaccountsPage() {
                           <tr key={sr.id}>
                             <td className="px-4 py-2">{sr.charge.customerName}</td>
                             <td className="px-4 py-2 text-right">{formatCurrency(sr.charge.value)}</td>
-                            <td className="px-4 py-2 text-right">{Number(sr.percentage)}%</td>
+                            <td className="px-4 py-2 text-right">{sr.fixedValue != null ? 'R$ fixo' : `${Number(sr.percentage)}%`}</td>
                             <td className="px-4 py-2 text-right font-medium">{formatCurrency(sr.value)}</td>
                             <td className="px-4 py-2 text-center">
                               <span className={`text-xs px-2 py-0.5 rounded-full ${
