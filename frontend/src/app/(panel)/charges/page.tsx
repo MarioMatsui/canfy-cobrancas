@@ -48,6 +48,8 @@ interface PaginatedResponse {
 const statusColors: Record<string, string> = {
   PENDING: 'bg-yellow-100 text-yellow-800',
   CONFIRMED: 'bg-green-100 text-green-800',
+  RECEIVED: 'bg-green-100 text-green-800',
+  RECEIVED_IN_CASH: 'bg-green-100 text-green-800',
   OVERDUE: 'bg-red-100 text-red-800',
   REFUNDED: 'bg-gray-100 text-gray-800',
   CANCELLED: 'bg-gray-100 text-gray-500',
@@ -56,6 +58,8 @@ const statusColors: Record<string, string> = {
 const statusLabels: Record<string, string> = {
   PENDING: 'Pendente',
   CONFIRMED: 'Pago',
+  RECEIVED: 'Pago',
+  RECEIVED_IN_CASH: 'Pago',
   OVERDUE: 'Atrasado',
   REFUNDED: 'Estornado',
   CANCELLED: 'Cancelado',
@@ -105,8 +109,8 @@ export default function ChargesPage() {
   });
 
   const { data: subaccounts } = useQuery<Subaccount[]>({
-    queryKey: ['subaccounts-list'],
-    queryFn: () => api.get('/subaccounts', { params: { limit: 100 } }).then((r) => r.data.data),
+    queryKey: ['subaccounts-list-active'],
+    queryFn: () => api.get('/subaccounts', { params: { limit: 100, active: true } }).then((r) => r.data.data),
   });
 
   const createMutation = useMutation({
@@ -304,11 +308,11 @@ export default function ChargesPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Parcelas (max 5)
+                Parcelas (máx 24)
               </label>
               <select value={maxInstallments} onChange={(e) => setMaxInstallments(Number(e.target.value))}
                 className="w-full rounded-lg border px-3 py-2 text-sm">
-                {Array.from({ length: 5 }, (_, i) => i + 1).map((n) => (
+                {Array.from({ length: 24 }, (_, i) => i + 1).map((n) => (
                   <option key={n} value={n}>{n}x</option>
                 ))}
               </select>
@@ -445,8 +449,8 @@ export default function ChargesPage() {
       </div>
 
       {/* Tabela */}
-      <div className="bg-white rounded-xl border overflow-hidden">
-        <table className="w-full">
+      <div className="bg-white rounded-xl border overflow-x-auto">
+        <table className="w-full min-w-[900px]">
           <thead className="bg-gray-50 border-b">
             <tr>
               <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">Tipo</th>

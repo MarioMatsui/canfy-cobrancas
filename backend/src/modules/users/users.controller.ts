@@ -41,7 +41,7 @@ export class UsersController {
 
   @Put('me')
   @ApiOperation({ summary: 'Atualizar perfil (nome, email, senha)' })
-  updateMe(@Request() req: { user: { id: string } }, @Body() dto: UpdateProfileDto) {
-    return this.usersService.updateProfile(req.user.id, dto);
+  updateMe(@Request() req: { user: { id: string; role: string } }, @Body() dto: UpdateProfileDto) {
+    return this.usersService.updateProfile(req.user.id, req.user.role, dto);
   }
 }

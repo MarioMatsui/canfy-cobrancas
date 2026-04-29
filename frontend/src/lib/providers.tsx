@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
 import { useState } from 'react';
 import { AuthProvider } from '@/contexts/auth';
+import { GlobalLoadingOverlay } from '@/components/global-loading-overlay';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -23,6 +24,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <AuthProvider>
         {children}
       </AuthProvider>
+      <GlobalLoadingOverlay />
       <Toaster position="top-right" />
     </QueryClientProvider>
   );

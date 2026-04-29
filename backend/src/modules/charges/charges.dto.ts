@@ -73,11 +73,11 @@ export class CreateChargeDto {
   @IsOptional()
   description?: string;
 
-  @ApiPropertyOptional({ example: 5, description: 'Máximo de parcelas (1-5 custom, 1-3 reusable)' })
+  @ApiPropertyOptional({ example: 12, description: 'Número de parcelas (1-24)' })
   @IsNumber()
   @IsOptional()
   @Min(1)
-  @Max(5)
+  @Max(24)
   maxInstallments?: number;
 
   // Splits - array de destinatários (fornecedor, médico, etc.)

@@ -26,7 +26,8 @@ async function bootstrap() {
       const allowed = process.env.FRONTEND_URL
         ? process.env.FRONTEND_URL.split(',')
         : ['http://localhost:3000', 'http://localhost:3002'];
-      if (!origin || allowed.some(u => origin.startsWith(u))) {
+      const isTryCloudflare = origin && /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(origin);
+      if (!origin || isTryCloudflare || allowed.some(u => origin.startsWith(u))) {
         callback(null, true);
       } else {
         callback(new Error('Origem não permitida pelo CORS'));

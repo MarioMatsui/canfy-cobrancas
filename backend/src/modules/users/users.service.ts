@@ -51,10 +51,13 @@ export class UsersService {
     return { message: 'Usuário excluído' };
   }
 
-  async updateProfile(id: string, dto: UpdateProfileDto) {
+  async updateProfile(id: string, role: string, dto: UpdateProfileDto) {
     const data: Record<string, unknown> = {};
     if (dto.name) data.name = dto.name;
     if (dto.email) {
+      if (role !== 'ADMIN') {
+        throw new ForbiddenException('Apenas administradores podem alterar o email');
+      }
       const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
       if (existing && existing.id !== id) throw new BadRequestException('Email já em uso');
       data.email = dto.email;
