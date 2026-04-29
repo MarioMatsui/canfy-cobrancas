@@ -3,11 +3,13 @@
 import { useEffect, useState } from 'react';
 import { useIsFetching, useIsMutating } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
+import { useNavigation } from '@/contexts/navigation';
 
 export function GlobalLoadingOverlay() {
   const fetching = useIsFetching();
   const mutating = useIsMutating();
-  const busy = fetching + mutating > 0;
+  const { isNavigating } = useNavigation();
+  const busy = isNavigating || fetching + mutating > 0;
   const [show, setShow] = useState(false);
 
   useEffect(() => {
@@ -15,9 +17,11 @@ export function GlobalLoadingOverlay() {
       setShow(false);
       return;
     }
-    const t = setTimeout(() => setShow(true), 250);
+    // navigation clicks should feel instant; data-only refetches wait a bit
+    const delay = isNavigating ? 0 : 200;
+    const t = setTimeout(() => setShow(true), delay);
     return () => clearTimeout(t);
-  }, [busy]);
+  }, [busy, isNavigating]);
 
   if (!show) return null;
 

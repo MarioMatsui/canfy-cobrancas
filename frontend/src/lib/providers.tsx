@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
 import { useState } from 'react';
 import { AuthProvider } from '@/contexts/auth';
+import { NavigationProvider } from '@/contexts/navigation';
 import { GlobalLoadingOverlay } from '@/components/global-loading-overlay';
 
 export function Providers({ children }: { children: React.ReactNode }) {
@@ -21,10 +22,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        {children}
-      </AuthProvider>
-      <GlobalLoadingOverlay />
+      <NavigationProvider>
+        <AuthProvider>
+          {children}
+        </AuthProvider>
+        <GlobalLoadingOverlay />
+      </NavigationProvider>
       <Toaster position="top-right" />
     </QueryClientProvider>
   );

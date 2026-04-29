@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import {
@@ -14,6 +13,7 @@ import {
   UserCog,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth';
+import { NavLink } from '@/components/nav-link';
 
 const allMenuItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'ATTENDANT'] },
@@ -47,7 +47,7 @@ export function Sidebar() {
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">{menuItems.map((item) => {
           const isActive = pathname.startsWith(item.href);
           return (
-            <Link
+            <NavLink
               key={item.href}
               href={item.href}
               className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
@@ -58,7 +58,7 @@ export function Sidebar() {
             >
               <item.icon size={20} />
               <span>{item.label}</span>
-            </Link>
+            </NavLink>
           );
         })}
       </nav>
