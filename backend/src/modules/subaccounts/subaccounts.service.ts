@@ -29,6 +29,7 @@ export class SubaccountsService {
       postalCode: dto.postalCode,
       address: dto.address,
       addressNumber: dto.addressNumber,
+      complement: dto.complement,
       province: dto.province,
     };
 

@@ -8,6 +8,14 @@ export enum SubaccountTypeDto {
   OTHER = 'OTHER',
 }
 
+// Valores aceitos pela Asaas para pessoa jurídica (reference/criar-subconta)
+export enum CompanyTypeDto {
+  MEI = 'MEI',
+  LIMITED = 'LIMITED',
+  INDIVIDUAL = 'INDIVIDUAL',
+  ASSOCIATION = 'ASSOCIATION',
+}
+
 export class CreateSubaccountDto {
   @ApiProperty({ example: 'João Silva' })
   @IsString()
@@ -30,46 +38,45 @@ export class CreateSubaccountDto {
   @IsOptional()
   phone?: string;
 
-  @ApiPropertyOptional({ example: '11999999999' })
+  @ApiProperty({ example: '11999999999', description: 'Obrigatório pela Asaas para criação de subconta' })
+  @IsString()
+  mobilePhone!: string;
+
+  @ApiPropertyOptional({ enum: CompanyTypeDto, description: 'Tipo societário — somente para pessoa jurídica (CNPJ)' })
+  @IsEnum(CompanyTypeDto)
+  @IsOptional()
+  companyType?: CompanyTypeDto;
+
+  @ApiProperty({ example: '01001000', description: 'CEP, somente dígitos' })
+  @IsString()
+  postalCode!: string;
+
+  @ApiProperty({ example: 'Praça da Sé' })
+  @IsString()
+  address!: string;
+
+  @ApiProperty({ example: '1' })
+  @IsString()
+  addressNumber!: string;
+
+  @ApiPropertyOptional({ example: 'Apto 12' })
   @IsString()
   @IsOptional()
-  mobilePhone?: string;
+  complement?: string;
 
-  @ApiPropertyOptional({ example: 'MEI' })
+  @ApiProperty({ example: 'Sé', description: 'Bairro' })
   @IsString()
-  @IsOptional()
-  companyType?: string;
+  province!: string;
 
-  @ApiPropertyOptional({ example: '01001000' })
-  @IsString()
-  @IsOptional()
-  postalCode?: string;
-
-  @ApiPropertyOptional({ example: 'Praça da Sé' })
-  @IsString()
-  @IsOptional()
-  address?: string;
-
-  @ApiPropertyOptional({ example: '1' })
-  @IsString()
-  @IsOptional()
-  addressNumber?: string;
-
-  @ApiPropertyOptional({ example: 'Sé' })
-  @IsString()
-  @IsOptional()
-  province?: string;
-
-  @ApiPropertyOptional({ example: '1985-06-15', description: 'Data de nascimento (obrigatório para pessoa física)' })
+  @ApiPropertyOptional({ example: '1985-06-15', description: 'Data de nascimento — aplicável somente a pessoa física (CPF)' })
   @IsString()
   @IsOptional()
   birthDate?: string;
 
-  @ApiPropertyOptional({ example: 5000, description: 'Renda/faturamento mensal (obrigatório para abertura de conta)' })
-  @IsOptional()
+  @ApiProperty({ example: 5000, description: 'Renda/faturamento mensal — obrigatório pela Asaas' })
   @Type(() => Number)
   @IsNumber()
-  incomeValue?: number;
+  incomeValue!: number;
 }
 
 export class UpdateSubaccountDto {

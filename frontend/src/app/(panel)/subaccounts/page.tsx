@@ -48,6 +48,27 @@ const typeConfig: Record<SubaccountType, { label: string; icon: React.ElementTyp
   OTHER: { label: 'Outro', icon: UsersIcon, color: 'bg-gray-100 text-gray-800' },
 };
 
+// Tipo societário aceito pela Asaas para pessoa jurídica (reference/criar-subconta) —
+// não confundir com a classificação interna (Médico/Fornecedor/Outro) acima.
+const COMPANY_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'MEI', label: 'MEI' },
+  { value: 'LIMITED', label: 'Limitada (LTDA)' },
+  { value: 'INDIVIDUAL', label: 'Empresário Individual' },
+  { value: 'ASSOCIATION', label: 'Associação' },
+];
+
+function getDocumentType(cpfCnpj: string): 'CPF' | 'CNPJ' | null {
+  const digits = cpfCnpj.replace(/\D/g, '');
+  if (digits.length === 11) return 'CPF';
+  if (digits.length === 14) return 'CNPJ';
+  return null;
+}
+
+function formatCep(value: string) {
+  const digits = value.replace(/\D/g, '').slice(0, 8);
+  return digits.length > 5 ? `${digits.slice(0, 5)}-${digits.slice(5)}` : digits;
+}
+
 export default function SubaccountsPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
@@ -66,7 +87,15 @@ export default function SubaccountsPage() {
   const [formMobilePhone, setFormMobilePhone] = useState('');
   const [formBirthDate, setFormBirthDate] = useState('');
   const [formIncomeValue, setFormIncomeValue] = useState('');
+  const [formCompanyType, setFormCompanyType] = useState('');
+  const [formPostalCode, setFormPostalCode] = useState('');
+  const [formAddress, setFormAddress] = useState('');
+  const [formAddressNumber, setFormAddressNumber] = useState('');
+  const [formComplement, setFormComplement] = useState('');
+  const [formProvince, setFormProvince] = useState('');
   const [formWalletId, setFormWalletId] = useState('');
+
+  const docType = getDocumentType(formCpfCnpj);
 
   const { data, isLoading, refetch } = useQuery<PaginatedResponse>({
     queryKey: ['subaccounts', page, search, typeFilter],
@@ -119,23 +148,70 @@ export default function SubaccountsPage() {
     setFormMobilePhone('');
     setFormBirthDate('');
     setFormIncomeValue('');
+    setFormCompanyType('');
+    setFormPostalCode('');
+    setFormAddress('');
+    setFormAddressNumber('');
+    setFormComplement('');
+    setFormProvince('');
     setFormWalletId('');
   };
 
   const handleCreate = () => {
-    if (!formName || !formCpfCnpj || !formEmail) {
+    if (!formName.trim() || !formCpfCnpj.trim() || !formEmail.trim()) {
       toast.error('Preencha nome, CPF/CNPJ e email');
       return;
     }
+    if (!docType) {
+      toast.error('CPF/CNPJ inválido — informe 11 dígitos (CPF) ou 14 dígitos (CNPJ)');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formEmail.trim())) {
+      toast.error('Email inválido');
+      return;
+    }
+    const mobilePhone = (formMobilePhone || formPhone).trim();
+    if (!mobilePhone) {
+      toast.error('Celular é obrigatório (Asaas exige mobilePhone para criar a subconta)');
+      return;
+    }
+    if (!formIncomeValue || parseFloat(formIncomeValue) <= 0) {
+      toast.error('Renda/faturamento mensal é obrigatório');
+      return;
+    }
+    const postalCode = formPostalCode.replace(/\D/g, '');
+    if (postalCode.length !== 8) {
+      toast.error('CEP inválido — informe os 8 dígitos');
+      return;
+    }
+    if (!formAddress.trim()) {
+      toast.error('Logradouro é obrigatório');
+      return;
+    }
+    if (!formAddressNumber.trim()) {
+      toast.error('Número é obrigatório');
+      return;
+    }
+    if (!formProvince.trim()) {
+      toast.error('Bairro é obrigatório');
+      return;
+    }
+
     createMutation.mutate({
-      name: formName,
+      name: formName.trim(),
       cpfCnpj: formCpfCnpj.replace(/\D/g, ''),
-      email: formEmail,
+      email: formEmail.trim(),
       type: formType,
-      phone: formPhone || undefined,
-      mobilePhone: formMobilePhone || formPhone || undefined,
-      birthDate: formBirthDate || undefined,
-      incomeValue: formIncomeValue ? parseFloat(formIncomeValue) : undefined,
+      phone: formPhone.trim() || undefined,
+      mobilePhone,
+      birthDate: docType === 'CPF' && formBirthDate ? formBirthDate : undefined,
+      companyType: docType === 'CNPJ' && formCompanyType ? formCompanyType : undefined,
+      incomeValue: parseFloat(formIncomeValue),
+      postalCode,
+      address: formAddress.trim(),
+      addressNumber: formAddressNumber.trim(),
+      complement: formComplement.trim() || undefined,
+      province: formProvince.trim(),
     });
   };
 
@@ -292,19 +368,65 @@ export default function SubaccountsPage() {
                     className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="11999999999" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Celular</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Celular *</label>
                   <input value={formMobilePhone} onChange={(e) => setFormMobilePhone(e.target.value)}
                     className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="11999999999" />
                 </div>
+                {docType === 'CNPJ' ? (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de Empresa</label>
+                    <select value={formCompanyType} onChange={(e) => setFormCompanyType(e.target.value)}
+                      className="w-full rounded-lg border px-3 py-2 text-sm">
+                      <option value="">Selecione...</option>
+                      {COMPANY_TYPE_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Data de Nasc.</label>
+                    <input type="date" value={formBirthDate} onChange={(e) => setFormBirthDate(e.target.value)}
+                      className="w-full rounded-lg border px-3 py-2 text-sm" />
+                  </div>
+                )}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Data de Nasc.</label>
-                  <input type="date" value={formBirthDate} onChange={(e) => setFormBirthDate(e.target.value)}
-                    className="w-full rounded-lg border px-3 py-2 text-sm" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Renda mensal</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Renda mensal *</label>
                   <input type="number" step="0.01" value={formIncomeValue} onChange={(e) => setFormIncomeValue(e.target.value)}
                     className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="5000" />
+                </div>
+              </div>
+
+              <div className="border-t pt-4">
+                <h3 className="font-semibold text-gray-800 mb-3">Endereço</h3>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">CEP *</label>
+                    <input value={formPostalCode} onChange={(e) => setFormPostalCode(formatCep(e.target.value))}
+                      className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="00000-000" maxLength={9} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Logradouro *</label>
+                    <input value={formAddress} onChange={(e) => setFormAddress(e.target.value)}
+                      className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="Rua/Av." />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Número *</label>
+                    <input value={formAddressNumber} onChange={(e) => setFormAddressNumber(e.target.value)}
+                      className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="123" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4 mt-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Bairro *</label>
+                    <input value={formProvince} onChange={(e) => setFormProvince(e.target.value)}
+                      className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="Bairro" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Complemento</label>
+                    <input value={formComplement} onChange={(e) => setFormComplement(e.target.value)}
+                      className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="Apto, sala, etc. (opcional)" />
+                  </div>
                 </div>
               </div>
             </>

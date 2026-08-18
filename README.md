@@ -31,7 +31,7 @@ O sistema permite:
 - **Painel administrativo** com Dashboard, Cobranças, Splits, Webhooks, Usuários e Configurações
 - **Webhooks** para receber notificações de pagamento em tempo real
 - **Sincronização automática** a cada 5 minutos (caso algum webhook falhe)
-- **Gestão de usuários** com 3 papéis: ADMIN, MANAGER, ATTENDANT
+- **Gestão de usuários** com 2 papéis: `ADMIN` (único que pode criar/listar/excluir usuários) e `ATTENDANT` (acesso operacional completo — cobranças, subcontas, splits, webhooks)
 
 > **Importante:** Splits automáticos só funcionam em **cobranças avulsas** (`POST /payments`).
 > Links de pagamento (`POST /paymentLinks`) NÃO suportam split — limitação da própria API do Asaas.
@@ -123,11 +123,30 @@ npm run dev
 
 ### Criar primeiro usuário admin
 
+O endpoint `POST /auth/register` só pode ser chamado por um usuário `ADMIN` já autenticado — ou seja,
+não há como criar o primeiro admin pela API. Insira-o diretamente no banco:
+
 ```bash
 cd backend
-npx ts-node scripts/create-admin.ts
-# Ou via SQL direto no Postgres
+
+# 1. Gere salt + hash da senha (mesmo algoritmo usado pelo AuthService: PBKDF2-SHA512)
+node -e "
+const crypto = require('crypto');
+const password = 'SUA_SENHA_AQUI';
+const salt = crypto.randomBytes(32).toString('hex');
+const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
+console.log('salt:', salt);
+console.log('password (hash):', hash);
+"
 ```
+
+```sql
+-- 2. Insira o usuário usando os valores gerados acima
+INSERT INTO users (id, email, password, salt, name, role, created_at, updated_at)
+VALUES (gen_random_uuid(), 'admin@exemplo.com', '<hash>', '<salt>', 'Admin', 'ADMIN', now(), now());
+```
+
+Depois disso, use o painel (**Usuários**) ou `POST /auth/register` logado como esse admin para criar os demais.
 
 ---
 
@@ -156,8 +175,8 @@ ASAAS_API_URL=https://www.asaas.com/api/v3
 JWT_SECRET=string-aleatoria-de-pelo-menos-32-caracteres
 JWT_EXPIRES_IN=7d
 
-# Webhook (token que o Asaas vai enviar no header)
-ASAAS_WEBHOOK_TOKEN=token-aleatorio-para-validar-webhooks
+# Webhook (token que o Asaas vai enviar no header "asaas-access-token")
+WEBHOOK_SECRET=token-aleatorio-para-validar-webhooks
 
 # CORS (URL do frontend)
 FRONTEND_URL=https://cobranca.canfy.com.br
@@ -167,7 +186,7 @@ FRONTEND_URL=https://cobranca.canfy.com.br
 
 ```env
 NEXT_PUBLIC_API_URL=https://cobranca.canfy.com.br/api
-# Em desenvolvimento: http://localhost:3001
+# Em desenvolvimento: http://localhost:3001/api
 ```
 
 ---
@@ -213,6 +232,12 @@ pm2 start ecosystem.config.js
 pm2 save
 pm2 startup   # gera comando para iniciar no boot — execute o comando que aparecer
 ```
+
+> **Atenção:** o `ecosystem.config.js` atual sobe os processos com `npm run start:dev` (backend) e
+> `next dev` (frontend) — ou seja, roda em **modo desenvolvimento**, e não usa os builds gerados
+> nos passos 4 e 5. Funciona, mas sem as otimizações de produção. Para usar de fato o build,
+> troque os `args` do `ecosystem.config.js` para `start:prod` (backend, via `node dist/main`) e
+> `next start -p 3002` (frontend).
 
 ### Opção B — Docker Compose
 
@@ -352,7 +377,8 @@ POST https://cobranca.canfy.com.br/api/webhooks/asaas
 
 1. Painel Asaas → **Configurações** → **Integrações** → **Webhooks**
 2. Adicione a URL acima
-3. Token de autenticação: o mesmo valor de `ASAAS_WEBHOOK_TOKEN` no `.env`
+3. Token de autenticação: o mesmo valor de `WEBHOOK_SECRET` no `.env` (o Asaas envia esse valor no
+   header `asaas-access-token`, que é o que o backend valida)
 4. Eventos: marque **PAYMENT_CONFIRMED** e **PAYMENT_RECEIVED** no mínimo
 
 ### Eventos processados:
@@ -360,6 +386,9 @@ POST https://cobranca.canfy.com.br/api/webhooks/asaas
 - `PAYMENT_CONFIRMED` — pagamento confirmado pelo Asaas
 - `PAYMENT_RECEIVED` — valor disponível na conta
 - `PAYMENT_OVERDUE` — cobrança vencida
+- `PAYMENT_REFUNDED` / `PAYMENT_CHARGEBACK` — pagamento estornado
+
+Outros eventos são aceitos e logados, mas não alteram o status da cobrança.
 
 ---
 
@@ -408,97 +437,3 @@ Para suporte da API Asaas: https://docs.asaas.com/
 
 Software proprietário desenvolvido para uso exclusivo do cliente.
 Todos os direitos reservados.
-# AsaasSplit — Sistema de Gestão de Cobranças e Splits de Pagamento
-
-## Visão Geral
-
-Sistema completo para gestão de cobranças e splits de pagamento integrado à plataforma **Asaas**.
-Permite criação de subcontas, geração de cobranças (boleto, Pix, cartão), automação de splits e acompanhamento em tempo real via painel de gestão.
-
-## Stack Tecnológico
-
-| Camada     | Tecnologia                          |
-|------------|-------------------------------------|
-| Backend    | NestJS (Node.js) + TypeScript       |
-| Banco      | PostgreSQL + Prisma ORM             |
-| Frontend   | Next.js 14 + React + TailwindCSS    |
-| Auth       | JWT                                 |
-| Integração | API Asaas v3                        |
-| Deploy     | Vercel (front) + Railway (back) + Supabase (db) |
-
-## Estrutura do Repositório
-
-```
-├── backend/          # API NestJS
-│   ├── src/
-│   │   ├── modules/
-│   │   │   ├── auth/          # Autenticação JWT
-│   │   │   ├── subaccounts/   # Gestão de subcontas
-│   │   │   ├── charges/       # Geração de cobranças
-│   │   │   ├── splits/        # Automação de splits
-│   │   │   ├── webhooks/      # Recebimento de eventos Asaas
-│   │   │   ├── sync/          # Sincronização periódica
-│   │   │   └── dashboard/     # Dados do painel
-│   │   ├── common/            # Guards, interceptors, filters
-│   │   └── asaas/             # Client SDK do Asaas
-│   └── prisma/                # Schema e migrations
-├── frontend/         # Painel Next.js
-│   └── src/
-│       ├── app/               # App Router
-│       ├── components/        # Componentes reutilizáveis
-│       ├── lib/               # API client, utils
-│       └── hooks/             # Custom hooks
-├── docs/             # Documentação
-└── docker-compose.yml
-```
-
-## Setup Local
-
-```bash
-# 1. Clonar e instalar
-git clone <repo>
-cd asaas-split
-
-# 2. Subir infra local
-docker-compose up -d
-
-# 3. Backend
-cd backend
-cp .env.example .env
-npm install
-npx prisma migrate dev
-npm run start:dev
-
-# 4. Frontend
-cd frontend
-cp .env.example .env.local
-npm install
-npm run dev
-```
-
-## Variáveis de Ambiente
-
-### Backend (.env)
-```
-DATABASE_URL=postgresql://user:pass@localhost:5432/asaas_split
-ASAAS_API_KEY=seu_api_key
-ASAAS_API_URL=https://sandbox.asaas.com/api/v3
-JWT_SECRET=seu_jwt_secret
-WEBHOOK_SECRET=seu_webhook_secret
-```
-
-### Frontend (.env.local)
-```
-NEXT_PUBLIC_API_URL=http://localhost:3001
-```
-
-## Cliente
-
-- **Nome:** Mario Matsui Fumura
-- **Plataforma:** Workana
-- **Contrato:** R$ 2.400,00
-- **Prazo:** 12 dias úteis (aceito em 06/04/2026)
-
-## Autor
-
-Gabriel Gomes Santos Barreto — Desenvolvedor Backend & Integrações de Pagamento
