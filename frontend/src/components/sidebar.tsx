@@ -41,7 +41,6 @@ export function Sidebar() {
     <aside className="w-64 shrink-0 bg-gray-900 text-white sticky top-0 h-screen flex flex-col">
       <div className="p-6 border-b border-gray-800">
         <Image src="/logo-canfy.svg" alt="Canfy" width={150} height={48} className="brightness-100" />
-        <p className="text-gray-400 text-sm mt-1">Gestão de Pagamentos</p>
       </div>
 
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">{menuItems.map((item) => {
