@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, ToggleLeft, ToggleRight, History, Stethoscope, Package, Users as UsersIcon, X, Link2, Trash2 } from 'lucide-react';
+import { Plus, Search, ToggleLeft, ToggleRight, History, Stethoscope, Package, Users as UsersIcon, X, Link2, Trash2, MailCheck } from 'lucide-react';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
@@ -17,6 +17,7 @@ interface Subaccount {
   active: boolean;
   balance: number;
   totalReceived: number;
+  canResendActivation?: boolean;
   _count: { chargeSplits: number; splitResults: number };
   createdAt: string;
 }
@@ -137,6 +138,26 @@ export default function SubaccountsPage() {
     },
   });
 
+  const [resendingId, setResendingId] = useState<string | null>(null);
+
+  const resendActivationMutation = useMutation({
+    mutationFn: (id: string) => api.post(`/subaccounts/${id}/resend-activation`),
+    onMutate: (id: string) => setResendingId(id),
+    onSuccess: () => {
+      toast.success('Novo link de ativação enviado pelo Asaas.');
+      queryClient.invalidateQueries({ queryKey: ['subaccounts'] });
+    },
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { details?: { errors?: { description?: string }[] }; message?: string } } };
+      const msg =
+        err.response?.data?.details?.errors?.[0]?.description ||
+        err.response?.data?.message ||
+        'Erro ao reenviar link de ativação';
+      toast.error(msg);
+    },
+    onSettled: () => setResendingId(null),
+  });
+
   const resetForm = () => {
     setShowForm(false);
     setFormMode('create');
@@ -252,6 +273,15 @@ export default function SubaccountsPage() {
     } catch {
       toast.error('Erro ao excluir subconta');
     }
+  };
+
+  const resendActivation = (id: string, email: string) => {
+    const emailInfo = email ? `\n\nE-mail cadastrado: ${email}` : '';
+    const confirmed = confirm(
+      `Reenviar o link de ativação para esta subconta?\n\nO Asaas permite apenas um reenvio do link de ativação. Utilize esta opção quando o link original tiver expirado.\n\nO novo link será enviado pelo Asaas ao e-mail de login cadastrado da subconta.${emailInfo}`,
+    );
+    if (!confirmed) return;
+    resendActivationMutation.mutate(id);
   };
 
   const formatCurrency = (value: number) =>
@@ -543,6 +573,16 @@ export default function SubaccountsPage() {
                         >
                           {sub.active ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}
                         </button>
+                        {sub.canResendActivation && (
+                          <button
+                            onClick={() => resendActivation(sub.id, sub.email)}
+                            disabled={resendingId === sub.id}
+                            className="text-gray-400 hover:text-blue-600 transition-colors disabled:opacity-50"
+                            title="Reenviar link de ativação"
+                          >
+                            <MailCheck size={18} />
+                          </button>
+                        )}
                         <button
                           onClick={() => deleteSubaccount(sub.id, sub.name)}
                           className="text-gray-400 hover:text-red-600 transition-colors"

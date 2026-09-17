@@ -7,6 +7,10 @@ import { CreateSubaccountDto, UpdateSubaccountDto, ListSubaccountsDto, LinkExist
 export class SubaccountsService {
   private readonly logger = new Logger(SubaccountsService.name);
 
+  // Tempo de vida do cache do status geral do Asaas (GET /myAccount/status),
+  // para evitar consultar o Asaas a cada renderização da lista de subcontas.
+  private readonly STATUS_CACHE_TTL_MS = 10 * 60 * 1000;
+
   constructor(
     private prisma: PrismaService,
     private asaas: AsaasService,
@@ -15,6 +19,92 @@ export class SubaccountsService {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private sanitize<T extends { apiKey?: string | null }>({ apiKey, ...rest }: T) {
     return rest;
+  }
+
+  // Subcontas "vinculadas externamente" sem correspondência real no Asaas
+  // recebem um asaasId sintético (ver linkExisting). Nunca são elegíveis
+  // para operações que dependem de um ID de conta Asaas real.
+  private isRealAsaasId(asaasId: string | null | undefined): boolean {
+    return !!asaasId && !asaasId.startsWith('external_');
+  }
+
+  // Consulta GET /myAccount/status (com a apiKey DA PRÓPRIA SUBCONTA) e atualiza
+  // o cache local (asaasGeneralStatus/asaasStatusCheckedAt). Nunca lança: se a
+  // consulta falhar, registra um warning e preserva o último status conhecido,
+  // para que uma falha isolada nunca derrube a listagem inteira de subcontas.
+  private async refreshAsaasStatus<
+    T extends {
+      id: string;
+      asaasId: string;
+      apiKey: string | null;
+      asaasGeneralStatus: string | null;
+      asaasStatusCheckedAt: Date | null;
+    },
+  >(subaccount: T): Promise<T> {
+    if (!subaccount.apiKey || !this.isRealAsaasId(subaccount.asaasId)) {
+      return subaccount;
+    }
+
+    const isStale =
+      !subaccount.asaasStatusCheckedAt ||
+      Date.now() - subaccount.asaasStatusCheckedAt.getTime() > this.STATUS_CACHE_TTL_MS;
+
+    if (!isStale) {
+      return subaccount;
+    }
+
+    try {
+      const status = await this.asaas.requestWithApiKey<{ general?: string }>(
+        'GET',
+        '/myAccount/status',
+        subaccount.apiKey,
+      );
+
+      const asaasGeneralStatus = status?.general ?? null;
+      const asaasStatusCheckedAt = new Date();
+
+      await this.prisma.subaccount.update({
+        where: { id: subaccount.id },
+        data: { asaasGeneralStatus, asaasStatusCheckedAt },
+      });
+
+      return { ...subaccount, asaasGeneralStatus, asaasStatusCheckedAt };
+    } catch (error) {
+      this.logger.warn(
+        `Falha ao consultar status Asaas (myAccount/status) da subconta ${subaccount.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      // Preserva o último status conhecido em vez de propagar o erro.
+      return subaccount;
+    }
+  }
+
+  // Calcula se a ação "Reenviar link de ativação" pode ser oferecida.
+  //
+  // IMPORTANTE: asaasGeneralStatus !== 'APPROVED' significa apenas que a
+  // aprovação cadastral da conta ainda está em andamento — NÃO significa que
+  // o e-mail de ativação não foi confirmado, nem que o link expirou. A
+  // elegibilidade real do reenvio é sempre validada pelo próprio Asaas em
+  // POST /accounts/{id}/resendActivationLink; este campo só controla se a
+  // ação de recuperação é exibida como opção.
+  private computeCanResendActivation(subaccount: {
+    deletedAt: Date | null;
+    asaasId: string;
+    email: string | null;
+    activationResentAt: Date | null;
+    asaasGeneralStatus: string | null;
+  }): boolean {
+    if (subaccount.deletedAt) return false;
+    if (!this.isRealAsaasId(subaccount.asaasId)) return false;
+    if (!subaccount.email) return false;
+    // O Asaas permite apenas um reenvio — se já usamos, nunca mais oferecer.
+    if (subaccount.activationResentAt) return false;
+    // Status desconhecido (nunca consultado com sucesso): comportamento
+    // conservador — não afirma que está pendente nem que está aprovado.
+    if (!subaccount.asaasGeneralStatus) return false;
+    if (subaccount.asaasGeneralStatus === 'APPROVED') return false;
+    return true;
   }
 
   async create(dto: CreateSubaccountDto) {
@@ -181,8 +271,16 @@ export class SubaccountsService {
     });
     const revenueMap = new Map(splitAgg.map(a => [a.receiverSubaccountId, Number(a._sum.value || 0)]));
 
+    // Atualiza o cache de status Asaas (com TTL) de cada subconta em paralelo.
+    // refreshAsaasStatus nunca lança — uma falha isolada não derruba a listagem.
+    const withStatus = await Promise.all(data.map((s) => this.refreshAsaasStatus(s)));
+
     return {
-      data: data.map(s => ({ ...this.sanitize(s), totalReceived: revenueMap.get(s.id) || 0 })),
+      data: withStatus.map(s => ({
+        ...this.sanitize(s),
+        totalReceived: revenueMap.get(s.id) || 0,
+        canResendActivation: this.computeCanResendActivation(s),
+      })),
       total, page, limit, totalPages: Math.ceil(total / limit),
     };
   }
@@ -195,7 +293,7 @@ export class SubaccountsService {
       },
     });
     if (!subaccount) throw new NotFoundException('Subconta não encontrada');
-    return this.sanitize(subaccount);
+    return { ...this.sanitize(subaccount), canResendActivation: this.computeCanResendActivation(subaccount) };
   }
 
   async getFinancialHistory(id: string) {
@@ -251,6 +349,48 @@ export class SubaccountsService {
 
     this.logger.log(`Subconta removida (soft delete): ${subaccount.name} — Asaas: ${subaccount.asaasId}`);
     return this.sanitize(updated);
+  }
+
+  // Reenvia o e-mail de ativação da subconta Asaas (POST /accounts/{asaasId}/resendActivationLink),
+  // autenticado com a API Key DA CONTA-PAI (assim como as demais operações /accounts).
+  // O Asaas permite apenas UM reenvio por subconta, então activationResentAt só é
+  // gravado após confirmação real (204) do Asaas — nunca de forma otimista.
+  async resendActivation(id: string) {
+    const subaccount = await this.prisma.subaccount.findFirst({ where: { id, deletedAt: null } });
+    if (!subaccount) throw new NotFoundException('Subconta não encontrada');
+
+    if (!this.isRealAsaasId(subaccount.asaasId)) {
+      throw new BadRequestException(
+        'Esta subconta não possui um ID Asaas válido (conta vinculada externamente) — não é possível reenviar o link de ativação.',
+      );
+    }
+
+    if (subaccount.activationResentAt) {
+      throw new BadRequestException('O link de ativação desta subconta já foi reenviado anteriormente.');
+    }
+
+    if (subaccount.asaasGeneralStatus === 'APPROVED') {
+      throw new BadRequestException('Esta subconta já está aprovada pelo Asaas — o reenvio do link de ativação não é necessário.');
+    }
+
+    // Fonte final de verdade: se o Asaas recusar (já ativado, já reenviado,
+    // não elegível etc.), o erro é propagado com a mensagem original do Asaas
+    // e activationResentAt permanece null.
+    await this.asaas.post<void>(`/accounts/${subaccount.asaasId}/resendActivationLink`);
+
+    const resentAt = new Date();
+    await this.prisma.subaccount.update({
+      where: { id },
+      data: { activationResentAt: resentAt },
+    });
+
+    this.logger.log(`Link de ativação reenviado com sucesso — Asaas: ${subaccount.asaasId}`);
+
+    return {
+      success: true,
+      message: 'Novo link de ativação enviado com sucesso.',
+      resentAt,
+    };
   }
 
   async syncFromAsaas() {

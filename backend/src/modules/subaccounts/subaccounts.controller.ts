@@ -53,6 +53,12 @@ export class SubaccountsController {
     return this.subaccountsService.toggleActive(id);
   }
 
+  @Post(':id/resend-activation')
+  @ApiOperation({ summary: 'Reenviar link de ativação da subconta Asaas (permitido apenas uma vez por subconta)' })
+  resendActivation(@Param('id') id: string) {
+    return this.subaccountsService.resendActivation(id);
+  }
+
   @Delete(':id')
   @ApiOperation({ summary: 'Excluir subconta' })
   remove(@Param('id') id: string) {

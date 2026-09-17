@@ -61,6 +61,17 @@ model Subaccount {
   type        SubaccountType  @default(OTHER)
   active      Boolean         @default(true)
   balance     Decimal         @default(0) @db.Decimal(12, 2)
+
+  // Reenvio do link de ativação Asaas (POST /accounts/{id}/resendActivationLink).
+  // O Asaas permite apenas UM reenvio por subconta — activationResentAt guarda
+  // quando esse reenvio foi confirmado (204) para não oferecer a ação de novo.
+  activationResentAt   DateTime? @map("activation_resent_at")
+  // Cache do último status geral de aprovação cadastral (GET /myAccount/status,
+  // campo "general"), usado apenas para decidir se a conta ainda está em
+  // processo de aprovação — não indica se o e-mail de ativação foi confirmado.
+  asaasGeneralStatus   String?   @map("asaas_general_status")
+  asaasStatusCheckedAt DateTime? @map("asaas_status_checked_at")
+
   deletedAt   DateTime?       @map("deleted_at")
   createdAt   DateTime        @default(now()) @map("created_at")
   updatedAt   DateTime        @updatedAt @map("updated_at")

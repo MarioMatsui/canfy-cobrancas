@@ -20,6 +20,33 @@ export class AsaasService {
     };
   }
 
+  // Interpreta o corpo de uma resposta HTTP de forma segura.
+  // Endpoints como /accounts/{id}/resendActivationLink retornam 204 No Content
+  // (ou, em alguns casos, 200/201 com corpo vazio), e response.json() lançaria
+  // um erro de parse nesses casos. Qualquer corpo vazio vira `undefined`.
+  private async parseBody<T>(response: Response): Promise<T> {
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    const text = await response.text();
+
+    if (!text) {
+      return undefined as T;
+    }
+
+    return JSON.parse(text) as T;
+  }
+
+  private async parseErrorBody(response: Response): Promise<unknown> {
+    try {
+      const text = await response.text();
+      return text ? JSON.parse(text) : {};
+    } catch {
+      return {};
+    }
+  }
+
   async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const url = `${this.apiUrl}${path}`;
 
@@ -30,14 +57,14 @@ export class AsaasService {
       headers: this.headers,
     };
 
-    if (body && (method === 'POST' || method === 'PUT')) {
+    if (body !== undefined && (method === 'POST' || method === 'PUT')) {
       options.body = JSON.stringify(body);
     }
 
     const response = await fetch(url, options);
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
+      const error = await this.parseErrorBody(response);
       this.logger.error(`Asaas API error: ${response.status}`, error);
       throw new HttpException(
         {
@@ -50,14 +77,14 @@ export class AsaasService {
       );
     }
 
-    return response.json() as Promise<T>;
+    return this.parseBody<T>(response);
   }
 
   async get<T>(path: string): Promise<T> {
     return this.request<T>('GET', path);
   }
 
-  async post<T>(path: string, body: unknown): Promise<T> {
+  async post<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>('POST', path, body);
   }
 
@@ -81,14 +108,14 @@ export class AsaasService {
       },
     };
 
-    if (body && (method === 'POST' || method === 'PUT')) {
+    if (body !== undefined && (method === 'POST' || method === 'PUT')) {
       options.body = JSON.stringify(body);
     }
 
     const response = await fetch(url, options);
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
+      const error = await this.parseErrorBody(response);
       this.logger.error(`Asaas API error: ${response.status}`, error);
       throw new HttpException(
         { message: 'Erro na comunicação com o Asaas', details: error },
@@ -96,6 +123,6 @@ export class AsaasService {
       );
     }
 
-    return response.json() as Promise<T>;
+    return this.parseBody<T>(response);
   }
 }
