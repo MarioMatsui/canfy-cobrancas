@@ -28,3 +28,4 @@ Thumbs.db
 docs/
 .claude/
 .session/
+backend/tsconfig.build.tsbuildinfo
