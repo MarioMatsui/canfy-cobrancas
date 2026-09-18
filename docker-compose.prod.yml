@@ -38,15 +38,15 @@ services:
     container_name: asaas_split_backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/${DB_NAME:-asaas_split}
-      ASAAS_API_KEY: ${ASAAS_API_KEY}
-      ASAAS_API_URL: ${ASAAS_API_URL:-https://sandbox.asaas.com/api/v3}
-      JWT_SECRET: ${JWT_SECRET}
-      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      DATABASE_URL: ${DATABASE_URL:?defina no .env.production}
+      ASAAS_API_KEY: ${ASAAS_API_KEY:?}
+      ASAAS_API_URL: ${ASAAS_API_URL:?}
+      JWT_SECRET: ${JWT_SECRET:?}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:?}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       PORT: 3001
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+      FRONTEND_URL: ${FRONTEND_URL:?}
     depends_on:
       postgres:
         condition: service_healthy
