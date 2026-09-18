@@ -15,6 +15,7 @@ import { SyncModule } from './modules/sync/sync.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { UsersModule } from './modules/users/users.module';
+import { PublicCheckoutModule } from './modules/public-checkout/public-checkout.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -43,6 +44,7 @@ import { HealthController } from './health.controller';
     SplitsModule,
     SettingsModule,
     UsersModule,
+    PublicCheckoutModule,
     WebhooksModule,
     SyncModule,
     DashboardModule,

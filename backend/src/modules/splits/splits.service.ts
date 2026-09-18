@@ -15,7 +15,7 @@ export class SplitsService {
           include: { subaccount: { select: { id: true, name: true, type: true } } },
         },
         splitResults: {
-          include: { receiverSubaccount: { select: { id: true, name: true, type: true } } },
+          include: { receiver: { select: { id: true, name: true, type: true } } },
         },
       },
     });
@@ -62,7 +62,7 @@ export class SplitsService {
       where,
       include: {
         charge: { select: { asaasId: true, value: true, status: true, customerName: true, description: true } },
-        receiverSubaccount: { select: { name: true, type: true } },
+        receiver: { select: { name: true, type: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 100,

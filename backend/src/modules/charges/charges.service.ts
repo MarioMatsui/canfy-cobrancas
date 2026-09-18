@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from '@nes
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AsaasService } from '../../asaas/asaas.service';
 import { CreateChargeDto, ListChargesDto } from './charges.dto';
+import { randomUUID } from 'node:crypto';
 
 interface AsaasCharge {
   id: string;
@@ -62,7 +63,7 @@ export class ChargesService {
 
     // Valida que todas as subcontas existem e têm walletId
     const subaccountIds = splits.map((s) => s.subaccountId);
-    let subaccounts: { id: string; name: string; walletId: string | null }[] = [];
+    let subaccounts: { id: string; name: string; walletId: string | null; type: string }[] = [];
     if (subaccountIds.length > 0) {
       subaccounts = await this.prisma.subaccount.findMany({
         where: { id: { in: subaccountIds }, active: true },
@@ -77,6 +78,21 @@ export class ChargesService {
         throw new BadRequestException(`Subconta "${missingWallet.name}" não possui walletId do Asaas`);
       }
     }
+
+    // Classificação do destinatário do split (coluna recipientType, obrigatória).
+    // SubaccountType tem OTHER, mas SplitRecipientType não — então uma subconta
+    // OTHER não tem classificação possível e o cadastro é recusado aqui, em vez
+    // de gravar um rótulo falso que depois apareceria errado em relatórios.
+    const recipientTypeBySubaccount = new Map(
+      subaccounts.map((sub) => {
+        if (sub.type === 'DOCTOR') return [sub.id, 'DOCTOR' as const];
+        if (sub.type === 'SUPPLIER') return [sub.id, 'SUPPLIER' as const];
+        throw new BadRequestException(
+          `A subconta "${sub.name}" é do tipo ${sub.type} e ainda não tem classificação de split definida. ` +
+            `Os tipos aceitos hoje são DOCTOR e SUPPLIER.`,
+        );
+      }),
+    );
 
     // Monta payload para o Asaas (usa percentualValue OU fixedValue)
     const asaasSplits = splits.map((splitDto) => {
@@ -132,6 +148,9 @@ export class ChargesService {
       }
     }
 
+    const subtotal = dto.value;
+    const totalAmount = dto.value;
+
     charge = await this.prisma.charge.create({
       data: {
         asaasId: asaasCharge.id,
@@ -150,11 +169,16 @@ export class ChargesService {
         bankSlipUrl: asaasCharge.bankSlipUrl,
         pixQrCode: asaasCharge.pixQrCode,
         pixCopiaECola: asaasCharge.pixCopiaECola,
+        subtotal,
+        totalAmount,
+        publicToken: randomUUID(),
         splits: {
           create: splits.map((s) => ({
             subaccountId: s.subaccountId,
             percentage: s.percentage ?? null,
             fixedValue: s.fixedValue ?? null,
+            recipientType: recipientTypeBySubaccount.get(s.subaccountId)!,
+            calculationType: s.fixedValue != null ? ('FIXED' as const) : ('PERCENTAGE' as const),
           })),
         },
       },
@@ -226,7 +250,7 @@ export class ChargesService {
           include: { subaccount: { select: { id: true, name: true, type: true, walletId: true } } },
         },
         splitResults: {
-          include: { receiverSubaccount: { select: { name: true, type: true } } },
+          include: { receiver: { select: { name: true, type: true } } },
         },
       },
     });
