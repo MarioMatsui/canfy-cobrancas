@@ -181,7 +181,8 @@ model Customer {
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  charges Charge[]
+  charges           Charge[]
+  shippingAddresses ShippingAddress[]
 
   @@index([email])
   @@index([asaasCustomerId])
@@ -199,6 +200,12 @@ model Product {
   description          String?
   supplierSubaccountId String?         @map("supplier_subaccount_id")
   defaultPrice         Decimal         @map("default_price") @db.Decimal(12, 2)
+  /// Peso em kg (API Melhor Envio). Nulo = usa default_package_weight_kg de settings.
+  weightKg             Decimal?        @map("weight_kg") @db.Decimal(8, 3)
+  /// Dimensoes em cm. Nulas = usa a caixa padrao de settings.
+  heightCm             Decimal?        @map("height_cm") @db.Decimal(8, 2)
+  widthCm              Decimal?        @map("width_cm") @db.Decimal(8, 2)
+  lengthCm             Decimal?        @map("length_cm") @db.Decimal(8, 2)
   fulfillmentType      FulfillmentType @default(NATIONAL) @map("fulfillment_type")
   active               Boolean         @default(true)
   createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -286,11 +293,12 @@ model Charge {
   createdBy User?       @relation("ChargeCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   doctor    Subaccount? @relation("ChargeDoctor", fields: [doctorSubaccountId], references: [id], onDelete: SetNull)
 
-  items        ChargeItem[]
-  payments     Payment[]
-  shipments    Shipment[]
-  splits       ChargeSplit[]
-  splitResults SplitResult[]
+  items           ChargeItem[]
+  payments        Payment[]
+  shipments       Shipment[]
+  splits          ChargeSplit[]
+  splitResults    SplitResult[]
+  shippingAddress ShippingAddress?
 
   @@index([chargeType])
   @@index([dueDate])
@@ -383,6 +391,7 @@ model Payment {
 model Shipment {
   id                     String         @id @default(uuid())
   chargeId               String         @map("charge_id")
+  shippingAddressId      String?        @map("shipping_address_id")
   type                   ShipmentType
   carrier                String?
   service                String?
@@ -401,9 +410,11 @@ model Shipment {
   createdAt              DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  charge Charge @relation(fields: [chargeId], references: [id], onDelete: Cascade)
+  charge          Charge           @relation(fields: [chargeId], references: [id], onDelete: Cascade)
+  shippingAddress ShippingAddress? @relation(fields: [shippingAddressId], references: [id], onDelete: SetNull)
 
   @@index([chargeId])
+  @@index([shippingAddressId])
   @@index([status])
   @@index([trackingCode])
   @@map("shipments")
@@ -497,6 +508,47 @@ model WebhookLog {
   @@index([createdAt])
   @@index([paymentId])
   @@map("webhook_logs")
+}
+
+// =====================================================================
+// ENDERECO DE ENTREGA — NOVA (migration 3)
+// Coletado no formulario do pagar.canfy antes do pagamento.
+// Um por cobranca (UNIQUE em charge_id). E SNAPSHOT do pedido: se o
+// cliente mudar de casa, o pedido antigo nao muda de destino.
+// =====================================================================
+
+model ShippingAddress {
+  id         String  @id @default(uuid())
+  chargeId   String  @unique @map("charge_id")
+  customerId String? @map("customer_id")
+
+  /// Quem recebe pode nao ser quem comprou.
+  recipientName  String? @map("recipient_name")
+  recipientPhone String? @map("recipient_phone")
+
+  /// Somente digitos, 8 caracteres. Normalizar na aplicacao.
+  postalCode   String  @map("postal_code")
+  street       String
+  /// TEXT por causa de "S/N" e "123-A".
+  number       String
+  complement   String?
+  neighborhood String
+  city         String
+  /// UF, 2 letras.
+  state        String
+  country      String  @default("BR")
+  reference    String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  charge    Charge     @relation(fields: [chargeId], references: [id], onDelete: Cascade)
+  customer  Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  shipments Shipment[]
+
+  @@index([customerId])
+  @@index([postalCode])
+  @@map("shipping_addresses")
 }
 
 // =====================================================================
