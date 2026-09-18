@@ -1,3 +1,15 @@
+// =====================================================================
+// schema.prisma — CanFy
+// Corresponde ao banco DEPOIS de aplicar 01_payment_checkout_foundation.sql
+//
+// Convencoes preservadas do banco atual:
+//   - ids TEXT com valor UUID (@default(uuid()), gerado pelo Prisma)
+//   - dinheiro em Decimal(12,2), percentual em Decimal(5,2)
+//   - enums em PascalCase no Postgres
+//   - timestamps ANTIGOS ficam em timestamp(3) sem timezone (nao mexi)
+//   - timestamps NOVOS em timestamptz(6)
+// =====================================================================
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -5,11 +17,18 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  // Se voce usa o pooler do Supabase, mantenha tambem:
+  // directUrl = env("DIRECT_URL")
 }
 
-// ==========================================
+// =====================================================================
 // ENUMS
-// ==========================================
+// =====================================================================
+
+enum UserRole {
+  ADMIN
+  ATTENDANT
+}
 
 enum SubaccountType {
   DOCTOR
@@ -17,19 +36,85 @@ enum SubaccountType {
   OTHER
 }
 
+/// LEGADO. REUSABLE foi descontinuado; 3 registros historicos usam.
 enum ChargeType {
-  CUSTOM    // Cobrança avulsa/personalizada
-  REUSABLE  // Cobrança reutilizável (link permanente)
+  CUSTOM
+  REUSABLE
 }
 
-enum UserRole {
-  ADMIN
-  ATTENDANT
+/// Ciclo de vida da VENDA.
+enum OrderStatus {
+  DRAFT
+  READY
+  PENDING_PAYMENT
+  PAID
+  EXPIRED
+  CANCELLED
+  REFUNDED
 }
 
-// ==========================================
-// USUÁRIOS DO PAINEL
-// ==========================================
+enum DiscountType {
+  NONE
+  PERCENTAGE
+  FIXED
+}
+
+enum FulfillmentType {
+  NATIONAL
+  INTERNATIONAL
+}
+
+enum PaymentProvider {
+  ASAAS
+}
+
+/// Vocabulario do Asaas.
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+  RECEIVED
+  OVERDUE
+  REFUNDED
+  FAILED
+  CANCELLED
+}
+
+enum ShipmentType {
+  NATIONAL
+  INTERNATIONAL
+}
+
+enum ShipmentStatus {
+  PENDING
+  QUOTED
+  LABEL_CREATED
+  POSTED
+  IN_TRANSIT
+  DELIVERED
+  RETURNED
+  CANCELLED
+}
+
+enum QuoteSource {
+  MANUAL
+  FIXED
+  MELHOR_ENVIO
+}
+
+enum SplitRecipientType {
+  SUPPLIER
+  DOCTOR
+  PLATFORM
+}
+
+enum SplitCalculationType {
+  PERCENTAGE
+  FIXED
+}
+
+// =====================================================================
+// USUARIOS (atendentes) — inalterado
+// =====================================================================
 
 model User {
   id        String   @id @default(uuid())
@@ -41,134 +126,387 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  createdCharges Charge[] @relation("ChargeCreatedBy")
+
   @@map("users")
 }
 
-// ==========================================
-// SUBCONTAS ASAAS (Médicos, Fornecedores, etc.)
-// ==========================================
+// =====================================================================
+// SUBCONTAS (fornecedores e medicos) — inalterado
+// =====================================================================
 
 model Subaccount {
-  id          String          @id @default(uuid())
-  asaasId     String          @unique @map("asaas_id")
-  walletId    String?         @map("wallet_id")
-  apiKey      String?         @map("api_key")
-  name        String
-  cpfCnpj     String          @map("cpf_cnpj")
-  email       String?
-  phone       String?
-  mobilePhone String?         @map("mobile_phone")
-  type        SubaccountType  @default(OTHER)
-  active      Boolean         @default(true)
-  balance     Decimal         @default(0) @db.Decimal(12, 2)
+  id                   String         @id @default(uuid())
+  asaasId              String         @unique @map("asaas_id")
+  walletId             String?        @map("wallet_id")
+  name                 String
+  cpfCnpj              String         @map("cpf_cnpj")
+  email                String?
+  phone                String?
+  mobilePhone          String?        @map("mobile_phone")
+  type                 SubaccountType @default(OTHER)
+  active               Boolean        @default(true)
+  balance              Decimal        @default(0) @db.Decimal(12, 2)
+  apiKey               String?        @map("api_key")
+  deletedAt            DateTime?      @map("deleted_at")
+  activationResentAt   DateTime?      @map("activation_resent_at")
+  asaasGeneralStatus   String?        @map("asaas_general_status")
+  asaasStatusCheckedAt DateTime?      @map("asaas_status_checked_at")
+  createdAt            DateTime       @default(now()) @map("created_at")
+  updatedAt            DateTime       @updatedAt @map("updated_at")
 
-  // Reenvio do link de ativação Asaas (POST /accounts/{id}/resendActivationLink).
-  // O Asaas permite apenas UM reenvio por subconta — activationResentAt guarda
-  // quando esse reenvio foi confirmado (204) para não oferecer a ação de novo.
-  activationResentAt   DateTime? @map("activation_resent_at")
-  // Cache do último status geral de aprovação cadastral (GET /myAccount/status,
-  // campo "general"), usado apenas para decidir se a conta ainda está em
-  // processo de aprovação — não indica se o e-mail de ativação foi confirmado.
-  asaasGeneralStatus   String?   @map("asaas_general_status")
-  asaasStatusCheckedAt DateTime? @map("asaas_status_checked_at")
-
-  deletedAt   DateTime?       @map("deleted_at")
-  createdAt   DateTime        @default(now()) @map("created_at")
-  updatedAt   DateTime        @updatedAt @map("updated_at")
-
-  chargeSplits ChargeSplit[]
-  splitResults SplitResult[]
+  chargeSplits    ChargeSplit[]
+  splitResults    SplitResult[]
+  products        Product[]
+  chargeItems     ChargeItem[]
+  chargesAsDoctor Charge[]      @relation("ChargeDoctor")
 
   @@index([type])
   @@map("subaccounts")
 }
 
-// ==========================================
-// COBRANÇAS (Avulsas e Reutilizáveis)
-// ==========================================
+// =====================================================================
+// CLIENTES — NOVA
+// cpfCnpj e a chave natural (100% preenchido nas cobrancas existentes).
+// email nao e unique porque 12 cobrancas nao tem email.
+// =====================================================================
+
+model Customer {
+  id              String   @id @default(uuid())
+  name            String
+  email           String?
+  cpfCnpj         String   @unique @map("cpf_cnpj")
+  phone           String?
+  asaasCustomerId String?  @map("asaas_customer_id")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  charges Charge[]
+
+  @@index([email])
+  @@index([asaasCustomerId])
+  @@map("customers")
+}
+
+// =====================================================================
+// CATALOGO DE PRODUTOS — NOVA
+// =====================================================================
+
+model Product {
+  id                   String          @id @default(uuid())
+  name                 String
+  sku                  String?         @unique
+  description          String?
+  supplierSubaccountId String?         @map("supplier_subaccount_id")
+  defaultPrice         Decimal         @map("default_price") @db.Decimal(12, 2)
+  fulfillmentType      FulfillmentType @default(NATIONAL) @map("fulfillment_type")
+  active               Boolean         @default(true)
+  createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  supplier    Subaccount?  @relation(fields: [supplierSubaccountId], references: [id], onDelete: SetNull)
+  chargeItems ChargeItem[]
+
+  @@index([supplierSubaccountId])
+  @@index([active])
+  @@map("products")
+}
+
+// =====================================================================
+// COBRANCA = A VENDA
+// charges deixa de representar o pagamento. Tudo que e Asaas foi para
+// Payment. Os campos legados continuam aqui ate o dia do corte.
+// =====================================================================
 
 model Charge {
-  id              String     @id @default(uuid())
-  asaasId         String?    @unique @map("asaas_id")
-  chargeType      ChargeType @default(CUSTOM) @map("charge_type")
+  id String @id @default(uuid())
 
-  // Cliente (quem paga)
-  customerName    String     @map("customer_name")
-  customerEmail   String?    @map("customer_email")
-  customerCpfCnpj String?   @map("customer_cpf_cnpj")
-  customerAsaasId String?    @map("customer_asaas_id")
+  // ---- cliente ----
+  customerId      String?  @map("customer_id")
+  customerName    String   @map("customer_name")
+  customerEmail   String?  @map("customer_email")
+  customerCpfCnpj String?  @map("customer_cpf_cnpj")
 
-  billingType     String     @map("billing_type") // PIX, BOLETO, CREDIT_CARD, DEBIT_CARD, UNDEFINED
-  value           Decimal    @db.Decimal(12, 2)
-  netValue        Decimal?   @db.Decimal(12, 2) @map("net_value") // Valor líquido após taxas do Asaas
-  dueDate         DateTime?  @map("due_date")
-  description     String?
-  status          String     @default("PENDING") // PENDING, CONFIRMED, OVERDUE, REFUNDED, CANCELLED
-  maxInstallments Int        @default(1) @map("max_installments")
-  isActive        Boolean    @default(true) @map("is_active") // para reutilizáveis
+  // ---- autoria ----
+  createdByUserId String? @map("created_by_user_id")
 
-  // Dados de pagamento retornados pelo Asaas
-  invoiceUrl      String?    @map("invoice_url")
-  bankSlipUrl     String?    @map("bank_slip_url")
-  pixQrCode       String?    @map("pix_qr_code")
-  pixCopiaECola   String?    @map("pix_copia_e_cola")
+  // ---- valores ----
+  subtotal       Decimal      @db.Decimal(12, 2)
+  discountType   DiscountType @default(NONE) @map("discount_type")
+  /// Se PERCENTAGE guarda o percentual (ex: 10). Se FIXED, o valor em R$.
+  discountValue  Decimal      @default(0) @map("discount_value") @db.Decimal(12, 2)
+  /// Resultado calculado do desconto, sempre em R$.
+  discountAmount Decimal      @default(0) @map("discount_amount") @db.Decimal(12, 2)
+  shippingAmount Decimal      @default(0) @map("shipping_amount") @db.Decimal(12, 2)
+  totalAmount    Decimal      @map("total_amount") @db.Decimal(12, 2)
 
-  createdAt       DateTime   @default(now()) @map("created_at")
-  updatedAt       DateTime   @updatedAt @map("updated_at")
+  // ---- ciclo de vida ----
+  orderStatus     OrderStatus @default(DRAFT) @map("order_status")
+  maxInstallments Int         @default(1) @map("max_installments")
+  isActive        Boolean     @default(true) @map("is_active")
 
+  // ---- link publico ----
+  /// Nunca exponha charges.id. O pagar.canfy so conhece este token.
+  publicToken String    @unique @map("public_token")
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz(6)
+
+  // ---- medico da venda (comissao) ----
+  doctorSubaccountId String? @map("doctor_subaccount_id")
+
+  description String?
+  notes       String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // =========== CAMPOS LEGADOS — remover no corte ===========
+  /// LEGADO: substituido por Payment.providerPaymentId
+  asaasId String? @unique @map("asaas_id")
+  /// LEGADO: REUSABLE descontinuado
+  chargeType ChargeType @default(CUSTOM) @map("charge_type")
+  /// LEGADO: substituido por Customer.asaasCustomerId
+  customerAsaasId String? @map("customer_asaas_id")
+  /// LEGADO: substituido por Payment.billingType
+  billingType String @map("billing_type")
+  /// LEGADO: substituido por totalAmount
+  value Decimal @db.Decimal(12, 2)
+  /// LEGADO: guarda o status do Asaas. Use orderStatus.
+  status String @default("PENDING")
+  /// LEGADO: substituido por Payment.dueDate
+  dueDate DateTime? @map("due_date")
+  /// LEGADO: movidos para Payment
+  invoiceUrl    String? @map("invoice_url")
+  bankSlipUrl   String? @map("bank_slip_url")
+  pixQrCode     String? @map("pix_qr_code")
+  pixCopiaECola String? @map("pix_copia_e_cola")
+  netValue      Decimal? @map("net_value") @db.Decimal(12, 2)
+  // =========================================================
+
+  customer  Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  createdBy User?       @relation("ChargeCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  doctor    Subaccount? @relation("ChargeDoctor", fields: [doctorSubaccountId], references: [id], onDelete: SetNull)
+
+  items        ChargeItem[]
+  payments     Payment[]
+  shipments    Shipment[]
   splits       ChargeSplit[]
   splitResults SplitResult[]
 
-  @@index([status])
   @@index([chargeType])
   @@index([dueDate])
   @@index([isActive])
+  @@index([status])
+  @@index([orderStatus])
+  @@index([customerId])
+  @@index([expiresAt])
+  @@index([createdByUserId])
+  @@index([doctorSubaccountId])
   @@map("charges")
 }
 
-// ==========================================
-// SPLIT POR COBRANÇA (múltiplos destinatários)
-// ==========================================
+// =====================================================================
+// ITENS DA VENDA — NOVA
+// productName e unitPrice sao SNAPSHOT: se o catalogo mudar de preco,
+// a venda antiga nao muda.
+// supplierSubaccountId por item permite mais de um fornecedor na mesma
+// cobranca.
+// =====================================================================
 
-model ChargeSplit {
-  id           String   @id @default(uuid())
-  chargeId     String   @map("charge_id")
-  subaccountId String   @map("subaccount_id")
-  percentage   Decimal? @db.Decimal(5, 2)
-  fixedValue   Decimal? @map("fixed_value") @db.Decimal(12, 2)
+model ChargeItem {
+  id                   String          @id @default(uuid())
+  chargeId             String          @map("charge_id")
+  productId            String?         @map("product_id")
+  productName          String          @map("product_name")
+  productSku           String?         @map("product_sku")
+  quantity             Int             @default(1)
+  unitPrice            Decimal         @map("unit_price") @db.Decimal(12, 2)
+  lineTotal            Decimal         @map("line_total") @db.Decimal(12, 2)
+  supplierSubaccountId String?         @map("supplier_subaccount_id")
+  fulfillmentType      FulfillmentType @default(NATIONAL) @map("fulfillment_type")
+  createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  charge     Charge     @relation(fields: [chargeId], references: [id], onDelete: Cascade)
-  subaccount Subaccount @relation(fields: [subaccountId], references: [id])
+  charge   Charge      @relation(fields: [chargeId], references: [id], onDelete: Cascade)
+  product  Product?    @relation(fields: [productId], references: [id], onDelete: SetNull)
+  supplier Subaccount? @relation(fields: [supplierSubaccountId], references: [id], onDelete: SetNull)
+  splits   ChargeSplit[]
 
   @@index([chargeId])
+  @@index([productId])
+  @@index([supplierSubaccountId])
+  @@map("charge_items")
+}
+
+// =====================================================================
+// PAGAMENTOS — NOVA
+// Uma venda pode ter varias tentativas. Era exatamente isso que o
+// UNIQUE em charges.asaas_id impedia.
+// =====================================================================
+
+model Payment {
+  id                String          @id @default(uuid())
+  chargeId          String          @map("charge_id")
+  provider          PaymentProvider @default(ASAAS)
+  providerPaymentId String?         @map("provider_payment_id")
+  billingType       String          @map("billing_type")
+  amount            Decimal         @db.Decimal(12, 2)
+  installments      Int             @default(1)
+  status            PaymentStatus   @default(PENDING)
+
+  invoiceUrl    String?  @map("invoice_url")
+  bankSlipUrl   String?  @map("bank_slip_url")
+  pixQrCode     String?  @map("pix_qr_code")
+  pixCopyPaste  String?  @map("pix_copy_paste")
+  netValue      Decimal? @map("net_value") @db.Decimal(12, 2)
+  failureReason String?  @map("failure_reason")
+
+  dueDate   DateTime? @map("due_date") @db.Timestamptz(6)
+  paidAt    DateTime? @map("paid_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  charge       Charge        @relation(fields: [chargeId], references: [id], onDelete: Cascade)
+  splitResults SplitResult[]
+  webhookLogs  WebhookLog[]
+
+  @@unique([provider, providerPaymentId])
+  @@index([chargeId])
+  @@index([status])
+  @@map("payments")
+}
+
+// =====================================================================
+// ENVIOS — NOVA
+// Sem unique em chargeId: item nacional + item internacional na mesma
+// venda geram dois envios.
+// =====================================================================
+
+model Shipment {
+  id                     String         @id @default(uuid())
+  chargeId               String         @map("charge_id")
+  type                   ShipmentType
+  carrier                String?
+  service                String?
+  shippingAmount         Decimal        @default(0) @map("shipping_amount") @db.Decimal(12, 2)
+  quoteSource            QuoteSource    @default(MANUAL) @map("quote_source")
+  destinationPostalCode  String?        @map("destination_postal_code")
+  estimatedDaysMin       Int?           @map("estimated_days_min")
+  estimatedDaysMax       Int?           @map("estimated_days_max")
+  estimatedDeliveryStart DateTime?      @map("estimated_delivery_start") @db.Timestamptz(6)
+  estimatedDeliveryEnd   DateTime?      @map("estimated_delivery_end") @db.Timestamptz(6)
+  trackingCode           String?        @map("tracking_code")
+  trackingUrl            String?        @map("tracking_url")
+  status                 ShipmentStatus @default(PENDING)
+  /// id no Melhor Envio, quando integrar
+  externalId             String?        @map("external_id")
+  createdAt              DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  charge Charge @relation(fields: [chargeId], references: [id], onDelete: Cascade)
+
+  @@index([chargeId])
+  @@index([status])
+  @@index([trackingCode])
+  @@map("shipments")
+}
+
+// =====================================================================
+// REGRAS DE SPLIT — expandida
+// basisAmount + calculatedValue tornam o calculo auditavel: nao basta
+// saber "85%", e preciso saber sobre qual valor e quanto deu.
+// =====================================================================
+
+model ChargeSplit {
+  id           String @id @default(uuid())
+  chargeId     String @map("charge_id")
+  subaccountId String @map("subaccount_id")
+
+  recipientType   SplitRecipientType   @map("recipient_type")
+  calculationType SplitCalculationType @map("calculation_type")
+
+  /// Split de um item especifico (opcional). Vazio = split da venda toda.
+  chargeItemId String? @map("charge_item_id")
+
+  percentage Decimal? @db.Decimal(5, 2)
+  fixedValue Decimal? @map("fixed_value") @db.Decimal(12, 2)
+
+  /// Valor sobre o qual a regra foi aplicada.
+  basisAmount     Decimal? @map("basis_amount") @db.Decimal(12, 2)
+  /// Resultado em R$ no momento do calculo.
+  calculatedValue Decimal? @map("calculated_value") @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  charge     Charge      @relation(fields: [chargeId], references: [id], onDelete: Cascade)
+  subaccount Subaccount  @relation(fields: [subaccountId], references: [id])
+  chargeItem ChargeItem? @relation(fields: [chargeItemId], references: [id], onDelete: SetNull)
+
+  @@index([chargeId])
+  @@index([subaccountId])
+  @@index([chargeItemId])
   @@map("charge_splits")
 }
 
-// ==========================================
-// RESULTADOS DE SPLIT (histórico real)
-// ==========================================
+// =====================================================================
+// RESULTADO DO SPLIT — expandida
+// Agora ligada ao PAGAMENTO: o split aconteceu numa tentativa
+// especifica, nao na venda em abstrato.
+// =====================================================================
 
 model SplitResult {
-  id                   String   @id @default(uuid())
-  chargeId             String   @map("charge_id")
-  receiverSubaccountId String   @map("receiver_subaccount_id")
-  value                Decimal  @db.Decimal(12, 2)
-  percentage           Decimal? @db.Decimal(5, 2)
-  fixedValue           Decimal? @map("fixed_value") @db.Decimal(12, 2)
-  status               String   @default("PENDING") // PENDING, COMPLETED, FAILED
-  createdAt            DateTime @default(now()) @map("created_at")
+  id                  String   @id @default(uuid())
+  chargeId            String   @map("charge_id")
+  paymentId           String?  @map("payment_id")
+  receiverSubaccountId String  @map("receiver_subaccount_id")
+  value               Decimal  @db.Decimal(12, 2)
+  percentage          Decimal? @db.Decimal(5, 2)
+  fixedValue          Decimal? @map("fixed_value") @db.Decimal(12, 2)
+  status              String   @default("PENDING")
+  createdAt           DateTime @default(now()) @map("created_at")
 
-  charge             Charge     @relation(fields: [chargeId], references: [id])
-  receiverSubaccount Subaccount @relation(fields: [receiverSubaccountId], references: [id])
+  charge   Charge     @relation(fields: [chargeId], references: [id])
+  payment  Payment?   @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  receiver Subaccount @relation(fields: [receiverSubaccountId], references: [id])
 
   @@index([chargeId])
   @@index([receiverSubaccountId])
+  @@index([paymentId])
   @@map("split_results")
 }
 
-// ==========================================
-// CONFIGURAÇÕES PARAMETRIZÁVEIS
-// ==========================================
+// =====================================================================
+// LOGS DE WEBHOOK — expandida
+// providerEventId unique da idempotencia: se o Asaas reenviar o mesmo
+// evento, o insert falha e voce ignora em vez de processar duas vezes.
+// =====================================================================
+
+model WebhookLog {
+  id              String          @id @default(uuid())
+  provider        PaymentProvider @default(ASAAS)
+  providerEventId String?         @unique @map("provider_event_id")
+  event           String
+  payload         Json
+  status          String          @default("RECEIVED")
+  paymentId       String?         @map("payment_id")
+  processedAt     DateTime?       @map("processed_at") @db.Timestamptz(6)
+  errorMessage    String?         @map("error_message")
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([event])
+  @@index([createdAt])
+  @@index([paymentId])
+  @@map("webhook_logs")
+}
+
+// =====================================================================
+// CONFIGURACOES — inalterada
+// Chaves novas inseridas pela migration:
+//   international_shipping_default, charge_link_expiration_days,
+//   checkout_base_url, platform_fee_percentage
+// Chaves que viraram legado com o fim do REUSABLE:
+//   default_reusable_value, max_installments_reusable
+// =====================================================================
 
 model Setting {
   id          String   @id @default(uuid())
@@ -178,20 +516,4 @@ model Setting {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@map("settings")
-}
-
-// ==========================================
-// LOG DE WEBHOOKS
-// ==========================================
-
-model WebhookLog {
-  id        String   @id @default(uuid())
-  event     String
-  payload   Json
-  status    String   @default("RECEIVED") // RECEIVED, PROCESSED, FAILED
-  createdAt DateTime @default(now()) @map("created_at")
-
-  @@index([event])
-  @@index([createdAt])
-  @@map("webhook_logs")
 }
