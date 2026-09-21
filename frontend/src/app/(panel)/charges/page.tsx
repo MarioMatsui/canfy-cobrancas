@@ -1,6 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { AxiosError } from 'axios';
 import { ClipboardCopy, Plus, Trash2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
@@ -21,6 +22,7 @@ type Charge = {
   splits: Split[]; latestPayment: { billingType: string; status: string } | null;
 };
 type PageResponse = { data: Charge[]; total: number; page: number; totalPages: number };
+type ApiErrorBody = { message?: string | string[] };
 type Item = { productId: string; productName: string; quantity: number; unitPrice: string; supplierSubaccountId: string; fulfillmentType: FulfillmentType };
 
 const blankProduct = (): Item => ({ productId: '', productName: '', quantity: 1, unitPrice: '', supplierSubaccountId: '', fulfillmentType: 'NATIONAL' });
@@ -28,6 +30,12 @@ const blankConsultation = (): Item => ({ productId: '', productName: 'Consulta m
 const money = (value: unknown) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value || 0));
 const date = (value: string | null) => value ? new Date(value).toLocaleDateString('pt-BR') : '—';
 const futureDate = (days: number) => { const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
+const apiErrorMessage = (error: unknown, fallback: string) => {
+  const apiError = error as AxiosError<ApiErrorBody>;
+  const raw = apiError.response?.data?.message;
+  if (Array.isArray(raw)) return raw[0] || fallback;
+  return raw || fallback;
+};
 
 const statusLabel: Record<string, string> = {
   DRAFT: 'Rascunho', READY: 'Pronto', PENDING_PAYMENT: 'Aguardando pagamento', PAID: 'Pago', EXPIRED: 'Expirado', CANCELLED: 'Cancelado', REFUNDED: 'Estornado',
@@ -71,9 +79,9 @@ export default function ChargesPage() {
   const productQuery = useQuery<{ data: Product[] }>({ queryKey: ['products-active'], queryFn: () => api.get('/products', { params: { limit: 200, active: true } }).then((r) => r.data) });
   const settingsQuery = useQuery<Setting[]>({ queryKey: ['settings-charge-form'], queryFn: () => api.get('/settings').then((r) => r.data) });
 
-  const doctors = subaccounts.data?.data.filter((s) => s.type === 'DOCTOR') || [];
-  const suppliers = subaccounts.data?.data.filter((s) => s.type === 'SUPPLIER') || [];
-  const products = productQuery.data?.data || [];
+  const doctors = useMemo(() => subaccounts.data?.data.filter((s) => s.type === 'DOCTOR') ?? [], [subaccounts.data]);
+  const suppliers = useMemo(() => subaccounts.data?.data.filter((s) => s.type === 'SUPPLIER') ?? [], [subaccounts.data]);
+  const products = useMemo(() => productQuery.data?.data ?? [], [productQuery.data]);
   const setting = (key: string, fallback: number) => { const n = Number(settingsQuery.data?.find((s) => s.key === key)?.value); return Number.isFinite(n) ? n : fallback; };
   const supplierPct = setting('product_supplier_percentage', 70);
   const productDoctorPct = setting('product_doctor_percentage', 5);
@@ -115,7 +123,7 @@ export default function ChargesPage() {
   const create = useMutation({
     mutationFn: (payload: Record<string, unknown>) => api.post('/charges', payload),
     onSuccess: (response) => { setCreatedLink(response.data.checkoutUrl || ''); toast.success('Pedido criado sem criar pagamento no Asaas'); reset(); queryClient.invalidateQueries({ queryKey: ['charges'] }); },
-    onError: (error: any) => { const raw = error.response?.data?.message; toast.error((Array.isArray(raw) ? raw[0] : raw) || 'Erro ao criar pedido'); },
+    onError: (error: unknown) => { toast.error(apiErrorMessage(error, 'Erro ao criar pedido')); },
   });
 
   const submit = () => {
@@ -144,7 +152,7 @@ export default function ChargesPage() {
     });
   };
 
-  const cancel = async (id: string) => { try { await api.delete('/charges/' + id); toast.success('Cobrança cancelada'); charges.refetch(); } catch (error: any) { toast.error(error.response?.data?.message || 'Erro ao cancelar'); } };
+  const cancel = async (id: string) => { try { await api.delete('/charges/' + id); toast.success('Cobrança cancelada'); charges.refetch(); } catch (error: unknown) { toast.error(apiErrorMessage(error, 'Erro ao cancelar')); } };
   const groupedSplits = (charge: Charge) => {
     const map = new Map<string, { name: string; type: string; value: number }>();
     charge.splits.filter((s) => s.calculatedValue != null).forEach((s) => { const old = map.get(s.subaccount.id); map.set(s.subaccount.id, { name: s.subaccount.name, type: s.subaccount.type, value: (old?.value || 0) + Number(s.calculatedValue || 0) }); });
