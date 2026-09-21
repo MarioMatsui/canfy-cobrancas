@@ -32,6 +32,11 @@ export enum FulfillmentTypeDto {
   INTERNATIONAL = 'INTERNATIONAL',
 }
 
+export enum SplitCalculationTypeDto {
+  PERCENTAGE = 'PERCENTAGE',
+  FIXED = 'FIXED',
+}
+
 export enum OrderStatusDto {
   DRAFT = 'DRAFT',
   READY = 'READY',
@@ -78,6 +83,22 @@ export class CreateChargeItemDto {
   fulfillmentType?: FulfillmentTypeDto;
 }
 
+export class ChargeSplitRuleDto {
+  @ApiProperty({ description: 'Subconta que receberá o repasse nesta cobrança.' })
+  @IsUUID('4')
+  subaccountId!: string;
+
+  @ApiProperty({ enum: SplitCalculationTypeDto, description: 'Se o repasse desta cobrança é percentual ou valor fixo.' })
+  @IsEnum(SplitCalculationTypeDto)
+  calculationType!: SplitCalculationTypeDto;
+
+  @ApiProperty({ example: 70, description: 'Percentual (0-100) ou valor fixo em R$, conforme calculationType.' })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  value!: number;
+}
+
 export class CreateChargeDto {
   @ApiProperty({ enum: OrderKindDto })
   @IsEnum(OrderKindDto)
@@ -108,6 +129,17 @@ export class CreateChargeDto {
   @Type(() => CreateChargeItemDto)
   items!: CreateChargeItemDto[];
 
+  @ApiPropertyOptional({
+    type: [ChargeSplitRuleDto],
+    description:
+      'Repasses específicos desta cobrança. Se um destinatário esperado for omitido, usa-se apenas o percentual padrão como valor inicial/fallback.',
+  })
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => ChargeSplitRuleDto)
+  splits?: ChargeSplitRuleDto[];
+
   @ApiPropertyOptional({ enum: DiscountTypeDto, default: DiscountTypeDto.NONE })
   @IsEnum(DiscountTypeDto)
   @IsOptional()
@@ -134,7 +166,7 @@ export class CreateChargeDto {
   @IsOptional()
   internationalShippingAmount?: number;
 
-  @ApiProperty({ description: 'Médico associado ao pedido para cálculo do split.' })
+  @ApiProperty({ description: 'Médico associado ao pedido e ao repasse desta cobrança.' })
   @IsUUID('4')
   doctorSubaccountId!: string;
 

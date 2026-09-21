@@ -41,17 +41,18 @@ export class SettingsService {
       { key: 'international_shipping_default', value: '150.00', description: 'Frete internacional padrão em reais' },
       { key: 'charge_link_expiration_days', value: '7', description: 'Dias padrão de validade do link CanFy' },
       { key: 'checkout_base_url', value: 'https://pagar.canfy.com.br', description: 'Base do checkout público da CanFy' },
-      { key: 'product_supplier_percentage', value: '70', description: 'Percentual do subtotal dos itens destinado ao fornecedor' },
-      { key: 'product_doctor_percentage', value: '5', description: 'Percentual do subtotal dos itens destinado ao médico' },
-      { key: 'product_platform_percentage', value: '25', description: 'Margem da CanFy sobre produtos antes de desconto e frete' },
-      { key: 'consultation_doctor_percentage', value: '85', description: 'Percentual da consulta destinado ao médico' },
-      { key: 'consultation_platform_percentage', value: '15', description: 'Margem da CanFy sobre consultas antes de desconto' },
+      { key: 'product_supplier_percentage', value: '70', description: 'Percentual inicial sugerido para fornecedor em nova cobrança; pode ser alterado por cobrança' },
+      { key: 'product_doctor_percentage', value: '5', description: 'Percentual inicial sugerido para médico em venda de produto; pode ser alterado por cobrança' },
+      { key: 'product_platform_percentage', value: '25', description: 'Referência histórica de margem; no fluxo novo a CanFy recebe o restante após os repasses da cobrança' },
+      { key: 'consultation_doctor_percentage', value: '85', description: 'Percentual inicial sugerido para médico em consulta; pode ser alterado por cobrança' },
+      { key: 'consultation_platform_percentage', value: '15', description: 'Referência histórica de margem; no fluxo novo a CanFy recebe o restante após o repasse da cobrança' },
     ];
 
     for (const setting of defaults) {
       await this.prisma.setting.upsert({
         where: { key: setting.key },
-        update: {},
+        // Mantém valores personalizados; atualiza apenas a documentação da chave.
+        update: { description: setting.description },
         create: setting,
       });
     }

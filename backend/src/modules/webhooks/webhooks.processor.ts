@@ -109,9 +109,15 @@ export class WebhooksProcessor {
       for (const split of charge.splits) {
         const walletId = split.subaccount?.walletId;
         const asaasSplit = asaasSplits.find(s => s.walletId === walletId);
-        const fallbackValue = split.fixedValue
-          ? Number(split.fixedValue)
-          : +(remainingForPercent * Number(split.percentage || 0) / 100).toFixed(2);
+        // No fluxo novo, calculatedValue é o valor travado da venda e deve
+        // prevalecer sobre qualquer recálculo por percentual no momento do
+        // pagamento. Isso evita que frete, desconto ou taxa líquida do Asaas
+        // alterem o repasse combinado na cobrança.
+        const fallbackValue = split.calculatedValue != null
+          ? Number(split.calculatedValue)
+          : split.fixedValue
+            ? Number(split.fixedValue)
+            : +(remainingForPercent * Number(split.percentage || 0) / 100).toFixed(2);
         const splitValue = asaasSplit ? asaasSplit.totalValue : fallbackValue;
 
         await this.prisma.splitResult.create({

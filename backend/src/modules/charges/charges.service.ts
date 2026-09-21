@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { AsaasService } from '../../asaas/asaas.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
+  ChargeSplitRuleDto,
   CreateChargeDto,
   CreateChargeItemDto,
   DiscountTypeDto,
@@ -23,9 +24,7 @@ import {
 type Rules = {
   productSupplier: Prisma.Decimal;
   productDoctor: Prisma.Decimal;
-  productPlatform: Prisma.Decimal;
   consultationDoctor: Prisma.Decimal;
-  consultationPlatform: Prisma.Decimal;
   internationalShipping: Prisma.Decimal;
   expirationDays: number;
   checkoutBaseUrl: string;
@@ -41,6 +40,17 @@ type Item = {
   lineTotal: Prisma.Decimal;
   supplierSubaccountId: string | null;
   fulfillmentType: FulfillmentType;
+};
+
+type CalculatedSplit = {
+  subaccountId: string;
+  recipientType: SplitRecipientType;
+  calculationType: SplitCalculationType;
+  chargeItemId: string | null;
+  percentage: Prisma.Decimal | null;
+  fixedValue: Prisma.Decimal | null;
+  basisAmount: Prisma.Decimal;
+  calculatedValue: Prisma.Decimal;
 };
 
 @Injectable()
@@ -68,15 +78,25 @@ export class ChargesService {
 
     if (orderKind === OrderKind.PRODUCT) await this.validateSuppliers(items);
 
+    const splits = this.buildSplits(dto.splits, orderKind, items, doctor.id, subtotal, rules);
+    const distributed = this.sum(splits.map((split) => split.calculatedValue));
+    if (distributed.gt(subtotal)) {
+      throw new BadRequestException(
+        'Os repasses desta cobrança somam R$ ' + distributed.toFixed(2) +
+        ', acima do subtotal de R$ ' + subtotal.toFixed(2) + '.',
+      );
+    }
+
+    // O desconto sai somente da margem da CanFy. Como os repasses agora são
+    // configuráveis por cobrança, a margem disponível é o subtotal menos os
+    // valores calculados dos destinatários — nunca uma porcentagem global fixa.
+    const platformMarginBeforeDiscount = this.money(subtotal.minus(distributed));
     const discount = this.calculateDiscount(dto, subtotal);
-    const platformPercentage =
-      orderKind === OrderKind.PRODUCT ? rules.productPlatform : rules.consultationPlatform;
-    const platformMargin = this.percent(subtotal, platformPercentage);
-    if (discount.amount.gt(platformMargin)) {
+    if (discount.amount.gt(platformMarginBeforeDiscount)) {
       throw new BadRequestException(
         'O desconto de R$ ' + discount.amount.toFixed(2) +
-        ' excede a margem da CanFy de R$ ' + platformMargin.toFixed(2) +
-        '. Fornecedor e médico não podem ter seus repasses reduzidos pelo desconto.',
+        ' excede a margem disponível da CanFy de R$ ' + platformMarginBeforeDiscount.toFixed(2) +
+        ' nesta cobrança. Reduza o desconto ou os repasses.',
       );
     }
 
@@ -84,18 +104,19 @@ export class ChargesService {
     const totalAmount = this.money(subtotal.minus(discount.amount).plus(shipping.total));
     if (totalAmount.lte(0)) throw new BadRequestException('O total da cobrança deve ser maior que zero');
 
+    // Frete pertence integralmente à conta principal. Repasses são travados em
+    // calculatedValue sobre a base comercial da venda e não devem ser
+    // recalculados depois sobre total com frete/desconto.
+    const mainAccountValue = this.money(totalAmount.minus(distributed));
+    if (mainAccountValue.lt(0)) {
+      throw new BadRequestException('Os repasses desta cobrança deixam a conta principal com valor negativo');
+    }
+
     const chargeId = randomUUID();
     const publicToken = randomUUID();
     const expiresAt = this.resolveExpiration(dto.expiresAt, rules.expirationDays);
     const description =
       dto.description?.trim() || items.map((item) => item.productName).slice(0, 3).join(', ');
-
-    const splits = this.buildSplits(orderKind, items, doctor.id, subtotal, rules);
-    const distributed = this.sum(splits.map((split) => split.calculatedValue));
-    const mainAccountValue = this.money(totalAmount.minus(distributed));
-    if (mainAccountValue.lt(0)) {
-      throw new BadRequestException('As regras de split resultaram em valor negativo para a conta principal');
-    }
 
     const created = await this.prisma.$transaction(async (tx) => {
       const customer = await this.upsertCustomer(tx, {
@@ -180,10 +201,10 @@ export class ChargesService {
             chargeId,
             subaccountId: split.subaccountId,
             recipientType: split.recipientType,
-            calculationType: SplitCalculationType.PERCENTAGE,
+            calculationType: split.calculationType,
             chargeItemId: split.chargeItemId,
             percentage: split.percentage,
-            fixedValue: null,
+            fixedValue: split.fixedValue,
             basisAmount: split.basisAmount,
             calculatedValue: split.calculatedValue,
           })),
@@ -207,12 +228,18 @@ export class ChargesService {
       'Pedido criado: ' + chargeId +
       ' | ' + orderKind +
       ' | total R$ ' + totalAmount.toFixed(2) +
-      ' | splits R$ ' + distributed.toFixed(2) +
+      ' | repasses R$ ' + distributed.toFixed(2) +
       ' | principal R$ ' + mainAccountValue.toFixed(2) +
-      ' | sem pagamento Asaas',
+      ' | regras de repasse por cobrança | sem pagamento Asaas',
     );
 
-    return { ...created, checkoutUrl, mainAccountValue, mainAccountPercentage };
+    return {
+      ...created,
+      checkoutUrl,
+      mainAccountValue,
+      mainAccountPercentage,
+      platformMarginBeforeDiscount,
+    };
   }
 
   async findAll(query: ListChargesDto) {
@@ -435,52 +462,106 @@ export class ChargesService {
   }
 
   private buildSplits(
+    requested: ChargeSplitRuleDto[] | undefined,
     orderKind: OrderKind,
     items: Item[],
     doctorId: string,
     subtotal: Prisma.Decimal,
     rules: Rules,
-  ) {
-    const rows: Array<{
-      subaccountId: string;
-      recipientType: SplitRecipientType;
-      chargeItemId: string | null;
-      percentage: Prisma.Decimal;
-      basisAmount: Prisma.Decimal;
-      calculatedValue: Prisma.Decimal;
-    }> = [];
+  ): CalculatedSplit[] {
+    const overrides = new Map<string, ChargeSplitRuleDto>();
+    for (const rule of requested ?? []) {
+      if (overrides.has(rule.subaccountId)) {
+        throw new BadRequestException('O mesmo destinatário não pode aparecer duas vezes nos repasses');
+      }
+      overrides.set(rule.subaccountId, rule);
+    }
+
+    const expected = new Map<
+      string,
+      { recipientType: SplitRecipientType; basisAmount: Prisma.Decimal; defaultPercentage: Prisma.Decimal }
+    >();
 
     if (orderKind === OrderKind.PRODUCT) {
+      const supplierBases = new Map<string, Prisma.Decimal>();
       for (const item of items) {
         if (!item.supplierSubaccountId) continue;
-        rows.push({
-          subaccountId: item.supplierSubaccountId,
+        const current = supplierBases.get(item.supplierSubaccountId) ?? new Prisma.Decimal(0);
+        supplierBases.set(item.supplierSubaccountId, current.plus(item.lineTotal));
+      }
+      for (const [supplierId, basis] of supplierBases.entries()) {
+        expected.set(supplierId, {
           recipientType: SplitRecipientType.SUPPLIER,
-          chargeItemId: item.id,
-          percentage: rules.productSupplier,
-          basisAmount: item.lineTotal,
-          calculatedValue: this.percent(item.lineTotal, rules.productSupplier),
+          basisAmount: this.money(basis),
+          defaultPercentage: rules.productSupplier,
         });
       }
-      rows.push({
-        subaccountId: doctorId,
-        recipientType: SplitRecipientType.DOCTOR,
-        chargeItemId: null,
-        percentage: rules.productDoctor,
-        basisAmount: subtotal,
-        calculatedValue: this.percent(subtotal, rules.productDoctor),
-      });
-    } else {
-      rows.push({
-        subaccountId: doctorId,
-        recipientType: SplitRecipientType.DOCTOR,
-        chargeItemId: null,
-        percentage: rules.consultationDoctor,
-        basisAmount: subtotal,
-        calculatedValue: this.percent(subtotal, rules.consultationDoctor),
-      });
     }
-    return rows;
+
+    expected.set(doctorId, {
+      recipientType: SplitRecipientType.DOCTOR,
+      basisAmount: subtotal,
+      defaultPercentage:
+        orderKind === OrderKind.PRODUCT ? rules.productDoctor : rules.consultationDoctor,
+    });
+
+    for (const subaccountId of overrides.keys()) {
+      if (!expected.has(subaccountId)) {
+        throw new BadRequestException(
+          'Há um repasse para destinatário que não pertence a esta cobrança: ' + subaccountId,
+        );
+      }
+    }
+
+    return Array.from(expected.entries(), ([subaccountId, config]) => {
+      const override = overrides.get(subaccountId);
+      const calculationType = override
+        ? (override.calculationType as SplitCalculationType)
+        : SplitCalculationType.PERCENTAGE;
+      const rawValue = override
+        ? this.money(override.value)
+        : config.defaultPercentage;
+
+      if (rawValue.lt(0)) {
+        throw new BadRequestException('Repasse não pode ser negativo');
+      }
+
+      if (calculationType === SplitCalculationType.PERCENTAGE) {
+        if (rawValue.gt(100)) {
+          throw new BadRequestException('Repasse percentual não pode ser maior que 100%');
+        }
+        const calculatedValue = this.percent(config.basisAmount, rawValue);
+        return {
+          subaccountId,
+          recipientType: config.recipientType,
+          calculationType,
+          chargeItemId: null,
+          percentage: rawValue,
+          fixedValue: null,
+          basisAmount: config.basisAmount,
+          calculatedValue,
+        };
+      }
+
+      if (rawValue.gt(config.basisAmount)) {
+        throw new BadRequestException(
+          'Repasse fixo de R$ ' + rawValue.toFixed(2) +
+          ' excede a base de R$ ' + config.basisAmount.toFixed(2) +
+          ' do destinatário.',
+        );
+      }
+
+      return {
+        subaccountId,
+        recipientType: config.recipientType,
+        calculationType,
+        chargeItemId: null,
+        percentage: null,
+        fixedValue: rawValue,
+        basisAmount: config.basisAmount,
+        calculatedValue: rawValue,
+      };
+    });
   }
 
   private async upsertCustomer(
@@ -510,9 +591,7 @@ export class ChargesService {
     const keys = [
       'product_supplier_percentage',
       'product_doctor_percentage',
-      'product_platform_percentage',
       'consultation_doctor_percentage',
-      'consultation_platform_percentage',
       'international_shipping_default',
       'charge_link_expiration_days',
       'checkout_base_url',
@@ -523,19 +602,18 @@ export class ChargesService {
     const rules: Rules = {
       productSupplier: this.settingPercent(map, 'product_supplier_percentage', 70),
       productDoctor: this.settingPercent(map, 'product_doctor_percentage', 5),
-      productPlatform: this.settingPercent(map, 'product_platform_percentage', 25),
       consultationDoctor: this.settingPercent(map, 'consultation_doctor_percentage', 85),
-      consultationPlatform: this.settingPercent(map, 'consultation_platform_percentage', 15),
       internationalShipping: this.money(map.get('international_shipping_default') ?? '150'),
       expirationDays: Number(map.get('charge_link_expiration_days') ?? 7),
       checkoutBaseUrl: map.get('checkout_base_url') ?? 'https://pagar.canfy.com.br',
     };
 
-    if (!rules.productSupplier.plus(rules.productDoctor).plus(rules.productPlatform).equals(100)) {
-      throw new BadRequestException('Configuração de split de produto deve somar 100%');
-    }
-    if (!rules.consultationDoctor.plus(rules.consultationPlatform).equals(100)) {
-      throw new BadRequestException('Configuração de split de consulta deve somar 100%');
+    // Esses percentuais são somente defaults para uma nova cobrança.
+    // A margem da CanFy é sempre o restante depois dos repasses escolhidos.
+    if (rules.productSupplier.plus(rules.productDoctor).gt(100)) {
+      throw new BadRequestException(
+        'Os percentuais padrão de fornecedor + médico não podem exceder 100%',
+      );
     }
     if (!Number.isFinite(rules.expirationDays) || rules.expirationDays < 1) {
       throw new BadRequestException('charge_link_expiration_days deve ser maior ou igual a 1');

@@ -452,7 +452,9 @@ model ChargeSplit {
 
   /// Valor sobre o qual a regra foi aplicada.
   basisAmount     Decimal? @map("basis_amount") @db.Decimal(12, 2)
-  /// Resultado em R$ no momento do calculo.
+  /// Resultado em R$ travado no momento da criacao da cobranca.
+  /// No checkout/pagamento, este e o valor de repasse que deve prevalecer
+  /// sobre qualquer recalculo por percentual com frete, desconto ou taxa.
   calculatedValue Decimal? @map("calculated_value") @db.Decimal(12, 2)
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
