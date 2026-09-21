@@ -29,7 +29,14 @@ const blankProduct = (): Item => ({ productId: '', productName: '', quantity: 1,
 const blankConsultation = (): Item => ({ productId: '', productName: 'Consulta médica', quantity: 1, unitPrice: '', supplierSubaccountId: '', fulfillmentType: 'NATIONAL' });
 const money = (value: unknown) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value || 0));
 const date = (value: string | null) => value ? new Date(value).toLocaleDateString('pt-BR') : '—';
-const futureDate = (days: number) => { const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
+const futureDate = (days: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 const apiErrorMessage = (error: unknown, fallback: string) => {
   const apiError = error as AxiosError<ApiErrorBody>;
   const raw = apiError.response?.data?.message;
@@ -102,7 +109,7 @@ export default function ChargesPage() {
     if (orderKind !== 'PRODUCT') return [] as Array<{ id: string; name: string; value: number }>;
     const map = new Map<string, number>();
     items.forEach((item) => { if (item.supplierSubaccountId) map.set(item.supplierSubaccountId, (map.get(item.supplierSubaccountId) || 0) + (Number(item.unitPrice) || 0) * item.quantity * supplierPct / 100); });
-    return [...map].map(([id, value]) => ({ id, value, name: suppliers.find((s) => s.id === id)?.name || 'Fornecedor' }));
+    return Array.from(map.entries(), ([id, value]) => ({ id, value, name: suppliers.find((s) => s.id === id)?.name || 'Fornecedor' }));
   }, [items, orderKind, supplierPct, suppliers]);
   const mainValue = total - supplierRows.reduce((sum, row) => sum + row.value, 0) - doctorValue;
 
@@ -156,7 +163,7 @@ export default function ChargesPage() {
   const groupedSplits = (charge: Charge) => {
     const map = new Map<string, { name: string; type: string; value: number }>();
     charge.splits.filter((s) => s.calculatedValue != null).forEach((s) => { const old = map.get(s.subaccount.id); map.set(s.subaccount.id, { name: s.subaccount.name, type: s.subaccount.type, value: (old?.value || 0) + Number(s.calculatedValue || 0) }); });
-    return [...map.values()];
+    return Array.from(map.values());
   };
 
   return <div className="space-y-6">
