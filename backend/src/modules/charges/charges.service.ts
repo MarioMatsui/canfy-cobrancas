@@ -334,7 +334,7 @@ export class ChargesService {
       }
 
       let supplierSubaccountId: string | null = null;
-      let fulfillmentType = FulfillmentType.NATIONAL;
+      let fulfillmentType: FulfillmentType = FulfillmentType.NATIONAL;
       if (orderKind === OrderKind.PRODUCT) {
         supplierSubaccountId = product?.supplierSubaccountId ?? entry.supplierSubaccountId ?? null;
         if (!supplierSubaccountId) {
