@@ -42,6 +42,11 @@ enum ChargeType {
   REUSABLE
 }
 
+enum OrderKind {
+  PRODUCT
+  CONSULTATION
+}
+
 /// Ciclo de vida da VENDA.
 enum OrderStatus {
   DRAFT
@@ -237,6 +242,10 @@ model Charge {
   // ---- autoria ----
   createdByUserId String? @map("created_by_user_id")
 
+  // ---- tipo do pedido no fluxo novo ----
+  // NULL = cobranca historica/legada sem classificacao confiavel.
+  orderKind OrderKind? @map("order_kind")
+
   // ---- valores ----
   subtotal       Decimal      @db.Decimal(12, 2)
   discountType   DiscountType @default(NONE) @map("discount_type")
@@ -305,6 +314,7 @@ model Charge {
   @@index([isActive])
   @@index([status])
   @@index([orderStatus])
+  @@index([orderKind])
   @@index([customerId])
   @@index([expiresAt])
   @@index([createdByUserId])

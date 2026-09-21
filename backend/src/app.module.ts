@@ -8,6 +8,7 @@ import { PrismaModule } from './common/prisma/prisma.module';
 import { AsaasModule } from './asaas/asaas.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { SubaccountsModule } from './modules/subaccounts/subaccounts.module';
+import { ProductsModule } from './modules/products/products.module';
 import { ChargesModule } from './modules/charges/charges.module';
 import { SplitsModule } from './modules/splits/splits.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
@@ -40,6 +41,7 @@ import { HealthController } from './health.controller';
     AsaasModule,
     AuthModule,
     SubaccountsModule,
+    ProductsModule,
     ChargesModule,
     SplitsModule,
     SettingsModule,

@@ -6,7 +6,7 @@ import { UpsertSettingDto } from './settings.dto';
 export class SettingsService {
   private readonly logger = new Logger(SettingsService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async getAll() {
     return this.prisma.setting.findMany({ orderBy: { key: 'asc' } });
@@ -33,18 +33,26 @@ export class SettingsService {
 
   async seedDefaults() {
     const defaults = [
-      { key: 'default_doctor_percentage', value: '15', description: 'Percentual padrão para médicos em cobranças reutilizáveis' },
-      { key: 'default_supplier_percentage', value: '70', description: 'Percentual padrão para fornecedores em cobranças avulsas' },
-      { key: 'max_installments_custom', value: '5', description: 'Máximo de parcelas para cobranças avulsas' },
-      { key: 'max_installments_reusable', value: '3', description: 'Máximo de parcelas para cobranças reutilizáveis' },
-      { key: 'default_reusable_value', value: '99', description: 'Valor padrão para consulta médica (reutilizável)' },
+      { key: 'default_doctor_percentage', value: '85', description: 'Percentual legado/padrão de médico em consulta' },
+      { key: 'default_supplier_percentage', value: '70', description: 'Percentual legado/padrão de fornecedor' },
+      { key: 'max_installments_custom', value: '4', description: 'Máximo configurado para cobranças avulsas legadas' },
+      { key: 'max_installments_reusable', value: '5', description: 'Máximo configurado para cobranças reutilizáveis legadas' },
+      { key: 'default_reusable_value', value: '99', description: 'Valor padrão legado para consulta médica reutilizável' },
+      { key: 'international_shipping_default', value: '150.00', description: 'Frete internacional padrão em reais' },
+      { key: 'charge_link_expiration_days', value: '7', description: 'Dias padrão de validade do link CanFy' },
+      { key: 'checkout_base_url', value: 'https://pagar.canfy.com.br', description: 'Base do checkout público da CanFy' },
+      { key: 'product_supplier_percentage', value: '70', description: 'Percentual do subtotal dos itens destinado ao fornecedor' },
+      { key: 'product_doctor_percentage', value: '5', description: 'Percentual do subtotal dos itens destinado ao médico' },
+      { key: 'product_platform_percentage', value: '25', description: 'Margem da CanFy sobre produtos antes de desconto e frete' },
+      { key: 'consultation_doctor_percentage', value: '85', description: 'Percentual da consulta destinado ao médico' },
+      { key: 'consultation_platform_percentage', value: '15', description: 'Margem da CanFy sobre consultas antes de desconto' },
     ];
 
-    for (const d of defaults) {
+    for (const setting of defaults) {
       await this.prisma.setting.upsert({
-        where: { key: d.key },
+        where: { key: setting.key },
         update: {},
-        create: d,
+        create: setting,
       });
     }
 

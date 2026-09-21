@@ -1,93 +1,165 @@
-import { IsString, IsNumber, IsOptional, IsEnum, IsDateString, IsArray, ValidateNested, Min, Max } from 'class-validator';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsDateString,
+  IsEmail,
+  IsEnum,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
-export enum BillingType {
-  BOLETO = 'BOLETO',
-  PIX = 'PIX',
-  CREDIT_CARD = 'CREDIT_CARD',
-  DEBIT_CARD = 'DEBIT_CARD',
-  UNDEFINED = 'UNDEFINED', // Para links de pagamento (aceita múltiplos)
+export enum OrderKindDto {
+  PRODUCT = 'PRODUCT',
+  CONSULTATION = 'CONSULTATION',
 }
 
-export enum ChargeType {
-  CUSTOM = 'CUSTOM',
-  REUSABLE = 'REUSABLE',
+export enum DiscountTypeDto {
+  NONE = 'NONE',
+  PERCENTAGE = 'PERCENTAGE',
+  FIXED = 'FIXED',
 }
 
-export class SplitRecipientDto {
-  @ApiProperty({ description: 'ID da subconta recebedora (médico ou fornecedor)' })
+export enum FulfillmentTypeDto {
+  NATIONAL = 'NATIONAL',
+  INTERNATIONAL = 'INTERNATIONAL',
+}
+
+export enum OrderStatusDto {
+  DRAFT = 'DRAFT',
+  READY = 'READY',
+  PENDING_PAYMENT = 'PENDING_PAYMENT',
+  PAID = 'PAID',
+  EXPIRED = 'EXPIRED',
+  CANCELLED = 'CANCELLED',
+  REFUNDED = 'REFUNDED',
+}
+
+export class CreateChargeItemDto {
+  @ApiPropertyOptional({ description: 'Produto do catálogo. Vazio = item avulso.' })
+  @IsUUID('4')
+  @IsOptional()
+  productId?: string;
+
+  @ApiPropertyOptional({ example: 'Óleo CBD 3000mg', description: 'Obrigatório para item avulso.' })
   @IsString()
-  subaccountId!: string;
-
-  @ApiPropertyOptional({ example: 70.0, description: 'Percentual do split. Informe percentage OU fixedValue (não os dois).' })
-  @IsNumber()
   @IsOptional()
-  @Min(0.01)
-  @Max(99.99)
-  percentage?: number;
+  productName?: string;
 
-  @ApiPropertyOptional({ example: 30.0, description: 'Valor fixo (R$) do split. Informe percentage OU fixedValue (não os dois).' })
+  @ApiProperty({ example: 1, default: 1 })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(999)
+  quantity!: number;
+
+  @ApiPropertyOptional({ example: 250, description: 'Preço usado nesta venda. Para produto do catálogo, vazio usa o preço padrão.' })
+  @Type(() => Number)
   @IsNumber()
-  @IsOptional()
   @Min(0.01)
-  fixedValue?: number;
+  @IsOptional()
+  unitPrice?: number;
+
+  @ApiPropertyOptional({ description: 'Fornecedor. Obrigatório em item avulso de pedido de produto.' })
+  @IsUUID('4')
+  @IsOptional()
+  supplierSubaccountId?: string;
+
+  @ApiPropertyOptional({ enum: FulfillmentTypeDto, description: 'Obrigatório em item avulso de pedido de produto.' })
+  @IsEnum(FulfillmentTypeDto)
+  @IsOptional()
+  fulfillmentType?: FulfillmentTypeDto;
 }
 
 export class CreateChargeDto {
-  @ApiProperty({ enum: ChargeType, default: 'CUSTOM' })
-  @IsEnum(ChargeType)
-  chargeType!: ChargeType;
+  @ApiProperty({ enum: OrderKindDto })
+  @IsEnum(OrderKindDto)
+  orderKind!: OrderKindDto;
 
-  // Cliente (quem paga)
   @ApiProperty({ example: 'João Silva' })
   @IsString()
   customerName!: string;
 
   @ApiPropertyOptional({ example: 'joao@email.com' })
-  @IsString()
+  @IsEmail()
   @IsOptional()
   customerEmail?: string;
 
-  @ApiPropertyOptional({ example: '12345678901' })
+  @ApiProperty({ example: '12345678901' })
+  @IsString()
+  customerCpfCnpj!: string;
+
+  @ApiPropertyOptional({ example: '11999999999' })
   @IsString()
   @IsOptional()
-  customerCpfCnpj?: string;
+  customerPhone?: string;
 
-  @ApiProperty({ enum: BillingType })
-  @IsEnum(BillingType)
-  billingType!: BillingType;
+  @ApiProperty({ type: [CreateChargeItemDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreateChargeItemDto)
+  items!: CreateChargeItemDto[];
 
-  @ApiProperty({ example: 300.0 })
+  @ApiPropertyOptional({ enum: DiscountTypeDto, default: DiscountTypeDto.NONE })
+  @IsEnum(DiscountTypeDto)
+  @IsOptional()
+  discountType?: DiscountTypeDto;
+
+  @ApiPropertyOptional({ example: 10, description: 'Percentual ou valor em R$, conforme discountType.' })
+  @Type(() => Number)
   @IsNumber()
-  @Min(0.01)
-  value!: number;
+  @Min(0)
+  @IsOptional()
+  discountValue?: number;
 
-  @ApiPropertyOptional({ example: '2026-04-20', description: 'Obrigatório para CUSTOM, opcional para REUSABLE' })
+  @ApiPropertyOptional({ example: 35, description: 'Frete nacional digitado manualmente.' })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  nationalShippingAmount?: number;
+
+  @ApiPropertyOptional({ example: 150, description: 'Frete internacional. Vazio usa international_shipping_default.' })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  internationalShippingAmount?: number;
+
+  @ApiProperty({ description: 'Médico associado ao pedido para cálculo do split.' })
+  @IsUUID('4')
+  doctorSubaccountId!: string;
+
+  @ApiPropertyOptional({ example: 4, description: 'Máximo de parcelas permitido no checkout (1-24).' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(24)
+  @IsOptional()
+  maxInstallments?: number;
+
+  @ApiPropertyOptional({ example: '2026-09-28', description: 'Validade do link. Vazio usa charge_link_expiration_days.' })
   @IsDateString()
   @IsOptional()
-  dueDate?: string;
+  expiresAt?: string;
 
-  @ApiPropertyOptional({ example: 'Consulta médica' })
+  @ApiPropertyOptional({ example: 'Pedido de medicamentos' })
   @IsString()
   @IsOptional()
   description?: string;
 
-  @ApiPropertyOptional({ example: 12, description: 'Número de parcelas (1-24)' })
-  @IsNumber()
+  @ApiPropertyOptional()
+  @IsString()
   @IsOptional()
-  @Min(1)
-  @Max(24)
-  maxInstallments?: number;
-
-  // Splits - array de destinatários (fornecedor, médico, etc.)
-  // O restante automaticamente vai para a conta principal
-  @ApiPropertyOptional({ type: [SplitRecipientDto], description: 'Destinatários do split. O restante vai para conta principal. Se vazio, 100% vai para conta principal.' })
-  @IsArray()
-  @IsOptional()
-  @ValidateNested({ each: true })
-  @Type(() => SplitRecipientDto)
-  splits?: SplitRecipientDto[];
+  notes?: string;
 }
 
 export class ListChargesDto {
@@ -105,20 +177,25 @@ export class ListChargesDto {
   @Min(1)
   limit?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ enum: OrderStatusDto })
+  @IsOptional()
+  @IsEnum(OrderStatusDto)
+  orderStatus?: OrderStatusDto;
+
+  @ApiPropertyOptional({ description: 'Filtro legado de status do Asaas.' })
   @IsOptional()
   @IsString()
   status?: string;
 
-  @ApiPropertyOptional({ enum: ChargeType })
+  @ApiPropertyOptional({ enum: OrderKindDto })
   @IsOptional()
-  @IsEnum(ChargeType)
-  chargeType?: ChargeType;
+  @IsEnum(OrderKindDto)
+  orderKind?: OrderKindDto;
 
-  @ApiPropertyOptional({ enum: BillingType })
+  @ApiPropertyOptional({ description: 'Buscar por nome ou CPF/CNPJ do cliente.' })
   @IsOptional()
-  @IsEnum(BillingType)
-  billingType?: BillingType;
+  @IsString()
+  search?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -129,9 +206,4 @@ export class ListChargesDto {
   @IsOptional()
   @IsDateString()
   dateTo?: string;
-
-  @ApiPropertyOptional({ description: 'Buscar por nome do cliente' })
-  @IsOptional()
-  @IsString()
-  search?: string;
 }
