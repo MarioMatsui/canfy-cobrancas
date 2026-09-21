@@ -50,6 +50,8 @@ type CalculatedSplit = {
   percentage: Prisma.Decimal | null;
   fixedValue: Prisma.Decimal | null;
   basisAmount: Prisma.Decimal;
+  commercialValue: Prisma.Decimal;
+  shippingValue: Prisma.Decimal;
   calculatedValue: Prisma.Decimal;
 };
 
@@ -69,28 +71,44 @@ export class ChargesService {
     const items = await this.resolveItems(dto.items, orderKind);
     const subtotal = this.sum(items.map((item) => item.lineTotal));
 
-    const doctor = await this.prisma.subaccount.findFirst({
-      where: { id: dto.doctorSubaccountId, type: 'DOCTOR', active: true, deletedAt: null },
-      select: { id: true, name: true, walletId: true },
-    });
-    if (!doctor) throw new BadRequestException('Médico não encontrado, inativo ou com tipo inválido');
-    if (!doctor.walletId) throw new BadRequestException('Médico "' + doctor.name + '" não possui walletId do Asaas');
+    let doctor: { id: string; name: string; walletId: string | null } | null = null;
+    if (dto.doctorSubaccountId) {
+      doctor = await this.prisma.subaccount.findFirst({
+        where: { id: dto.doctorSubaccountId, type: 'DOCTOR', active: true, deletedAt: null },
+        select: { id: true, name: true, walletId: true },
+      });
+      if (!doctor) throw new BadRequestException('Médico não encontrado, inativo ou com tipo inválido');
+      if (!doctor.walletId) {
+        throw new BadRequestException('Médico "' + doctor.name + '" não possui walletId do Asaas');
+      }
+    }
 
     if (orderKind === OrderKind.PRODUCT) await this.validateSuppliers(items);
 
-    const splits = this.buildSplits(dto.splits, orderKind, items, doctor.id, subtotal, rules);
-    const distributed = this.sum(splits.map((split) => split.calculatedValue));
-    if (distributed.gt(subtotal)) {
+    const shipping = this.calculateShipping(dto, orderKind, items, rules);
+    const shippingBySupplier = this.allocateShippingToSuppliers(items, shipping.rows);
+    const splits = this.buildSplits(
+      dto.splits,
+      orderKind,
+      items,
+      doctor?.id ?? null,
+      subtotal,
+      rules,
+      shippingBySupplier,
+    );
+
+    // Repasses comerciais continuam limitados ao subtotal. O frete não entra
+    // nessa base: ele é acrescentado depois e pertence 100% ao(s) fornecedor(es).
+    const commercialDistributed = this.sum(splits.map((split) => split.commercialValue));
+    if (commercialDistributed.gt(subtotal)) {
       throw new BadRequestException(
-        'Os repasses desta cobrança somam R$ ' + distributed.toFixed(2) +
+        'Os repasses comerciais desta cobrança somam R$ ' + commercialDistributed.toFixed(2) +
         ', acima do subtotal de R$ ' + subtotal.toFixed(2) + '.',
       );
     }
 
-    // O desconto sai somente da margem da CanFy. Como os repasses agora são
-    // configuráveis por cobrança, a margem disponível é o subtotal menos os
-    // valores calculados dos destinatários — nunca uma porcentagem global fixa.
-    const platformMarginBeforeDiscount = this.money(subtotal.minus(distributed));
+    // O desconto sai somente da margem da CanFy. Frete não compõe essa margem.
+    const platformMarginBeforeDiscount = this.money(subtotal.minus(commercialDistributed));
     const discount = this.calculateDiscount(dto, subtotal);
     if (discount.amount.gt(platformMarginBeforeDiscount)) {
       throw new BadRequestException(
@@ -100,13 +118,17 @@ export class ChargesService {
       );
     }
 
-    const shipping = this.calculateShipping(dto, orderKind, items, rules);
     const totalAmount = this.money(subtotal.minus(discount.amount).plus(shipping.total));
     if (totalAmount.lte(0)) throw new BadRequestException('O total da cobrança deve ser maior que zero');
 
-    // Frete pertence integralmente à conta principal. Repasses são travados em
-    // calculatedValue sobre a base comercial da venda e não devem ser
-    // recalculados depois sobre total com frete/desconto.
+    // calculatedValue já inclui, para fornecedores, a parcela de frete que lhes
+    // pertence. Portanto o total de repasses deve ser comercial + 100% do frete.
+    const distributed = this.sum(splits.map((split) => split.calculatedValue));
+    const expectedDistributed = this.money(commercialDistributed.plus(shipping.total));
+    if (!distributed.eq(expectedDistributed)) {
+      throw new BadRequestException('Não foi possível distribuir integralmente o frete entre os fornecedores');
+    }
+
     const mainAccountValue = this.money(totalAmount.minus(distributed));
     if (mainAccountValue.lt(0)) {
       throw new BadRequestException('Os repasses desta cobrança deixam a conta principal com valor negativo');
@@ -145,7 +167,7 @@ export class ChargesService {
           maxInstallments: dto.maxInstallments ?? 1,
           publicToken,
           expiresAt,
-          doctorSubaccountId: doctor.id,
+          doctorSubaccountId: doctor?.id ?? null,
           description,
           notes: dto.notes?.trim() || null,
 
@@ -228,7 +250,7 @@ export class ChargesService {
       'Pedido criado: ' + chargeId +
       ' | ' + orderKind +
       ' | total R$ ' + totalAmount.toFixed(2) +
-      ' | repasses R$ ' + distributed.toFixed(2) +
+      ' | repasses (com frete) R$ ' + distributed.toFixed(2) +
       ' | principal R$ ' + mainAccountValue.toFixed(2) +
       ' | regras de repasse por cobrança | sem pagamento Asaas',
     );
@@ -461,13 +483,64 @@ export class ChargesService {
     return { rows, total: this.sum(rows.map((row) => row.amount)) };
   }
 
+  private allocateShippingToSuppliers(
+    items: Item[],
+    rows: Array<{ type: ShipmentType; amount: Prisma.Decimal; source: QuoteSource }>,
+  ) {
+    const allocations = new Map<string, Prisma.Decimal>();
+
+    for (const row of rows) {
+      if (row.amount.lte(0)) continue;
+
+      const fulfillmentType =
+        row.type === ShipmentType.INTERNATIONAL
+          ? FulfillmentType.INTERNATIONAL
+          : FulfillmentType.NATIONAL;
+
+      const supplierBases = new Map<string, Prisma.Decimal>();
+      for (const item of items) {
+        if (item.fulfillmentType !== fulfillmentType || !item.supplierSubaccountId) continue;
+        const current = supplierBases.get(item.supplierSubaccountId) ?? new Prisma.Decimal(0);
+        supplierBases.set(item.supplierSubaccountId, current.plus(item.lineTotal));
+      }
+
+      if (supplierBases.size === 0) {
+        throw new BadRequestException(
+          'Há frete ' + fulfillmentType.toLowerCase() + ' sem fornecedor associado aos itens',
+        );
+      }
+
+      const entries = Array.from(supplierBases.entries());
+      const totalBasis = this.sum(entries.map(([, basis]) => basis));
+      let allocated = this.money(0);
+
+      entries.forEach(([supplierId, basis], index) => {
+        const remaining = this.money(row.amount.minus(allocated));
+        const proportional = this.money(row.amount.mul(basis).div(totalBasis));
+        const share =
+          index === entries.length - 1
+            ? remaining
+            : proportional.gt(remaining)
+              ? remaining
+              : proportional;
+
+        allocated = this.money(allocated.plus(share));
+        const current = allocations.get(supplierId) ?? new Prisma.Decimal(0);
+        allocations.set(supplierId, this.money(current.plus(share)));
+      });
+    }
+
+    return allocations;
+  }
+
   private buildSplits(
     requested: ChargeSplitRuleDto[] | undefined,
     orderKind: OrderKind,
     items: Item[],
-    doctorId: string,
+    doctorId: string | null,
     subtotal: Prisma.Decimal,
     rules: Rules,
+    shippingBySupplier: Map<string, Prisma.Decimal>,
   ): CalculatedSplit[] {
     const overrides = new Map<string, ChargeSplitRuleDto>();
     for (const rule of requested ?? []) {
@@ -479,7 +552,12 @@ export class ChargesService {
 
     const expected = new Map<
       string,
-      { recipientType: SplitRecipientType; basisAmount: Prisma.Decimal; defaultPercentage: Prisma.Decimal }
+      {
+        recipientType: SplitRecipientType;
+        basisAmount: Prisma.Decimal;
+        defaultPercentage: Prisma.Decimal;
+        shippingAmount: Prisma.Decimal;
+      }
     >();
 
     if (orderKind === OrderKind.PRODUCT) {
@@ -494,16 +572,20 @@ export class ChargesService {
           recipientType: SplitRecipientType.SUPPLIER,
           basisAmount: this.money(basis),
           defaultPercentage: rules.productSupplier,
+          shippingAmount: shippingBySupplier.get(supplierId) ?? this.money(0),
         });
       }
     }
 
-    expected.set(doctorId, {
-      recipientType: SplitRecipientType.DOCTOR,
-      basisAmount: subtotal,
-      defaultPercentage:
-        orderKind === OrderKind.PRODUCT ? rules.productDoctor : rules.consultationDoctor,
-    });
+    if (doctorId) {
+      expected.set(doctorId, {
+        recipientType: SplitRecipientType.DOCTOR,
+        basisAmount: subtotal,
+        defaultPercentage:
+          orderKind === OrderKind.PRODUCT ? rules.productDoctor : rules.consultationDoctor,
+        shippingAmount: this.money(0),
+      });
+    }
 
     for (const subaccountId of overrides.keys()) {
       if (!expected.has(subaccountId)) {
@@ -521,6 +603,7 @@ export class ChargesService {
       const rawValue = override
         ? this.money(override.value)
         : config.defaultPercentage;
+      const shippingValue = this.money(config.shippingAmount);
 
       if (rawValue.lt(0)) {
         throw new BadRequestException('Repasse não pode ser negativo');
@@ -530,7 +613,7 @@ export class ChargesService {
         if (rawValue.gt(100)) {
           throw new BadRequestException('Repasse percentual não pode ser maior que 100%');
         }
-        const calculatedValue = this.percent(config.basisAmount, rawValue);
+        const commercialValue = this.percent(config.basisAmount, rawValue);
         return {
           subaccountId,
           recipientType: config.recipientType,
@@ -539,7 +622,9 @@ export class ChargesService {
           percentage: rawValue,
           fixedValue: null,
           basisAmount: config.basisAmount,
-          calculatedValue,
+          commercialValue,
+          shippingValue,
+          calculatedValue: this.money(commercialValue.plus(shippingValue)),
         };
       }
 
@@ -551,6 +636,7 @@ export class ChargesService {
         );
       }
 
+      const commercialValue = rawValue;
       return {
         subaccountId,
         recipientType: config.recipientType,
@@ -559,7 +645,9 @@ export class ChargesService {
         percentage: null,
         fixedValue: rawValue,
         basisAmount: config.basisAmount,
-        calculatedValue: rawValue,
+        commercialValue,
+        shippingValue,
+        calculatedValue: this.money(commercialValue.plus(shippingValue)),
       };
     });
   }

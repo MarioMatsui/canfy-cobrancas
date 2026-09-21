@@ -85,6 +85,7 @@ type SplitRow = {
   recipientType: RecipientType;
   basis: number;
   defaultPercentage: number;
+  shippingAmount: number;
 };
 
 const blankProduct = (): Item => ({
@@ -120,6 +121,7 @@ const futureDate = (days: number) => {
 };
 
 const inputNumber = (value: number) => String(Number(value.toFixed(2)));
+const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 const apiErrorMessage = (error: unknown, fallback: string) => {
   const apiError = error as AxiosError<ApiErrorBody>;
@@ -256,6 +258,53 @@ export default function ChargesPage() {
   const hasInternational =
     orderKind === 'PRODUCT' && items.some((item) => item.fulfillmentType === 'INTERNATIONAL');
 
+  const nationalShipping =
+    hasNational ? Number(nationalShippingAmount) || 0 : 0;
+  const internationalShipping =
+    hasInternational
+      ? Number(internationalShippingAmount) || setting('international_shipping_default', 150)
+      : 0;
+  const shipping = roundMoney(nationalShipping + internationalShipping);
+
+  // O frete pertence integralmente aos fornecedores. Quando a mesma modalidade
+  // de envio envolve mais de um fornecedor, o valor é rateado proporcionalmente
+  // ao subtotal dos itens de cada fornecedor nessa modalidade.
+  const shippingBySupplier = new Map<string, number>();
+  const allocateShipping = (fulfillmentType: FulfillmentType, amount: number) => {
+    if (amount <= 0) return;
+
+    const bases = new Map<string, number>();
+    items.forEach((item) => {
+      if (item.fulfillmentType !== fulfillmentType || !item.supplierSubaccountId) return;
+      const lineTotal = (Number(item.unitPrice) || 0) * item.quantity;
+      bases.set(
+        item.supplierSubaccountId,
+        (bases.get(item.supplierSubaccountId) || 0) + lineTotal,
+      );
+    });
+
+    const entries = Array.from(bases.entries());
+    const totalBasis = entries.reduce((sum, [, basis]) => sum + basis, 0);
+    if (entries.length === 0 || totalBasis <= 0) return;
+
+    let allocated = 0;
+    entries.forEach(([supplierId, basis], index) => {
+      const remaining = roundMoney(amount - allocated);
+      const proportional = roundMoney((amount * basis) / totalBasis);
+      const share =
+        index === entries.length - 1 ? remaining : Math.min(proportional, remaining);
+
+      allocated = roundMoney(allocated + share);
+      shippingBySupplier.set(
+        supplierId,
+        roundMoney((shippingBySupplier.get(supplierId) || 0) + share),
+      );
+    });
+  };
+
+  allocateShipping('NATIONAL', nationalShipping);
+  allocateShipping('INTERNATIONAL', internationalShipping);
+
   const splitRows: SplitRow[] = [];
   if (orderKind === 'PRODUCT') {
     const supplierBases = new Map<string, number>();
@@ -275,6 +324,7 @@ export default function ChargesPage() {
         recipientType: 'SUPPLIER',
         basis,
         defaultPercentage: supplierDefaultPct,
+        shippingAmount: shippingBySupplier.get(id) || 0,
       });
     });
   }
@@ -287,6 +337,7 @@ export default function ChargesPage() {
       basis: subtotal,
       defaultPercentage:
         orderKind === 'PRODUCT' ? productDoctorDefaultPct : consultationDoctorDefaultPct,
+      shippingAmount: 0,
     });
   }
 
@@ -296,33 +347,34 @@ export default function ChargesPage() {
       value: String(row.defaultPercentage),
     };
     const rawValue = Number(draft.value) || 0;
-    const calculatedValue =
-      draft.mode === 'PERCENTAGE' ? (row.basis * rawValue) / 100 : rawValue;
-    return { ...row, draft, rawValue, calculatedValue };
+    const commercialValue = roundMoney(
+      draft.mode === 'PERCENTAGE' ? (row.basis * rawValue) / 100 : rawValue,
+    );
+    const shippingValue = row.recipientType === 'SUPPLIER' ? row.shippingAmount : 0;
+    const calculatedValue = roundMoney(commercialValue + shippingValue);
+    return { ...row, draft, rawValue, commercialValue, shippingValue, calculatedValue };
   });
 
-  const distributed = computedSplits.reduce((sum, split) => sum + split.calculatedValue, 0);
-  const platformMarginBeforeDiscount = subtotal - distributed;
+  const commercialDistributed = roundMoney(
+    computedSplits.reduce((sum, split) => sum + split.commercialValue, 0),
+  );
+  const distributed = roundMoney(
+    computedSplits.reduce((sum, split) => sum + split.calculatedValue, 0),
+  );
+  const platformMarginBeforeDiscount = roundMoney(subtotal - commercialDistributed);
   const maxDiscountWithoutReducingSplits = Math.max(0, platformMarginBeforeDiscount);
 
   const discountRaw = Number(discountValue) || 0;
-  const discountAmount =
+  const discountAmount = roundMoney(
     discountType === 'PERCENTAGE'
       ? (subtotal * discountRaw) / 100
       : discountType === 'FIXED'
         ? discountRaw
-        : 0;
+        : 0,
+  );
 
-  const shipping =
-    orderKind === 'PRODUCT'
-      ? (hasNational ? Number(nationalShippingAmount) || 0 : 0) +
-        (hasInternational
-          ? Number(internationalShippingAmount) || setting('international_shipping_default', 150)
-          : 0)
-      : 0;
-
-  const total = subtotal - discountAmount + shipping;
-  const mainValue = total - distributed;
+  const total = roundMoney(subtotal - discountAmount + shipping);
+  const mainValue = roundMoney(total - distributed);
 
   const reset = () => {
     setShowForm(false);
@@ -453,11 +505,6 @@ export default function ChargesPage() {
       toast.error('Email inválido');
       return;
     }
-    if (!doctorSubaccountId) {
-      toast.error('Selecione o médico');
-      return;
-    }
-
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index];
       if (!item.productId && !item.productName.trim()) {
@@ -483,7 +530,7 @@ export default function ChargesPage() {
         toast.error('O repasse percentual de ' + split.name + ' não pode passar de 100%');
         return;
       }
-      if (split.calculatedValue > split.basis + 0.005) {
+      if (split.commercialValue > split.basis + 0.005) {
         toast.error(
           'O repasse de ' + split.name + ' não pode ultrapassar sua base de ' + money(split.basis),
         );
@@ -491,8 +538,8 @@ export default function ChargesPage() {
       }
     }
 
-    if (distributed > subtotal + 0.005) {
-      toast.error('A soma dos repasses não pode ultrapassar o subtotal');
+    if (commercialDistributed > subtotal + 0.005) {
+      toast.error('A soma dos repasses comerciais não pode ultrapassar o subtotal');
       return;
     }
     if (discountType !== 'NONE' && discountRaw <= 0) {
@@ -535,7 +582,7 @@ export default function ChargesPage() {
         calculationType: split.draft.mode,
         value: split.rawValue,
       })),
-      doctorSubaccountId,
+      doctorSubaccountId: doctorSubaccountId || undefined,
       discountType,
       discountValue: discountType === 'NONE' ? 0 : discountRaw,
       nationalShippingAmount: hasNational ? Number(nationalShippingAmount) || 0 : undefined,
@@ -830,7 +877,7 @@ export default function ChargesPage() {
               value={doctorSubaccountId}
               onChange={(event) => setDoctorSubaccountId(event.target.value)}
             >
-              <option value="">Médico *</option>
+              <option value="">Sem médico (sem split)</option>
               {doctors.map((doctor) => (
                 <option key={doctor.id} value={doctor.id}>
                   {doctor.name}
@@ -862,14 +909,16 @@ export default function ChargesPage() {
               <h3 className="font-semibold">Repasses desta cobrança</h3>
               <p className="text-xs text-gray-500 mt-1">
                 Ajuste cada destinatário em % ou R$. Os percentuais de fornecedor usam
-                apenas os itens daquele fornecedor; o médico usa o subtotal. A conta
-                principal recebe o restante.
+                apenas os itens daquele fornecedor; o médico usa o subtotal e é opcional.
+                O frete é somado integralmente ao repasse do(s) fornecedor(es).
               </p>
             </div>
 
             {splitRows.length === 0 ? (
               <div className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
-                Selecione fornecedor(es) e médico para configurar os repasses.
+                {orderKind === 'PRODUCT'
+                  ? 'Selecione o fornecedor obrigatório do(s) item(ns). O médico é opcional.'
+                  : 'Médico opcional. Sem seleção, não haverá split médico.'}
               </div>
             ) : (
               <div className="space-y-2">
@@ -895,6 +944,7 @@ export default function ChargesPage() {
                         <div className="text-xs text-gray-500">
                           {row.recipientType === 'DOCTOR' ? 'Médico' : 'Fornecedor'} · base{' '}
                           {money(row.basis)}
+                          {row.shippingAmount > 0 ? ' · frete ' + money(row.shippingAmount) : ''}
                         </div>
                       </div>
 
@@ -1071,6 +1121,9 @@ export default function ChargesPage() {
                         ? inputNumber(split.rawValue) + '%'
                         : money(split.rawValue) + ' fixo'}
                       )
+                      {split.shippingValue > 0
+                        ? ' + ' + money(split.shippingValue) + ' frete'
+                        : ''}
                     </span>
                     <strong>{money(split.calculatedValue)}</strong>
                   </div>
@@ -1085,8 +1138,9 @@ export default function ChargesPage() {
                   <strong>{money(mainValue)}</strong>
                 </div>
                 <p className="text-xs text-gray-500">
-                  O frete fica na conta principal. O desconto reduz apenas o valor que
-                  restaria para a CanFy, sem recalcular os repasses já definidos.
+                  O frete vai integralmente ao(s) fornecedor(es). Se houver mais de um
+                  fornecedor na mesma modalidade de envio, ele é rateado pelo valor dos
+                  itens. O desconto reduz apenas a margem da CanFy.
                 </p>
               </div>
             </div>

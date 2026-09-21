@@ -166,9 +166,12 @@ export class CreateChargeDto {
   @IsOptional()
   internationalShippingAmount?: number;
 
-  @ApiProperty({ description: 'Médico associado ao pedido e ao repasse desta cobrança.' })
+  @ApiPropertyOptional({
+    description: 'Médico opcional associado ao pedido. Se omitido, a cobrança não terá split médico.',
+  })
   @IsUUID('4')
-  doctorSubaccountId!: string;
+  @IsOptional()
+  doctorSubaccountId?: string;
 
   @ApiPropertyOptional({ example: 4, description: 'Máximo de parcelas permitido no checkout (1-24).' })
   @Type(() => Number)
