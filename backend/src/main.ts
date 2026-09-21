@@ -7,6 +7,17 @@ import { AppModule } from './app.module';
 
 config(); // Load .env before anything else
 
+function normalizeOrigin(value: string): string {
+  return value.trim().replace(/\/+$/, '');
+}
+
+function readOrigins(name: string): string[] {
+  return (process.env[name] ?? '')
+    .split(',')
+    .map(normalizeOrigin)
+    .filter(Boolean);
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
@@ -21,13 +32,29 @@ async function bootstrap() {
     }),
   );
 
+  const configuredOrigins = [
+    ...readOrigins('FRONTEND_URL'),
+    ...readOrigins('CHECKOUT_FRONTEND_URL'),
+  ];
+  const allowedOrigins = new Set(
+    configuredOrigins.length > 0
+      ? configuredOrigins
+      : ['http://localhost:3000', 'http://localhost:3002', 'http://localhost:3003'],
+  );
+
   app.enableCors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      const allowed = process.env.FRONTEND_URL
-        ? process.env.FRONTEND_URL.split(',')
-        : ['http://localhost:3000', 'http://localhost:3002'];
-      const isTryCloudflare = origin && /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(origin);
-      if (!origin || isTryCloudflare || allowed.some(u => origin.startsWith(u))) {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      const normalized = normalizeOrigin(origin);
+      const isDevelopmentTunnel =
+        process.env.NODE_ENV !== 'production' &&
+        /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(normalized);
+
+      if (isDevelopmentTunnel || allowedOrigins.has(normalized)) {
         callback(null, true);
       } else {
         callback(new Error('Origem não permitida pelo CORS'));

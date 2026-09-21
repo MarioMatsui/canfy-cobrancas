@@ -1,34 +1,42 @@
-import { Injectable, Logger, NotFoundException, GoneException } from '@nestjs/common';
+import { GoneException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
-  PublicChargeResponseDto,
   PublicChargeItemDto,
+  PublicChargeResponseDto,
+  PublicChargeShipmentDto,
+  PublicFulfillmentType,
+  PublicOrderKind,
+  PublicOrderStatus,
+  PublicShipmentType,
 } from './dto/public-charge.response.dto';
 
-/**
- * Estados em que a cobranca NAO deve ser exibida no checkout publico.
- *
- * DRAFT fica de fora de proposito: enquanto o atendente esta montando,
- * preco e split ainda podem mudar. O link so vale a partir de READY.
- */
-const NAO_EXIBIVEL = ['DRAFT', 'CANCELLED', 'EXPIRED', 'REFUNDED'];
+const PUBLIC_TOKEN_V4 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+// Allowlist proposital: status novo no futuro nao fica publico automaticamente.
+const EXIBIVEL = new Set<PublicOrderStatus>(['READY', 'PENDING_PAYMENT', 'PAID']);
 
 @Injectable()
 export class PublicCheckoutService {
-  private readonly logger = new Logger(PublicCheckoutService.name);
-
   constructor(private readonly prisma: PrismaService) {}
 
   async findByToken(token: string): Promise<PublicChargeResponseDto> {
-    // `select` explicito, nunca `include`. Campo que nao esta listado
-    // aqui nao sai do banco — nem por acidente, nem se alguem adicionar
-    // uma coluna sensivel em charges depois.
+    // Token malformado e token inexistente devolvem a mesma resposta publica.
+    // Evita diferenciar casos durante tentativa de enumeracao de links.
+    if (!PUBLIC_TOKEN_V4.test(token)) {
+      throw new NotFoundException('Cobrança não encontrada');
+    }
+
+    // `select` explicito, nunca `include`: somente dados necessarios para a
+    // tela publica saem do banco. Split, CPF, IDs internos e dados do Asaas
+    // nao sao carregados por esta consulta.
     const charge = await this.prisma.charge.findUnique({
       where: { publicToken: token },
       select: {
         publicToken: true,
         orderStatus: true,
+        orderKind: true,
         customerName: true,
         description: true,
         subtotal: true,
@@ -38,8 +46,7 @@ export class PublicCheckoutService {
         maxInstallments: true,
         expiresAt: true,
         isActive: true,
-        // legado: usado so como fallback de exibicao quando a cobranca
-        // antiga nao tem charge_items
+        // Legado: usado apenas no fallback de cobrancas antigas sem charge_items.
         value: true,
         items: {
           select: {
@@ -47,27 +54,27 @@ export class PublicCheckoutService {
             quantity: true,
             unitPrice: true,
             lineTotal: true,
+            fulfillmentType: true,
           },
           orderBy: { createdAt: 'asc' },
         },
         shipments: {
           select: {
+            type: true,
+            shippingAmount: true,
             estimatedDaysMin: true,
             estimatedDaysMax: true,
           },
           orderBy: { createdAt: 'asc' },
-          take: 1,
         },
       },
     });
 
-    // Token inexistente e token invalido devolvem a mesma coisa.
-    // Nao damos pistas para quem estiver varrendo tokens.
     if (!charge || !charge.isActive) {
       throw new NotFoundException('Cobrança não encontrada');
     }
 
-    if (NAO_EXIBIVEL.includes(charge.orderStatus)) {
+    if (!EXIBIVEL.has(charge.orderStatus as PublicOrderStatus)) {
       throw new GoneException('Esta cobrança não está mais disponível');
     }
 
@@ -79,50 +86,57 @@ export class PublicCheckoutService {
   }
 
   private toResponse(charge: any): PublicChargeResponseDto {
-    const n = (v: Prisma.Decimal | null | undefined): number =>
-      v ? Number(v.toString()) : 0;
+    const n = (value: Prisma.Decimal | number | null | undefined): number =>
+      value == null ? 0 : Number(value.toString());
 
-    let items: PublicChargeItemDto[] = charge.items.map((i: any) => ({
-      name: i.productName,
-      quantity: i.quantity,
-      unitPrice: n(i.unitPrice),
-      lineTotal: n(i.lineTotal),
+    let items: PublicChargeItemDto[] = charge.items.map((item: any) => ({
+      name: item.productName,
+      quantity: item.quantity,
+      unitPrice: n(item.unitPrice),
+      lineTotal: n(item.lineTotal),
+      ...(charge.orderKind === 'PRODUCT'
+        ? { fulfillmentType: item.fulfillmentType as PublicFulfillmentType }
+        : {}),
     }));
 
-    // Cobrancas criadas antes da migration nao tem charge_items.
-    // Em vez de mostrar um checkout vazio, monta uma linha unica a
-    // partir da descricao e do total.
+    // Cobrancas historicas nao possuem charge_items. Mantemos esses links
+    // legados legiveis sem expor ou inventar classificacoes de produto.
     if (items.length === 0) {
+      const legacyTotal = n(charge.totalAmount ?? charge.value);
       items = [
         {
           name: charge.description?.trim() || 'Pagamento',
           quantity: 1,
-          unitPrice: n(charge.totalAmount ?? charge.value),
-          lineTotal: n(charge.totalAmount ?? charge.value),
+          unitPrice: legacyTotal,
+          lineTotal: legacyTotal,
         },
       ];
     }
 
-    const shipment = charge.shipments?.[0];
+    const shipments: PublicChargeShipmentDto[] = charge.shipments.map((shipment: any) => ({
+      type: shipment.type as PublicShipmentType,
+      shippingAmount: n(shipment.shippingAmount),
+      ...(shipment.estimatedDaysMin != null
+        ? { estimatedDaysMin: shipment.estimatedDaysMin }
+        : {}),
+      ...(shipment.estimatedDaysMax != null
+        ? { estimatedDaysMax: shipment.estimatedDaysMax }
+        : {}),
+    }));
 
     return {
-      token: charge.publicToken,
-      status: charge.orderStatus,
+      publicToken: charge.publicToken,
+      orderStatus: charge.orderStatus as PublicOrderStatus,
+      ...(charge.orderKind ? { orderKind: charge.orderKind as PublicOrderKind } : {}),
       customerName: charge.customerName,
       description: charge.description ?? undefined,
       items,
       subtotal: n(charge.subtotal),
-      discount: n(charge.discountAmount),
-      shipping: n(charge.shippingAmount),
-      total: n(charge.totalAmount),
+      discountAmount: n(charge.discountAmount),
+      shippingAmount: n(charge.shippingAmount),
+      totalAmount: n(charge.totalAmount),
       maxInstallments: charge.maxInstallments,
-      delivery:
-        shipment?.estimatedDaysMin != null || shipment?.estimatedDaysMax != null
-          ? {
-              minDays: shipment.estimatedDaysMin ?? undefined,
-              maxDays: shipment.estimatedDaysMax ?? undefined,
-            }
-          : undefined,
+      shipments,
       expiresAt: charge.expiresAt?.toISOString(),
     };
   }

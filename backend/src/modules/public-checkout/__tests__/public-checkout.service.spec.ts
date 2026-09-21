@@ -1,25 +1,41 @@
+import { GoneException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { NotFoundException, GoneException } from '@nestjs/common';
-import { PublicCheckoutService } from '../public-checkout.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
+import { PublicCheckoutService } from '../public-checkout.service';
 
-const D = (v: string) => ({ toString: () => v }) as any;
+const D = (value: string) => ({ toString: () => value }) as any;
 
 const base = {
   publicToken: '42495a27-9d2d-4cc4-8aaf-dcc6bd95c248',
-  orderStatus: 'PENDING_PAYMENT',
+  orderStatus: 'READY',
+  orderKind: 'PRODUCT',
   customerName: 'Mario',
-  description: 'Óleo CBDMD',
+  description: 'Pedido de medicamentos',
   subtotal: D('500.00'),
   discountAmount: D('50.00'),
-  shippingAmount: D('50.00'),
-  totalAmount: D('500.00'),
-  value: D('500.00'),
+  shippingAmount: D('35.00'),
+  totalAmount: D('485.00'),
+  value: D('485.00'),
   maxInstallments: 6,
   expiresAt: null,
   isActive: true,
-  items: [],
-  shipments: [],
+  items: [
+    {
+      productName: 'Óleo X',
+      quantity: 1,
+      unitPrice: D('500.00'),
+      lineTotal: D('500.00'),
+      fulfillmentType: 'NATIONAL',
+    },
+  ],
+  shipments: [
+    {
+      type: 'NATIONAL',
+      shippingAmount: D('35.00'),
+      estimatedDaysMin: null,
+      estimatedDaysMax: null,
+    },
+  ],
 };
 
 describe('PublicCheckoutService', () => {
@@ -37,25 +53,47 @@ describe('PublicCheckoutService', () => {
     service = mod.get(PublicCheckoutService);
   });
 
-  it('devolve os valores corretos', async () => {
+  it('devolve o contrato definitivo de uma cobranca READY', async () => {
     findUnique.mockResolvedValue(base);
-    const r = await service.findByToken(base.publicToken);
+    const result = await service.findByToken(base.publicToken);
 
-    expect(r.subtotal).toBe(500);
-    expect(r.discount).toBe(50);
-    expect(r.shipping).toBe(50);
-    expect(r.total).toBe(500);
-    expect(r.maxInstallments).toBe(6);
+    expect(result.publicToken).toBe(base.publicToken);
+    expect(result.orderStatus).toBe('READY');
+    expect(result.orderKind).toBe('PRODUCT');
+    expect(result.subtotal).toBe(500);
+    expect(result.discountAmount).toBe(50);
+    expect(result.shippingAmount).toBe(35);
+    expect(result.totalAmount).toBe(485);
+    expect(result.maxInstallments).toBe(6);
+    expect(result.items[0].fulfillmentType).toBe('NATIONAL');
   });
 
-  // Este e o teste que mais importa. Se alguem adicionar um campo
-  // sensivel ao select do service, ele quebra.
-  it('nao vaza nenhum dado sensivel', async () => {
+  it('consulta o banco somente com campos permitidos para o checkout publico', async () => {
     findUnique.mockResolvedValue(base);
-    const r = await service.findByToken(base.publicToken);
-    const json = JSON.stringify(r).toLowerCase();
+    await service.findByToken(base.publicToken);
 
-    for (const proibido of [
+    const query = findUnique.mock.calls[0][0];
+    expect(query.where).toEqual({ publicToken: base.publicToken });
+    for (const forbidden of [
+      'id',
+      'customerCpfCnpj',
+      'customerAsaasId',
+      'asaasId',
+      'doctorSubaccountId',
+      'splits',
+      'splitResults',
+      'netValue',
+    ]) {
+      expect(query.select[forbidden]).toBeUndefined();
+    }
+  });
+
+  it('nao vaza informacao financeira interna na resposta', async () => {
+    findUnique.mockResolvedValue(base);
+    const result = await service.findByToken(base.publicToken);
+    const json = JSON.stringify(result).toLowerCase();
+
+    for (const forbidden of [
       'cpf',
       'cnpj',
       'asaas',
@@ -63,45 +101,111 @@ describe('PublicCheckoutService', () => {
       'apikey',
       'api_key',
       'split',
+      'supplier',
+      'fornecedor',
+      'doctor',
+      'medico',
       'netvalue',
       'net_value',
+      'calculatedvalue',
+      'basisamount',
       'margem',
     ]) {
-      expect(json).not.toContain(proibido);
+      expect(json).not.toContain(forbidden);
     }
   });
 
-  it('monta uma linha de fallback para cobranca antiga sem itens', async () => {
-    findUnique.mockResolvedValue(base);
-    const r = await service.findByToken(base.publicToken);
-
-    expect(r.items).toHaveLength(1);
-    expect(r.items[0].name).toBe('Óleo CBDMD');
-    expect(r.items[0].lineTotal).toBe(500);
-  });
-
-  it('usa os itens reais quando existem', async () => {
+  it('devolve todos os envios em pedido misto nacional e internacional', async () => {
     findUnique.mockResolvedValue({
       ...base,
-      items: [
-        { productName: 'Óleo X', quantity: 1, unitPrice: D('500.00'), lineTotal: D('500.00') },
-        { productName: 'Gomas', quantity: 2, unitPrice: D('75.00'), lineTotal: D('150.00') },
+      shippingAmount: D('185.00'),
+      totalAmount: D('635.00'),
+      shipments: [
+        {
+          type: 'NATIONAL',
+          shippingAmount: D('35.00'),
+          estimatedDaysMin: 3,
+          estimatedDaysMax: 6,
+        },
+        {
+          type: 'INTERNATIONAL',
+          shippingAmount: D('150.00'),
+          estimatedDaysMin: 12,
+          estimatedDaysMax: 20,
+        },
       ],
     });
-    const r = await service.findByToken(base.publicToken);
 
-    expect(r.items).toHaveLength(2);
-    expect(r.items[1].quantity).toBe(2);
+    const result = await service.findByToken(base.publicToken);
+
+    expect(result.shipments).toEqual([
+      {
+        type: 'NATIONAL',
+        shippingAmount: 35,
+        estimatedDaysMin: 3,
+        estimatedDaysMax: 6,
+      },
+      {
+        type: 'INTERNATIONAL',
+        shippingAmount: 150,
+        estimatedDaysMin: 12,
+        estimatedDaysMax: 20,
+      },
+    ]);
   });
 
-  it('devolve o prazo de entrega quando ha envio', async () => {
+  it('nao expoe fulfillmentType em consulta e nao exige envio', async () => {
     findUnique.mockResolvedValue({
       ...base,
-      shipments: [{ estimatedDaysMin: 3, estimatedDaysMax: 6 }],
+      orderKind: 'CONSULTATION',
+      description: 'Consulta médica',
+      shippingAmount: D('0.00'),
+      totalAmount: D('450.00'),
+      items: [
+        {
+          productName: 'Consulta médica',
+          quantity: 1,
+          unitPrice: D('500.00'),
+          lineTotal: D('500.00'),
+          fulfillmentType: 'NATIONAL',
+        },
+      ],
+      shipments: [],
     });
-    const r = await service.findByToken(base.publicToken);
 
-    expect(r.delivery).toEqual({ minDays: 3, maxDays: 6 });
+    const result = await service.findByToken(base.publicToken);
+
+    expect(result.orderKind).toBe('CONSULTATION');
+    expect(result.shipments).toEqual([]);
+    expect(result.items[0]).not.toHaveProperty('fulfillmentType');
+  });
+
+  it('mantem fallback para cobranca historica sem itens e sem orderKind', async () => {
+    findUnique.mockResolvedValue({
+      ...base,
+      orderStatus: 'PENDING_PAYMENT',
+      orderKind: null,
+      description: 'Pagamento legado',
+      subtotal: D('99.00'),
+      discountAmount: D('0.00'),
+      shippingAmount: D('0.00'),
+      totalAmount: D('99.00'),
+      value: D('99.00'),
+      items: [],
+      shipments: [],
+    });
+
+    const result = await service.findByToken(base.publicToken);
+
+    expect(result).not.toHaveProperty('orderKind');
+    expect(result.items).toEqual([
+      { name: 'Pagamento legado', quantity: 1, unitPrice: 99, lineTotal: 99 },
+    ]);
+  });
+
+  it('404 para token malformado sem consultar o banco', async () => {
+    await expect(service.findByToken('token-invalido')).rejects.toThrow(NotFoundException);
+    expect(findUnique).not.toHaveBeenCalled();
   });
 
   it('404 quando o token nao existe', async () => {
@@ -109,24 +213,27 @@ describe('PublicCheckoutService', () => {
     await expect(service.findByToken(base.publicToken)).rejects.toThrow(NotFoundException);
   });
 
-  it('410 para cobranca em DRAFT', async () => {
-    findUnique.mockResolvedValue({ ...base, orderStatus: 'DRAFT' });
-    await expect(service.findByToken(base.publicToken)).rejects.toThrow(GoneException);
+  it('404 quando a cobranca esta inativa', async () => {
+    findUnique.mockResolvedValue({ ...base, isActive: false });
+    await expect(service.findByToken(base.publicToken)).rejects.toThrow(NotFoundException);
   });
 
-  it('410 para cobranca cancelada', async () => {
-    findUnique.mockResolvedValue({ ...base, orderStatus: 'CANCELLED' });
-    await expect(service.findByToken(base.publicToken)).rejects.toThrow(GoneException);
-  });
+  it.each(['DRAFT', 'CANCELLED', 'EXPIRED', 'REFUNDED'])(
+    '410 para cobranca com orderStatus %s',
+    async (orderStatus) => {
+      findUnique.mockResolvedValue({ ...base, orderStatus });
+      await expect(service.findByToken(base.publicToken)).rejects.toThrow(GoneException);
+    },
+  );
 
-  it('410 quando o link expirou', async () => {
+  it('410 quando o link expirou cronologicamente', async () => {
     findUnique.mockResolvedValue({ ...base, expiresAt: new Date(Date.now() - 1000) });
     await expect(service.findByToken(base.publicToken)).rejects.toThrow(GoneException);
   });
 
-  it('exibe normalmente cobranca ja paga', async () => {
-    findUnique.mockResolvedValue({ ...base, orderStatus: 'PAID' });
-    const r = await service.findByToken(base.publicToken);
-    expect(r.status).toBe('PAID');
+  it.each(['READY', 'PENDING_PAYMENT', 'PAID'])('exibe status publico %s', async (orderStatus) => {
+    findUnique.mockResolvedValue({ ...base, orderStatus });
+    const result = await service.findByToken(base.publicToken);
+    expect(result.orderStatus).toBe(orderStatus);
   });
 });

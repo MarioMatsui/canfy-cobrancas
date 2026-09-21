@@ -1,5 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
+export type PublicOrderKind = 'PRODUCT' | 'CONSULTATION';
+export type PublicOrderStatus = 'READY' | 'PENDING_PAYMENT' | 'PAID';
+export type PublicFulfillmentType = 'NATIONAL' | 'INTERNATIONAL';
+export type PublicShipmentType = 'NATIONAL' | 'INTERNATIONAL';
+
 export class PublicChargeItemDto {
   @ApiProperty({ example: 'Óleo CBDMD 5000mg' })
   name!: string;
@@ -12,39 +17,50 @@ export class PublicChargeItemDto {
 
   @ApiProperty({ example: 500 })
   lineTotal!: number;
+
+  @ApiPropertyOptional({ enum: ['NATIONAL', 'INTERNATIONAL'], example: 'NATIONAL' })
+  fulfillmentType?: PublicFulfillmentType;
 }
 
-export class PublicChargeDeliveryDto {
+export class PublicChargeShipmentDto {
+  @ApiProperty({ enum: ['NATIONAL', 'INTERNATIONAL'], example: 'NATIONAL' })
+  type!: PublicShipmentType;
+
+  @ApiProperty({ example: 35 })
+  shippingAmount!: number;
+
   @ApiPropertyOptional({ example: 3 })
-  minDays?: number;
+  estimatedDaysMin?: number;
 
   @ApiPropertyOptional({ example: 6 })
-  maxDays?: number;
+  estimatedDaysMax?: number;
 }
 
 /**
- * Tudo que o pagar.canfy pode ver.
+ * Contrato publico consumido pelo pagar.canfy.
  *
  * O que NUNCA entra aqui:
- *   cpfCnpj, asaasId, customerAsaasId, walletId, apiKey,
- *   splits, margem da CanFy, netValue, o id interno da cobranca.
+ *   charge.id, cpfCnpj, asaasId, customerAsaasId, walletId, apiKey,
+ *   subcontas, medico, fornecedor, splits, margem da CanFy, netValue.
  *
- * Se algum campo novo precisar aparecer no checkout, ele tem que ser
- * adicionado aqui E no `select` do service. O service usa `select`
- * explicito justamente para que esquecer isso resulte em campo
- * faltando, nunca em vazamento.
+ * Campo novo de checkout precisa ser adicionado explicitamente aqui e no
+ * `select` do service. Assim um campo sensivel adicionado ao banco no futuro
+ * nao passa a ser exposto por acidente.
  */
 export class PublicChargeResponseDto {
   @ApiProperty({ example: '42495a27-9d2d-4cc4-8aaf-dcc6bd95c248' })
-  token!: string;
+  publicToken!: string;
 
-  @ApiProperty({ example: 'PENDING_PAYMENT' })
-  status!: string;
+  @ApiProperty({ enum: ['READY', 'PENDING_PAYMENT', 'PAID'], example: 'READY' })
+  orderStatus!: PublicOrderStatus;
+
+  @ApiPropertyOptional({ enum: ['PRODUCT', 'CONSULTATION'], example: 'PRODUCT' })
+  orderKind?: PublicOrderKind;
 
   @ApiProperty({ example: 'Mario' })
   customerName!: string;
 
-  @ApiPropertyOptional({ example: 'Consulta médica' })
+  @ApiPropertyOptional({ example: 'Pedido de medicamentos' })
   description?: string;
 
   @ApiProperty({ type: [PublicChargeItemDto] })
@@ -54,20 +70,20 @@ export class PublicChargeResponseDto {
   subtotal!: number;
 
   @ApiProperty({ example: 50 })
-  discount!: number;
+  discountAmount!: number;
 
-  @ApiProperty({ example: 50 })
-  shipping!: number;
+  @ApiProperty({ example: 35 })
+  shippingAmount!: number;
 
-  @ApiProperty({ example: 500 })
-  total!: number;
+  @ApiProperty({ example: 485 })
+  totalAmount!: number;
 
   @ApiProperty({ example: 6 })
   maxInstallments!: number;
 
-  @ApiPropertyOptional({ type: PublicChargeDeliveryDto })
-  delivery?: PublicChargeDeliveryDto;
+  @ApiProperty({ type: [PublicChargeShipmentDto] })
+  shipments!: PublicChargeShipmentDto[];
 
-  @ApiPropertyOptional({ example: '2026-09-25T00:00:00.000Z' })
+  @ApiPropertyOptional({ example: '2026-09-28T23:59:59.999Z' })
   expiresAt?: string;
 }

@@ -47,6 +47,7 @@ services:
       REDIS_PORT: 6379
       PORT: 3001
       FRONTEND_URL: ${FRONTEND_URL:?}
+      CHECKOUT_FRONTEND_URL: ${CHECKOUT_FRONTEND_URL:-https://pagar.canfy.com.br}
     depends_on:
       postgres:
         condition: service_healthy
