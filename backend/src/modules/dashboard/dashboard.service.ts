@@ -16,7 +16,6 @@ export class DashboardService {
       totalSubaccounts,
       totalDoctors,
       totalSuppliers,
-      totalSplitResults,
     ] = await Promise.all([
       this.prisma.charge.count(),
       this.prisma.charge.count({ where: { chargeType: 'CUSTOM' } }),
@@ -27,9 +26,12 @@ export class DashboardService {
       this.prisma.subaccount.count({ where: { active: true } }),
       this.prisma.subaccount.count({ where: { type: 'DOCTOR', active: true } }),
       this.prisma.subaccount.count({ where: { type: 'SUPPLIER', active: true } }),
-      this.prisma.splitResult.count(),
     ]);
 
+    // Fase de transição: os fluxos atuais de criação/sincronização ainda gravam
+    // status/value/netValue nos campos legados de Charge. Enquanto esses fluxos não
+    // forem migrados integralmente para Payment, o dashboard deve continuar lendo
+    // esses campos para não perder cobranças novas nem quebrar o histórico.
     const totalValue = await this.prisma.charge.aggregate({ _sum: { value: true } });
     const paidValue = await this.prisma.charge.aggregate({
       where: { status: { in: ['CONFIRMED', 'RECEIVED'] } },
@@ -40,7 +42,7 @@ export class DashboardService {
     const doctorRevenue = await this.prisma.splitResult.aggregate({
       where: {
         status: 'COMPLETED',
-        receiverSubaccount: { type: 'DOCTOR' },
+        receiver: { type: 'DOCTOR' },
       },
       _sum: { value: true },
     });
@@ -49,7 +51,7 @@ export class DashboardService {
     const supplierRevenue = await this.prisma.splitResult.aggregate({
       where: {
         status: 'COMPLETED',
-        receiverSubaccount: { type: 'SUPPLIER' },
+        receiver: { type: 'SUPPLIER' },
       },
       _sum: { value: true },
     });
@@ -75,7 +77,7 @@ export class DashboardService {
         paidValue: paidValue._sum.value || 0,
       },
       subaccounts: {
-        total: totalSubaccounts + totalDoctors + totalSuppliers,
+        total: totalSubaccounts,
         active: totalSubaccounts,
         doctorCount: totalDoctors,
         supplierCount: totalSuppliers,
