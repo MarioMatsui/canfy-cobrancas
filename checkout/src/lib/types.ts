@@ -2,6 +2,8 @@ export type PublicOrderKind = 'PRODUCT' | 'CONSULTATION';
 export type PublicOrderStatus = 'READY' | 'PENDING_PAYMENT' | 'PAID';
 export type PublicFulfillmentType = 'NATIONAL' | 'INTERNATIONAL';
 export type PublicShipmentType = 'NATIONAL' | 'INTERNATIONAL';
+export type PaymentMethod = 'PIX' | 'CARD';
+export type PublicPaymentStatus = 'PENDING' | 'CONFIRMED' | 'RECEIVED' | 'OVERDUE';
 
 export type PublicChargeItem = {
   name: string;
@@ -18,6 +20,16 @@ export type PublicChargeShipment = {
   estimatedDaysMax?: number;
 };
 
+export type PublicActivePayment = {
+  method: PaymentMethod;
+  status: PublicPaymentStatus;
+  amount: number;
+  invoiceUrl?: string;
+  pixQrCode?: string;
+  pixCopyPaste?: string;
+  pixExpirationDate?: string;
+};
+
 export type PublicCharge = {
   publicToken: string;
   orderStatus: PublicOrderStatus;
@@ -32,33 +44,10 @@ export type PublicCharge = {
   maxInstallments: number;
   shipments: PublicChargeShipment[];
   expiresAt?: string;
+  activePayment?: PublicActivePayment;
 };
 
-export type ShippingAddressInput = {
-  recipientName: string;
-  recipientPhone: string;
-  postalCode: string;
-  street: string;
-  number: string;
-  complement: string;
-  neighborhood: string;
-  city: string;
-  state: string;
-  reference: string;
+export type PublicPaymentStartResponse = {
+  orderStatus: 'PENDING_PAYMENT' | 'PAID';
+  activePayment?: PublicActivePayment;
 };
-
-export type ShippingAddressPayload = {
-  recipientName: string;
-  recipientPhone: string;
-  postalCode: string;
-  street: string;
-  number: string;
-  complement?: string;
-  neighborhood: string;
-  city: string;
-  state: string;
-  country: 'BR';
-  reference?: string;
-};
-
-export type PaymentMethod = 'PIX' | 'CREDIT_CARD';

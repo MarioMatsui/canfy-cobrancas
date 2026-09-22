@@ -4,6 +4,8 @@ export type PublicOrderKind = 'PRODUCT' | 'CONSULTATION';
 export type PublicOrderStatus = 'READY' | 'PENDING_PAYMENT' | 'PAID';
 export type PublicFulfillmentType = 'NATIONAL' | 'INTERNATIONAL';
 export type PublicShipmentType = 'NATIONAL' | 'INTERNATIONAL';
+export type PublicPaymentMethod = 'PIX' | 'CARD';
+export type PublicPaymentStatus = 'PENDING' | 'CONFIRMED' | 'RECEIVED' | 'OVERDUE';
 
 export class PublicChargeItemDto {
   @ApiProperty({ example: 'Óleo CBDMD 5000mg' })
@@ -36,16 +38,35 @@ export class PublicChargeShipmentDto {
   estimatedDaysMax?: number;
 }
 
+export class PublicActivePaymentDto {
+  @ApiProperty({ enum: ['PIX', 'CARD'], example: 'PIX' })
+  method!: PublicPaymentMethod;
+
+  @ApiProperty({ enum: ['PENDING', 'CONFIRMED', 'RECEIVED', 'OVERDUE'], example: 'PENDING' })
+  status!: PublicPaymentStatus;
+
+  @ApiProperty({ example: 485 })
+  amount!: number;
+
+  @ApiPropertyOptional({ example: 'https://www.asaas.com/i/...' })
+  invoiceUrl?: string;
+
+  @ApiPropertyOptional({ description: 'Imagem PNG do QR Code em Base64' })
+  pixQrCode?: string;
+
+  @ApiPropertyOptional({ description: 'Payload Pix Copia e Cola' })
+  pixCopyPaste?: string;
+
+  @ApiPropertyOptional({ example: '2026-09-22T03:15:00.000Z' })
+  pixExpirationDate?: string;
+}
+
 /**
  * Contrato publico consumido pelo pagar.canfy.
  *
  * O que NUNCA entra aqui:
- *   charge.id, cpfCnpj, asaasId, customerAsaasId, walletId, apiKey,
- *   subcontas, medico, fornecedor, splits, margem da CanFy, netValue.
- *
- * Campo novo de checkout precisa ser adicionado explicitamente aqui e no
- * `select` do service. Assim um campo sensivel adicionado ao banco no futuro
- * nao passa a ser exposto por acidente.
+ *   charge.id, cpfCnpj, asaasId, providerPaymentId, customerAsaasId, walletId,
+ *   apiKey, subcontas, medico, fornecedor, splits, margem da CanFy, netValue.
  */
 export class PublicChargeResponseDto {
   @ApiProperty({ example: '42495a27-9d2d-4cc4-8aaf-dcc6bd95c248' })
@@ -86,4 +107,15 @@ export class PublicChargeResponseDto {
 
   @ApiPropertyOptional({ example: '2026-09-28T23:59:59.999Z' })
   expiresAt?: string;
+
+  @ApiPropertyOptional({ type: PublicActivePaymentDto })
+  activePayment?: PublicActivePaymentDto;
+}
+
+export class PublicPaymentStartResponseDto {
+  @ApiProperty({ enum: ['PENDING_PAYMENT', 'PAID'] })
+  orderStatus!: 'PENDING_PAYMENT' | 'PAID';
+
+  @ApiPropertyOptional({ type: PublicActivePaymentDto })
+  activePayment?: PublicActivePaymentDto;
 }

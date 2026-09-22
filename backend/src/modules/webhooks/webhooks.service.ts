@@ -1,4 +1,4 @@
-import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
@@ -6,6 +6,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import * as crypto from 'crypto';
 
 export interface AsaasWebhookPayload {
+  id?: string;
   event: string;
   payment?: {
     id: string;
@@ -14,6 +15,10 @@ export interface AsaasWebhookPayload {
     customer: string;
     billingType: string;
   };
+}
+
+export interface QueuedAsaasWebhookPayload extends AsaasWebhookPayload {
+  webhookLogId: string;
 }
 
 @Injectable()
@@ -46,22 +51,50 @@ export class WebhooksService {
   async handleWebhook(payload: AsaasWebhookPayload, token: string | undefined) {
     this.validateToken(token);
 
-    // Loga o evento recebido
-    await this.prisma.webhookLog.create({
-      data: {
-        event: payload.event,
-        payload: JSON.parse(JSON.stringify(payload)),
-        status: 'RECEIVED',
-      },
-    });
+    const payment = payload.payment?.id
+      ? await this.prisma.payment.findFirst({
+          where: { provider: 'ASAAS', providerPaymentId: payload.payment.id },
+          select: { id: true },
+        })
+      : null;
 
-    // Adiciona na fila para processamento assíncrono
-    await this.webhooksQueue.add('process', payload, {
+    let log: { id: string };
+    try {
+      log = await this.prisma.webhookLog.create({
+        data: {
+          provider: 'ASAAS',
+          providerEventId: payload.id ?? null,
+          event: payload.event,
+          payload: JSON.parse(JSON.stringify(payload)),
+          status: 'RECEIVED',
+          paymentId: payment?.id ?? null,
+        },
+        select: { id: true },
+      });
+    } catch (error) {
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code?: unknown }).code)
+          : '';
+      if (payload.id && code === 'P2002') {
+        this.logger.log('Webhook duplicado ignorado com segurança.');
+        return { received: true, duplicate: true };
+      }
+      throw error;
+    }
+
+    const queuedPayload: QueuedAsaasWebhookPayload = {
+      ...payload,
+      webhookLogId: log.id,
+    };
+
+    await this.webhooksQueue.add('process', queuedPayload, {
       attempts: 3,
       backoff: { type: 'exponential', delay: 5000 },
+      removeOnComplete: true,
     });
 
-    this.logger.log(`Webhook recebido e enfileirado: ${payload.event}`);
+    this.logger.log('Webhook recebido e enfileirado: ' + payload.event);
     return { received: true };
   }
 

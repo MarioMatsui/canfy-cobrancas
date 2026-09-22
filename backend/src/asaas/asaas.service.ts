@@ -6,10 +6,18 @@ export class AsaasService {
   private readonly logger = new Logger(AsaasService.name);
   private readonly apiUrl: string;
   private readonly apiKey: string;
+  private readonly requestTimeoutMs: number;
 
   constructor(private configService: ConfigService) {
     this.apiUrl = this.configService.getOrThrow<string>('ASAAS_API_URL');
     this.apiKey = this.configService.getOrThrow<string>('ASAAS_API_KEY');
+    const configuredTimeout = Number(
+      this.configService.get<string>('ASAAS_REQUEST_TIMEOUT_MS', '15000'),
+    );
+    this.requestTimeoutMs =
+      Number.isFinite(configuredTimeout) && configuredTimeout > 0
+        ? configuredTimeout
+        : 15_000;
   }
 
   private get headers(): Record<string, string> {
@@ -20,17 +28,12 @@ export class AsaasService {
     };
   }
 
-  // Interpreta o corpo de uma resposta HTTP de forma segura.
-  // Endpoints como /accounts/{id}/resendActivationLink retornam 204 No Content
-  // (ou, em alguns casos, 200/201 com corpo vazio), e response.json() lançaria
-  // um erro de parse nesses casos. Qualquer corpo vazio vira `undefined`.
   private async parseBody<T>(response: Response): Promise<T> {
     if (response.status === 204) {
       return undefined as T;
     }
 
     const text = await response.text();
-
     if (!text) {
       return undefined as T;
     }
@@ -47,10 +50,32 @@ export class AsaasService {
     }
   }
 
-  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const url = `${this.apiUrl}${path}`;
+  private async fetchWithTimeout(
+    url: string,
+    options: RequestInit,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs);
 
-    this.logger.debug(`${method} ${url}`);
+    try {
+      return await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+    } catch {
+      this.logger.error('Falha de rede ou timeout na comunicação com o Asaas.');
+      throw new HttpException(
+        { message: 'Erro na comunicação com o Asaas' },
+        HttpStatus.BAD_GATEWAY,
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const url = this.apiUrl + path;
+    this.logger.debug(method + ' ' + url);
 
     const options: RequestInit = {
       method,
@@ -61,11 +86,11 @@ export class AsaasService {
       options.body = JSON.stringify(body);
     }
 
-    const response = await fetch(url, options);
+    const response = await this.fetchWithTimeout(url, options);
 
     if (!response.ok) {
       const error = await this.parseErrorBody(response);
-      this.logger.error(`Asaas API error: ${response.status}`, error);
+      this.logger.error('Asaas API error: HTTP ' + response.status);
       throw new HttpException(
         {
           message: 'Erro na comunicação com o Asaas',
@@ -96,9 +121,14 @@ export class AsaasService {
     return this.request<T>('DELETE', path);
   }
 
-  async requestWithApiKey<T>(method: string, path: string, apiKey: string, body?: unknown): Promise<T> {
-    const url = `${this.apiUrl}${path}`;
-    this.logger.debug(`${method} ${url} (custom apiKey)`);
+  async requestWithApiKey<T>(
+    method: string,
+    path: string,
+    apiKey: string,
+    body?: unknown,
+  ): Promise<T> {
+    const url = this.apiUrl + path;
+    this.logger.debug(method + ' ' + url + ' (custom apiKey)');
 
     const options: RequestInit = {
       method,
@@ -112,14 +142,16 @@ export class AsaasService {
       options.body = JSON.stringify(body);
     }
 
-    const response = await fetch(url, options);
+    const response = await this.fetchWithTimeout(url, options);
 
     if (!response.ok) {
       const error = await this.parseErrorBody(response);
-      this.logger.error(`Asaas API error: ${response.status}`, error);
+      this.logger.error('Asaas API error: HTTP ' + response.status);
       throw new HttpException(
         { message: 'Erro na comunicação com o Asaas', details: error },
-        response.status >= 500 ? HttpStatus.BAD_GATEWAY : HttpStatus.BAD_REQUEST,
+        response.status >= 500
+          ? HttpStatus.BAD_GATEWAY
+          : HttpStatus.BAD_REQUEST,
       );
     }
 

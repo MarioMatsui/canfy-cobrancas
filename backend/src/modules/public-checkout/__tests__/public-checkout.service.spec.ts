@@ -1,239 +1,560 @@
-import { GoneException, NotFoundException } from '@nestjs/common';
+import {
+  GoneException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
+import { AsaasService } from '../../../asaas/asaas.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { PublicCheckoutService } from '../public-checkout.service';
 
 const D = (value: string) => ({ toString: () => value }) as any;
 
-const base = {
-  publicToken: '42495a27-9d2d-4cc4-8aaf-dcc6bd95c248',
+const token = '42495a27-9d2d-4cc4-8aaf-dcc6bd95c248';
+
+const publicCharge = {
+  publicToken: token,
   orderStatus: 'READY',
   orderKind: 'PRODUCT',
-  customerName: 'Mario',
+  customerName: 'Mario Matsui',
   description: 'Pedido de medicamentos',
-  subtotal: D('500.00'),
-  discountAmount: D('50.00'),
-  shippingAmount: D('35.00'),
-  totalAmount: D('485.00'),
-  value: D('485.00'),
+  subtotal: D('100.00'),
+  discountAmount: D('10.00'),
+  shippingAmount: D('20.00'),
+  totalAmount: D('110.00'),
+  value: D('110.00'),
+  billingType: 'UNDEFINED',
+  asaasId: null,
+  invoiceUrl: null,
+  pixQrCode: null,
+  pixCopiaECola: null,
   maxInstallments: 6,
-  expiresAt: null,
+  expiresAt: new Date(Date.now() + 86_400_000),
   isActive: true,
   items: [
     {
-      productName: 'Óleo X',
-      quantity: 1,
-      unitPrice: D('500.00'),
-      lineTotal: D('500.00'),
+      productName: 'Produto teste',
+      quantity: 2,
+      unitPrice: D('50.00'),
+      lineTotal: D('100.00'),
       fulfillmentType: 'NATIONAL',
     },
   ],
   shipments: [
     {
       type: 'NATIONAL',
-      shippingAmount: D('35.00'),
-      estimatedDaysMin: null,
-      estimatedDaysMax: null,
+      shippingAmount: D('20.00'),
+      estimatedDaysMin: 3,
+      estimatedDaysMax: 5,
     },
   ],
+  payments: [],
 };
+
+function startCharge(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'charge-1',
+    publicToken: token,
+    orderStatus: 'READY',
+    orderKind: 'PRODUCT',
+    isActive: true,
+    expiresAt: new Date(Date.now() + 86_400_000),
+    dueDate: null,
+    description: 'Pedido de medicamentos',
+    totalAmount: D('110.00'),
+    customer: {
+      id: 'customer-1',
+      name: 'Mario Matsui',
+      email: 'mario@example.com',
+      cpfCnpj: '12345678901',
+      asaasCustomerId: 'cus_existing',
+    },
+    splits: [
+      {
+        subaccountId: 'supplier-1',
+        recipientType: 'SUPPLIER',
+        calculatedValue: D('90.00'),
+        subaccount: { walletId: 'wallet_supplier' },
+      },
+    ],
+    payments: [],
+    ...overrides,
+  };
+}
 
 describe('PublicCheckoutService', () => {
   let service: PublicCheckoutService;
-  let findUnique: jest.Mock;
+  let prisma: any;
+  let tx: any;
+  let asaas: {
+    get: jest.Mock;
+    post: jest.Mock;
+    delete: jest.Mock;
+  };
 
   beforeEach(async () => {
-    findUnique = jest.fn();
+    tx = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      charge: {
+        findUnique: jest.fn(),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      customer: {
+        findUnique: jest.fn().mockResolvedValue(startCharge().customer),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      payment: {
+        create: jest.fn().mockResolvedValue({}),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    };
+
+    prisma = {
+      charge: { findUnique: jest.fn() },
+      $transaction: jest.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    };
+
+    asaas = {
+      get: jest.fn(),
+      post: jest.fn(),
+      delete: jest.fn().mockResolvedValue(undefined),
+    };
+
     const mod = await Test.createTestingModule({
       providers: [
         PublicCheckoutService,
-        { provide: PrismaService, useValue: { charge: { findUnique } } },
+        { provide: PrismaService, useValue: prisma },
+        { provide: AsaasService, useValue: asaas },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string) =>
+              key === 'CHECKOUT_FRONTEND_URL' ? 'https://pagar.canfy.com.br' : undefined,
+            ),
+          },
+        },
       ],
     }).compile();
+
     service = mod.get(PublicCheckoutService);
   });
 
-  it('devolve o contrato definitivo de uma cobranca READY', async () => {
-    findUnique.mockResolvedValue(base);
-    const result = await service.findByToken(base.publicToken);
+  function mockStartCharge(charge = startCharge()) {
+    tx.charge.findUnique.mockResolvedValue(charge);
+    tx.customer.findUnique.mockResolvedValue(charge.customer);
+    return charge;
+  }
 
-    expect(result.publicToken).toBe(base.publicToken);
+  it('mantem GET publico estritamente sem efeitos colaterais', async () => {
+    prisma.charge.findUnique.mockResolvedValue(publicCharge);
+
+    const result = await service.findByToken(token);
+
     expect(result.orderStatus).toBe('READY');
-    expect(result.orderKind).toBe('PRODUCT');
-    expect(result.subtotal).toBe(500);
-    expect(result.discountAmount).toBe(50);
-    expect(result.shippingAmount).toBe(35);
-    expect(result.totalAmount).toBe(485);
-    expect(result.maxInstallments).toBe(6);
-    expect(result.items[0].fulfillmentType).toBe('NATIONAL');
+    expect(result.totalAmount).toBe(110);
+    expect(result.items[0]).toMatchObject({
+      quantity: 2,
+      unitPrice: 50,
+      lineTotal: 100,
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(asaas.post).not.toHaveBeenCalled();
+    expect(asaas.delete).not.toHaveBeenCalled();
   });
 
-  it('consulta o banco somente com campos permitidos para o checkout publico', async () => {
-    findUnique.mockResolvedValue(base);
-    await service.findByToken(base.publicToken);
+  it('usa allowlist e nao expoe dados financeiros internos no GET', async () => {
+    prisma.charge.findUnique.mockResolvedValue(publicCharge);
 
-    const query = findUnique.mock.calls[0][0];
-    expect(query.where).toEqual({ publicToken: base.publicToken });
-    for (const forbidden of [
-      'id',
-      'customerCpfCnpj',
-      'customerAsaasId',
-      'asaasId',
-      'doctorSubaccountId',
-      'splits',
-      'splitResults',
-      'netValue',
-    ]) {
-      expect(query.select[forbidden]).toBeUndefined();
-    }
-  });
-
-  it('nao vaza informacao financeira interna na resposta', async () => {
-    findUnique.mockResolvedValue(base);
-    const result = await service.findByToken(base.publicToken);
+    const result = await service.findByToken(token);
+    const query = prisma.charge.findUnique.mock.calls[0][0];
     const json = JSON.stringify(result).toLowerCase();
 
     for (const forbidden of [
       'cpf',
       'cnpj',
-      'asaas',
+      'asaasid',
+      'providerpaymentid',
       'wallet',
-      'apikey',
-      'api_key',
       'split',
-      'supplier',
-      'fornecedor',
       'doctor',
-      'medico',
+      'supplier',
       'netvalue',
-      'net_value',
       'calculatedvalue',
-      'basisamount',
-      'margem',
     ]) {
       expect(json).not.toContain(forbidden);
     }
+    expect(query.select.customerCpfCnpj).toBeUndefined();
+    expect(query.select.splits).toBeUndefined();
   });
 
-  it('devolve todos os envios em pedido misto nacional e internacional', async () => {
-    findUnique.mockResolvedValue({
-      ...base,
-      shippingAmount: D('185.00'),
-      totalAmount: D('635.00'),
-      shipments: [
-        {
-          type: 'NATIONAL',
-          shippingAmount: D('35.00'),
-          estimatedDaysMin: 3,
-          estimatedDaysMax: 6,
-        },
-        {
-          type: 'INTERNATIONAL',
-          shippingAmount: D('150.00'),
-          estimatedDaysMin: 12,
-          estimatedDaysMax: 20,
-        },
-      ],
+  it('404 para token invalido sem consultar banco', async () => {
+    await expect(service.findByToken('invalido')).rejects.toThrow(NotFoundException);
+    expect(prisma.charge.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('404 para cobranca inexistente ou inativa', async () => {
+    prisma.charge.findUnique.mockResolvedValueOnce(null);
+    await expect(service.findByToken(token)).rejects.toThrow(NotFoundException);
+
+    prisma.charge.findUnique.mockResolvedValueOnce({ ...publicCharge, isActive: false });
+    await expect(service.findByToken(token)).rejects.toThrow(NotFoundException);
+  });
+
+  it('410 para cobranca expirada', async () => {
+    prisma.charge.findUnique.mockResolvedValue({
+      ...publicCharge,
+      expiresAt: new Date(Date.now() - 1_000),
+    });
+    await expect(service.findByToken(token)).rejects.toThrow(GoneException);
+  });
+
+  it('nao inicia nova tentativa quando a Charge ja esta PAID', async () => {
+    mockStartCharge(startCharge({ orderStatus: 'PAID' }));
+
+    const result = await service.startPayment(token, { method: 'PIX' });
+
+    expect(result).toEqual({ orderStatus: 'PAID' });
+    expect(asaas.post).not.toHaveBeenCalled();
+    expect(tx.payment.create).not.toHaveBeenCalled();
+  });
+
+  it('inicia Pix real, persiste Payment e usa o calculatedValue travado no split', async () => {
+    mockStartCharge();
+    asaas.post.mockResolvedValue({
+      id: 'pay_pix',
+      status: 'PENDING',
+      billingType: 'PIX',
+      value: 110,
+      invoiceUrl: 'https://sandbox.asaas.com/i/pay_pix',
+    });
+    asaas.get.mockImplementation(async (path: string) => {
+      if (path.includes('/pixQrCode')) {
+        return {
+          encodedImage: 'BASE64_REAL_DO_PROVIDER',
+          payload: 'PIX-COPIA-E-COLA-REAL',
+          expirationDate: '2026-09-23T03:00:00.000Z',
+        };
+      }
+      return { data: [] };
     });
 
-    const result = await service.findByToken(base.publicToken);
+    const result = await service.startPayment(token, { method: 'PIX' });
 
-    expect(result.shipments).toEqual([
-      {
-        type: 'NATIONAL',
-        shippingAmount: 35,
-        estimatedDaysMin: 3,
-        estimatedDaysMax: 6,
-      },
-      {
-        type: 'INTERNATIONAL',
-        shippingAmount: 150,
-        estimatedDaysMin: 12,
-        estimatedDaysMax: 20,
-      },
+    expect(result.orderStatus).toBe('PENDING_PAYMENT');
+    expect(result.activePayment).toMatchObject({
+      method: 'PIX',
+      amount: 110,
+      pixQrCode: 'BASE64_REAL_DO_PROVIDER',
+      pixCopyPaste: 'PIX-COPIA-E-COLA-REAL',
+    });
+    expect(tx.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          chargeId: 'charge-1',
+          billingType: 'PIX',
+          amount: expect.anything(),
+          status: 'PENDING',
+        }),
+      }),
+    );
+
+    const providerBody = asaas.post.mock.calls.find(
+      (call) => call[0] === '/payments',
+    )?.[1];
+    expect(providerBody).toMatchObject({
+      customer: 'cus_existing',
+      billingType: 'PIX',
+      value: 110,
+      split: [{ walletId: 'wallet_supplier', fixedValue: 90 }],
+    });
+    expect(providerBody).not.toHaveProperty('installmentCount');
+    expect(tx.charge.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ orderStatus: 'PENDING_PAYMENT' }),
+      }),
+    );
+  });
+
+  it('mantem o frete ja incorporado ao repasse do fornecedor e aceita medico ausente', async () => {
+    mockStartCharge();
+    asaas.post.mockResolvedValue({
+      id: 'pay_pix',
+      status: 'PENDING',
+      invoiceUrl: null,
+    });
+    asaas.get.mockResolvedValue({
+      encodedImage: 'QR',
+      payload: 'PAYLOAD',
+      expirationDate: null,
+    });
+
+    await service.startPayment(token, { method: 'PIX' });
+
+    const body = asaas.post.mock.calls.find((call) => call[0] === '/payments')?.[1];
+    expect(body.split).toEqual([
+      { walletId: 'wallet_supplier', fixedValue: 90 },
     ]);
   });
 
-  it('nao expoe fulfillmentType em consulta e nao exige envio', async () => {
-    findUnique.mockResolvedValue({
-      ...base,
-      orderKind: 'CONSULTATION',
-      description: 'Consulta médica',
-      shippingAmount: D('0.00'),
-      totalAmount: D('450.00'),
-      items: [
-        {
-          productName: 'Consulta médica',
-          quantity: 1,
-          unitPrice: D('500.00'),
-          lineTotal: D('500.00'),
-          fulfillmentType: 'NATIONAL',
-        },
-      ],
-      shipments: [],
+  it('inicia Cartao hospedado sem coletar dados de cartao e retorna somente invoiceUrl publico', async () => {
+    mockStartCharge();
+    asaas.post.mockResolvedValue({
+      id: 'pay_card',
+      status: 'PENDING',
+      billingType: 'CREDIT_CARD',
+      value: 110,
+      invoiceUrl: 'https://sandbox.asaas.com/i/pay_card',
     });
 
-    const result = await service.findByToken(base.publicToken);
+    const result = await service.startPayment(token, { method: 'CARD' });
 
-    expect(result.orderKind).toBe('CONSULTATION');
-    expect(result.shipments).toEqual([]);
-    expect(result.items[0]).not.toHaveProperty('fulfillmentType');
-  });
-
-  it('mantem fallback para cobranca historica sem itens e sem orderKind', async () => {
-    findUnique.mockResolvedValue({
-      ...base,
+    expect(result).toEqual({
       orderStatus: 'PENDING_PAYMENT',
-      orderKind: null,
-      description: 'Pagamento legado',
-      subtotal: D('99.00'),
-      discountAmount: D('0.00'),
-      shippingAmount: D('0.00'),
-      totalAmount: D('99.00'),
-      value: D('99.00'),
-      items: [],
-      shipments: [],
+      activePayment: {
+        method: 'CARD',
+        status: 'PENDING',
+        amount: 110,
+        invoiceUrl: 'https://sandbox.asaas.com/i/pay_card',
+      },
     });
 
-    const result = await service.findByToken(base.publicToken);
-
-    expect(result).not.toHaveProperty('orderKind');
-    expect(result.items).toEqual([
-      { name: 'Pagamento legado', quantity: 1, unitPrice: 99, lineTotal: 99 },
-    ]);
+    const providerBody = asaas.post.mock.calls.find(
+      (call) => call[0] === '/payments',
+    )?.[1];
+    expect(providerBody).toMatchObject({
+      billingType: 'CREDIT_CARD',
+      callback: {
+        successUrl: 'https://pagar.canfy.com.br/' + token,
+        autoRedirect: true,
+      },
+    });
+    expect(providerBody).not.toHaveProperty('creditCard');
+    expect(providerBody).not.toHaveProperty('creditCardHolderInfo');
+    expect(providerBody).not.toHaveProperty('installmentCount');
   });
 
-  it('404 para token malformado sem consultar o banco', async () => {
-    await expect(service.findByToken('token-invalido')).rejects.toThrow(NotFoundException);
-    expect(findUnique).not.toHaveBeenCalled();
+  it('reutiliza Pix pendente sem criar outra cobranca Asaas', async () => {
+    const existing = {
+      id: 'payment-1',
+      providerPaymentId: 'pay_pix',
+      billingType: 'PIX',
+      amount: D('110.00'),
+      status: 'PENDING',
+      invoiceUrl: null,
+      pixQrCode: 'QR_SALVO',
+      pixCopyPaste: 'PAYLOAD_SALVO',
+      dueDate: new Date(Date.now() + 86_400_000),
+      createdAt: new Date(),
+    };
+    mockStartCharge(startCharge({ orderStatus: 'PENDING_PAYMENT', payments: [existing] }));
+
+    const result = await service.startPayment(token, { method: 'PIX' });
+
+    expect(result.activePayment).toMatchObject({
+      method: 'PIX',
+      pixQrCode: 'QR_SALVO',
+      pixCopyPaste: 'PAYLOAD_SALVO',
+    });
+    expect(asaas.post).not.toHaveBeenCalled();
+    expect(tx.payment.create).not.toHaveBeenCalled();
   });
 
-  it('404 quando o token nao existe', async () => {
-    findUnique.mockResolvedValue(null);
-    await expect(service.findByToken(base.publicToken)).rejects.toThrow(NotFoundException);
+  it('reutiliza Cartao pendente e o invoiceUrl existente', async () => {
+    const existing = {
+      id: 'payment-card',
+      providerPaymentId: 'pay_card',
+      billingType: 'CREDIT_CARD',
+      amount: D('110.00'),
+      status: 'PENDING',
+      invoiceUrl: 'https://sandbox.asaas.com/i/pay_card',
+      pixQrCode: null,
+      pixCopyPaste: null,
+      dueDate: new Date(Date.now() + 86_400_000),
+      createdAt: new Date(),
+    };
+    mockStartCharge(startCharge({ orderStatus: 'PENDING_PAYMENT', payments: [existing] }));
+
+    const result = await service.startPayment(token, { method: 'CARD' });
+
+    expect(result.activePayment?.invoiceUrl).toBe(
+      'https://sandbox.asaas.com/i/pay_card',
+    );
+    expect(asaas.post).not.toHaveBeenCalled();
   });
 
-  it('404 quando a cobranca esta inativa', async () => {
-    findUnique.mockResolvedValue({ ...base, isActive: false });
-    await expect(service.findByToken(base.publicToken)).rejects.toThrow(NotFoundException);
+  it('serializa o inicio no banco e um retry reutiliza a tentativa pendente', async () => {
+    mockStartCharge();
+    asaas.post.mockResolvedValue({
+      id: 'pay_once',
+      status: 'PENDING',
+      invoiceUrl: 'https://sandbox.asaas.com/i/pay_once',
+    });
+
+    await service.startPayment(token, { method: 'CARD' });
+
+    const existing = {
+      id: 'payment-once',
+      providerPaymentId: 'pay_once',
+      billingType: 'CREDIT_CARD',
+      amount: D('110.00'),
+      status: 'PENDING',
+      invoiceUrl: 'https://sandbox.asaas.com/i/pay_once',
+      pixQrCode: null,
+      pixCopyPaste: null,
+      dueDate: new Date(Date.now() + 86_400_000),
+      createdAt: new Date(),
+    };
+    tx.charge.findUnique.mockResolvedValue(
+      startCharge({ orderStatus: 'PENDING_PAYMENT', payments: [existing] }),
+    );
+
+    await service.startPayment(token, { method: 'CARD' });
+
+    expect(asaas.post).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRaw).toHaveBeenCalled();
   });
 
-  it.each(['DRAFT', 'CANCELLED', 'EXPIRED', 'REFUNDED'])(
-    '410 para cobranca com orderStatus %s',
-    async (orderStatus) => {
-      findUnique.mockResolvedValue({ ...base, orderStatus });
-      await expect(service.findByToken(base.publicToken)).rejects.toThrow(GoneException);
-    },
-  );
+  it('cancela a tentativa pagavel anterior antes de trocar Pix para Cartao', async () => {
+    const pix = {
+      id: 'payment-pix',
+      providerPaymentId: 'pay_old_pix',
+      billingType: 'PIX',
+      amount: D('110.00'),
+      status: 'PENDING',
+      invoiceUrl: null,
+      pixQrCode: 'QR',
+      pixCopyPaste: 'PAYLOAD',
+      dueDate: new Date(Date.now() + 86_400_000),
+      createdAt: new Date(),
+    };
+    mockStartCharge(startCharge({ orderStatus: 'PENDING_PAYMENT', payments: [pix] }));
+    asaas.get.mockResolvedValue({ id: 'pay_old_pix', status: 'PENDING' });
+    asaas.post.mockResolvedValue({
+      id: 'pay_new_card',
+      status: 'PENDING',
+      invoiceUrl: 'https://sandbox.asaas.com/i/pay_new_card',
+    });
 
-  it('410 quando o link expirou cronologicamente', async () => {
-    findUnique.mockResolvedValue({ ...base, expiresAt: new Date(Date.now() - 1000) });
-    await expect(service.findByToken(base.publicToken)).rejects.toThrow(GoneException);
+    await service.startPayment(token, { method: 'CARD' });
+
+    expect(asaas.delete).toHaveBeenCalledWith('/payments/pay_old_pix');
+    expect(tx.payment.update).toHaveBeenCalledWith({
+      where: { id: 'payment-pix' },
+      data: { status: 'CANCELLED' },
+    });
+    expect(asaas.post).toHaveBeenCalledWith(
+      '/payments',
+      expect.objectContaining({ billingType: 'CREDIT_CARD' }),
+    );
   });
 
-  it.each(['READY', 'PENDING_PAYMENT', 'PAID'])('exibe status publico %s', async (orderStatus) => {
-    findUnique.mockResolvedValue({ ...base, orderStatus });
-    const result = await service.findByToken(base.publicToken);
-    expect(result.orderStatus).toBe(orderStatus);
+  it('nao troca de metodo se a tentativa anterior ja foi confirmada no provider', async () => {
+    const pix = {
+      id: 'payment-pix',
+      providerPaymentId: 'pay_paid',
+      billingType: 'PIX',
+      amount: D('110.00'),
+      status: 'PENDING',
+      invoiceUrl: null,
+      pixQrCode: 'QR',
+      pixCopyPaste: 'PAYLOAD',
+      dueDate: new Date(Date.now() + 86_400_000),
+      createdAt: new Date(),
+    };
+    mockStartCharge(startCharge({ orderStatus: 'PENDING_PAYMENT', payments: [pix] }));
+    asaas.get.mockResolvedValue({ id: 'pay_paid', status: 'CONFIRMED' });
+
+    const result = await service.startPayment(token, { method: 'CARD' });
+
+    expect(result).toEqual({ orderStatus: 'PAID' });
+    expect(asaas.delete).not.toHaveBeenCalled();
+    expect(asaas.post).not.toHaveBeenCalled();
+  });
+
+  it('registra falha do provider no Payment e devolve erro publico generico', async () => {
+    mockStartCharge();
+    asaas.post.mockRejectedValue(new Error('erro interno provider'));
+
+    await expect(
+      service.startPayment(token, { method: 'PIX' }),
+    ).rejects.toThrow(ServiceUnavailableException);
+
+    expect(tx.payment.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'FAILED',
+          failureReason: 'PROVIDER_REQUEST_FAILED',
+        }),
+      }),
+    );
+    expect(tx.charge.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { orderStatus: 'READY' } }),
+    );
+  });
+
+  it('cria e persiste Customer Asaas quando ainda nao existe', async () => {
+    const customer = { ...startCharge().customer, asaasCustomerId: null };
+    mockStartCharge(startCharge({ customer }));
+    tx.customer.findUnique.mockResolvedValue(customer);
+    asaas.get
+      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValueOnce({ data: [] });
+    asaas.post
+      .mockResolvedValueOnce({ id: 'cus_created' })
+      .mockResolvedValueOnce({
+        id: 'pay_card',
+        status: 'PENDING',
+        invoiceUrl: 'https://sandbox.asaas.com/i/pay_card',
+      });
+
+    await service.startPayment(token, { method: 'CARD' });
+
+    expect(asaas.post).toHaveBeenNthCalledWith(
+      1,
+      '/customers',
+      expect.objectContaining({
+        name: 'Mario Matsui',
+        cpfCnpj: '12345678901',
+        externalReference: 'customer-1',
+      }),
+    );
+    expect(tx.customer.update).toHaveBeenCalledWith({
+      where: { id: 'customer-1' },
+      data: { asaasCustomerId: 'cus_created' },
+    });
+  });
+
+  it('retoma Pix no GET PENDING_PAYMENT usando o Payment sem expor providerPaymentId', async () => {
+    prisma.charge.findUnique.mockResolvedValue({
+      ...publicCharge,
+      orderStatus: 'PENDING_PAYMENT',
+      payments: [
+        {
+          providerPaymentId: 'pay_internal',
+          billingType: 'PIX',
+          amount: D('110.00'),
+          status: 'PENDING',
+          invoiceUrl: null,
+          pixQrCode: 'QR_SALVO',
+          pixCopyPaste: 'PAYLOAD_SALVO',
+          createdAt: new Date(),
+        },
+      ],
+    });
+    asaas.get.mockResolvedValue({
+      encodedImage: 'QR_ATUAL',
+      payload: 'PAYLOAD_ATUAL',
+      expirationDate: '2026-09-23T03:00:00.000Z',
+    });
+
+    const result = await service.findByToken(token);
+
+    expect(result.activePayment).toMatchObject({
+      method: 'PIX',
+      pixQrCode: 'QR_ATUAL',
+      pixCopyPaste: 'PAYLOAD_ATUAL',
+    });
+    expect(JSON.stringify(result)).not.toContain('pay_internal');
   });
 });

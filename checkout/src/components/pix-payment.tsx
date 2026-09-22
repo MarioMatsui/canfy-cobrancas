@@ -1,14 +1,147 @@
-import { Copy, LoaderCircle, QrCode } from 'lucide-react';
+'use client';
 
-export type PixState = 'idle' | 'generating' | 'ready' | 'waiting' | 'paid';
+import Image from 'next/image';
+import { useState } from 'react';
+import { Check, Copy, LoaderCircle, RefreshCw } from 'lucide-react';
+import { formatDateTime, formatMoney } from '@/lib/format';
+import type { PublicActivePayment } from '@/lib/types';
 
-export function PixPayment({state='idle',copyCode,onCopy,copied=false}:{state?:PixState;copyCode?:string;onCopy?:()=>void;copied?:boolean}) {
-  if (state==='generating') return <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 text-center" role="status"><LoaderCircle aria-hidden="true" className="mx-auto h-6 w-6 animate-spin text-canfy-600"/><p className="mt-3 text-sm font-medium text-slate-700">Gerando Pix...</p></div>;
-  if ((state==='ready'||state==='waiting')&&copyCode) return <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
-    <div className="mx-auto flex h-40 w-40 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white text-center text-xs text-slate-500">QR Code fornecido pelo backend</div>
-    <label className="mt-5 block text-sm font-medium text-slate-700">Código Pix copia e cola<textarea readOnly rows={3} value={copyCode} className="mt-2 w-full resize-none rounded-xl border border-slate-300 bg-white p-3 text-xs text-slate-700"/></label>
-    <button type="button" onClick={onCopy} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-canfy-500 px-4 py-3 text-sm font-semibold text-white"><Copy aria-hidden="true" className="h-4 w-4"/>{copied?'Código copiado':'Copiar código Pix'}</button>
-    {state==='waiting'&&<p className="mt-3 text-center text-xs text-slate-500">Aguardando confirmação do pagamento...</p>}
-  </div>;
-  return <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 text-center"><div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-white text-canfy-600 shadow-sm"><QrCode aria-hidden="true" className="h-5 w-5"/></div><p className="mt-3 text-sm font-semibold text-slate-800">Pix</p><p className="mx-auto mt-1 max-w-md text-xs leading-5 text-slate-500">A geração do QR Code será habilitada quando o backend tiver o endpoint público de início de pagamento. Nenhum código fictício é gerado nesta etapa.</p></div>;
+async function copyWithFallback(value: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const field = document.createElement('textarea');
+  field.value = value;
+  field.setAttribute('readonly', '');
+  field.style.position = 'fixed';
+  field.style.opacity = '0';
+  document.body.appendChild(field);
+  field.select();
+  const copied = document.execCommand('copy');
+  document.body.removeChild(field);
+  if (!copied) throw new Error('COPY_FAILED');
+}
+
+export function PixPayment({
+  payment,
+  refreshing,
+  refreshIssue,
+  onRefresh,
+}: {
+  payment: PublicActivePayment;
+  refreshing: boolean;
+  refreshIssue: boolean;
+  onRefresh: () => void;
+}) {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const expiration = payment.pixExpirationDate
+    ? formatDateTime(payment.pixExpirationDate)
+    : null;
+  const qrSource = payment.pixQrCode
+    ? payment.pixQrCode.startsWith('data:')
+      ? payment.pixQrCode
+      : 'data:image/png;base64,' + payment.pixQrCode
+    : null;
+
+  const copy = async () => {
+    if (!payment.pixCopyPaste) return;
+    try {
+      await copyWithFallback(payment.pixCopyPaste);
+      setCopyState('copied');
+      window.setTimeout(() => setCopyState('idle'), 2500);
+    } catch {
+      setCopyState('failed');
+    }
+  };
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card sm:p-7">
+      <div className="text-center">
+        <p className="text-sm font-semibold text-canfy-700">Pagamento via Pix</p>
+        <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-950">
+          {formatMoney(payment.amount)}
+        </h1>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          Escaneie o QR Code ou copie o código Pix abaixo.
+        </p>
+      </div>
+
+      {qrSource && payment.pixCopyPaste ? (
+        <>
+          <div className="mx-auto mt-6 w-fit rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <Image
+              src={qrSource}
+              alt="QR Code Pix para pagamento"
+              width={256}
+              height={256}
+              unoptimized
+              className="h-auto w-[min(68vw,256px)] max-w-64"
+            />
+          </div>
+
+          <label className="mt-6 block text-sm font-semibold text-slate-800" htmlFor="pix-code">
+            Pix Copia e Cola
+          </label>
+          <textarea
+            id="pix-code"
+            readOnly
+            rows={3}
+            value={payment.pixCopyPaste}
+            onFocus={(event) => event.currentTarget.select()}
+            className="mt-2 w-full resize-none break-all rounded-xl border border-slate-300 bg-slate-50 p-3 text-xs leading-5 text-slate-700 outline-none focus:border-canfy-500 focus:ring-2 focus:ring-canfy-500/20"
+          />
+          <button
+            type="button"
+            onClick={() => void copy()}
+            className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-canfy-500 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-canfy-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canfy-500 focus-visible:ring-offset-2"
+          >
+            {copyState === 'copied' ? (
+              <Check aria-hidden="true" className="h-4 w-4" />
+            ) : (
+              <Copy aria-hidden="true" className="h-4 w-4" />
+            )}
+            {copyState === 'copied' ? 'Código copiado' : 'Copiar código Pix'}
+          </button>
+          {copyState === 'failed' && (
+            <p className="mt-2 text-center text-xs text-red-600" role="alert">
+              Não foi possível copiar automaticamente. Selecione o código acima e copie manualmente.
+            </p>
+          )}
+        </>
+      ) : (
+        <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-900">
+          Não foi possível recuperar o QR Code agora. Atualize o status para tentar novamente.
+        </div>
+      )}
+
+      <div className="mt-5 border-t border-slate-100 pt-5 text-center">
+        {expiration && (
+          <p className="text-xs text-slate-500">Este Pix expira em {expiration}.</p>
+        )}
+        <div className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-slate-600" role="status">
+          <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin text-canfy-600" />
+          Aguardando confirmação do pagamento
+        </div>
+        {refreshIssue && (
+          <p className="mt-3 text-xs leading-5 text-amber-700">
+            A última atualização de status falhou, mas seu Pix continua preservado.
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="mx-auto mt-4 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canfy-500 focus-visible:ring-offset-2"
+        >
+          <RefreshCw
+            aria-hidden="true"
+            className={'h-4 w-4 ' + (refreshing ? 'animate-spin' : '')}
+          />
+          {refreshing ? 'Atualizando...' : 'Atualizar status'}
+        </button>
+      </div>
+    </section>
+  );
 }
