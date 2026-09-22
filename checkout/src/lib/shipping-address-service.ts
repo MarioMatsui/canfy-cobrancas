@@ -56,8 +56,10 @@ export function prepareShippingAddress(input: ShippingAddressInput): ShippingAdd
  * faz rede e não inventa uma rota.
  */
 export async function persistShippingAddress(
-  _publicToken: string,
-  _address: ShippingAddressPayload,
+  publicToken: string,
+  address: ShippingAddressPayload,
 ): Promise<{ ok: false; reason: 'NOT_AVAILABLE' }> {
+  void publicToken;
+  void address;
   return { ok: false, reason: 'NOT_AVAILABLE' };
 }
