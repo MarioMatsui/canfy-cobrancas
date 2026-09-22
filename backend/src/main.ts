@@ -42,6 +42,12 @@ async function bootstrap() {
       : ['http://localhost:3000', 'http://localhost:3002', 'http://localhost:3003'],
   );
 
+  // O checkout público roda em 4020 no desenvolvimento. Mantemos as origens
+  // anteriores e aceitamos 4020 mesmo quando FRONTEND_URL está configurado.
+  if (process.env.NODE_ENV !== 'production') {
+    allowedOrigins.add('http://localhost:4020');
+  }
+
   app.enableCors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
       if (!origin) {

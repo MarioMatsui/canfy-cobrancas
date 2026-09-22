@@ -28,6 +28,20 @@ module.exports = {
       },
     },
     {
+      name: 'mario-checkout',
+      cwd: './checkout',
+      script: 'npm',
+      args: 'run dev',
+      autorestart: true,
+      max_restarts: 50,
+      restart_delay: 3000,
+      watch: false,
+      env: {
+        NODE_ENV: 'development',
+        NEXT_PUBLIC_API_URL: '/api',
+      },
+    },
+    {
       name: 'mario-tunnel',
       script: process.env.HOME + '/.local/bin/cloudflared',
       args: 'tunnel --url http://localhost:3002',
