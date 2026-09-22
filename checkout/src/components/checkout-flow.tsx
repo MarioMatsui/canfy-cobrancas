@@ -38,6 +38,7 @@ export function CheckoutFlow({
   onStarted: (result: PublicPaymentStartResponse) => void;
 }) {
   const [loadingMethod, setLoadingMethod] = useState<PaymentMethod | null>(null);
+  const [switchMethod, setSwitchMethod] = useState<PaymentMethod | null>(null);
   const [error, setError] = useState<string | null>(null);
   const requestController = useRef<AbortController | null>(null);
 
@@ -81,7 +82,28 @@ export function CheckoutFlow({
     }
   };
 
+  const chooseMethod = (method: PaymentMethod) => {
+    if (loadingMethod) return;
+
+    if (charge.activePayment && charge.activePayment.method !== method) {
+      setError(null);
+      setSwitchMethod(method);
+      return;
+    }
+
+    void start(method);
+  };
+
+  const confirmMethodSwitch = () => {
+    if (!switchMethod) return;
+    const method = switchMethod;
+    setSwitchMethod(null);
+    void start(method);
+  };
+
   const customerFirstName = firstName(charge.customerName);
+  const currentMethodLabel = charge.activePayment?.method === 'PIX' ? 'Pix' : 'cartão';
+  const switchMethodLabel = switchMethod === 'PIX' ? 'Pix' : 'Cartão';
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card sm:p-7">
@@ -104,7 +126,7 @@ export function CheckoutFlow({
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <button
             type="button"
-            onClick={() => void start('PIX')}
+            onClick={() => chooseMethod('PIX')}
             disabled={loadingMethod !== null}
             aria-busy={loadingMethod === 'PIX'}
             className="group flex min-h-20 items-center gap-4 rounded-2xl border border-slate-200 bg-white px-5 py-4 text-left transition hover:border-canfy-300 hover:bg-canfy-50/40 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canfy-500 focus-visible:ring-offset-2"
@@ -126,7 +148,7 @@ export function CheckoutFlow({
 
           <button
             type="button"
-            onClick={() => void start('CARD')}
+            onClick={() => chooseMethod('CARD')}
             disabled={loadingMethod !== null}
             aria-busy={loadingMethod === 'CARD'}
             className="group flex min-h-20 items-center gap-4 rounded-2xl border border-slate-200 bg-white px-5 py-4 text-left transition hover:border-canfy-300 hover:bg-canfy-50/40 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canfy-500 focus-visible:ring-offset-2"
@@ -147,6 +169,43 @@ export function CheckoutFlow({
           </button>
         </div>
       </div>
+
+      {switchMethod && charge.activePayment && (
+        <div
+          className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4"
+          role="alertdialog"
+          aria-labelledby="switch-payment-title"
+          aria-describedby="switch-payment-description"
+        >
+          <p id="switch-payment-title" className="text-sm font-bold text-slate-900">
+            Alterar forma de pagamento?
+          </p>
+          <p
+            id="switch-payment-description"
+            className="mt-1 text-sm leading-6 text-slate-600"
+          >
+            Vamos verificar o pagamento atual em {currentMethodLabel}. Se ele ainda estiver
+            pendente, essa tentativa será encerrada antes de iniciar {switchMethodLabel}. O
+            pedido e este link de pagamento continuam os mesmos.
+          </p>
+          <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={() => setSwitchMethod(null)}
+              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canfy-500 focus-visible:ring-offset-2"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={confirmMethodSwitch}
+              className="inline-flex items-center justify-center rounded-xl bg-canfy-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-canfy-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canfy-500 focus-visible:ring-offset-2"
+            >
+              Alterar para {switchMethodLabel}
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <p

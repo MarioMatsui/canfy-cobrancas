@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { useState } from 'react';
-import { Check, Copy, LoaderCircle, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Check, Copy, LoaderCircle, RefreshCw } from 'lucide-react';
 import { formatDateTime, formatMoney } from '@/lib/format';
 import type { PublicActivePayment } from '@/lib/types';
 
@@ -29,11 +29,13 @@ export function PixPayment({
   refreshing,
   refreshIssue,
   onRefresh,
+  onChangePaymentMethod,
 }: {
   payment: PublicActivePayment;
   refreshing: boolean;
   refreshIssue: boolean;
   onRefresh: () => void;
+  onChangePaymentMethod: () => void;
 }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const expiration = payment.pixExpirationDate
@@ -58,7 +60,16 @@ export function PixPayment({
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card sm:p-7">
-      <div className="text-center">
+      <button
+        type="button"
+        onClick={onChangePaymentMethod}
+        className="inline-flex items-center gap-2 rounded-lg px-1 py-1 text-sm font-semibold text-slate-600 transition hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canfy-500 focus-visible:ring-offset-2"
+      >
+        <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+        Alterar forma de pagamento
+      </button>
+
+      <div className="mt-4 text-center">
         <p className="text-sm font-semibold text-canfy-700">Pagamento via Pix</p>
         <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-950">
           {formatMoney(payment.amount)}

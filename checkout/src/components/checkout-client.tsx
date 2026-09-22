@@ -22,6 +22,7 @@ export function CheckoutClient({ publicToken }: { publicToken: string }) {
   const [state, setState] = useState<ViewState>({ kind: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
   const [refreshIssue, setRefreshIssue] = useState(false);
+  const [isChangingPaymentMethod, setIsChangingPaymentMethod] = useState(false);
   const mounted = useRef(true);
 
   const refresh = useCallback(
@@ -93,6 +94,7 @@ export function CheckoutClient({ publicToken }: { publicToken: string }) {
   }, [refresh, state]);
 
   const onStarted = useCallback((started: PublicPaymentStartResponse) => {
+    setIsChangingPaymentMethod(false);
     setState((current) => {
       if (current.kind !== 'success') return current;
       return {
@@ -119,13 +121,14 @@ export function CheckoutClient({ publicToken }: { publicToken: string }) {
   const { charge } = state;
   if (charge.orderStatus === 'PAID') return <CheckoutPaid charge={charge} />;
 
-  if (charge.orderStatus === 'PENDING_PAYMENT') {
+  if (charge.orderStatus === 'PENDING_PAYMENT' && !isChangingPaymentMethod) {
     return (
       <PendingPayment
         charge={charge}
         refreshing={refreshing}
         refreshIssue={refreshIssue}
         onRefresh={() => void refresh()}
+        onChangePaymentMethod={() => setIsChangingPaymentMethod(true)}
       />
     );
   }

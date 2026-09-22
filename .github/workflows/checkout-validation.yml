@@ -296,6 +296,12 @@ jobs:
               permissions: ['clipboard-read', 'clipboard-write']
             });
             const desktop = await desktopContext.newPage();
+            let startRequests = 0;
+            desktop.on('request', (request) => {
+              if (request.method() === 'POST' && request.url().endsWith('/start')) {
+                startRequests += 1;
+              }
+            });
 
             await desktop.goto(base + '/' + tokens.product, { waitUntil: 'domcontentloaded' });
             await assertText(desktop, 'Resumo do pedido');
@@ -316,6 +322,24 @@ jobs:
             await assertText(desktop, '000201010212');
             await desktop.getByRole('button', { name: 'Copiar código Pix' }).click();
             await assertText(desktop, 'Código copiado');
+
+            const startsBeforeBack = startRequests;
+            await desktop.getByRole('button', { name: 'Alterar forma de pagamento' }).click();
+            await desktop.getByRole('button', { name: 'Pix' }).waitFor();
+            await desktop.getByRole('button', { name: 'Cartão' }).waitFor();
+            await desktop.waitForTimeout(100);
+            if (startRequests !== startsBeforeBack) {
+              throw new Error('Returning to payment selection unexpectedly started a new payment');
+            }
+
+            await desktop.getByRole('button', { name: 'Pix' }).click();
+            await assertText(desktop, 'Pagamento via Pix');
+
+            await desktop.getByRole('button', { name: 'Alterar forma de pagamento' }).click();
+            await desktop.getByRole('button', { name: 'Cartão' }).click();
+            await assertText(desktop, 'Alterar forma de pagamento?');
+            await desktop.getByRole('button', { name: 'Alterar para Cartão' }).click();
+            await desktop.waitForURL('**/mock-card-destination');
 
             await desktop.goto(base + '/' + tokens.pendingPix, { waitUntil: 'domcontentloaded' });
             await assertText(desktop, 'Pagamento via Pix');

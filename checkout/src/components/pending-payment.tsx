@@ -1,4 +1,4 @@
-import { Clock3, CreditCard, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Clock3, CreditCard, RefreshCw } from 'lucide-react';
 import type { PublicCharge } from '@/lib/types';
 import { CheckoutShell } from './checkout-shell';
 import { OrderSummary } from './order-summary';
@@ -19,11 +19,13 @@ export function PendingPayment({
   refreshing,
   refreshIssue,
   onRefresh,
+  onChangePaymentMethod,
 }: {
   charge: PublicCharge;
   refreshing: boolean;
   refreshIssue: boolean;
   onRefresh: () => void;
+  onChangePaymentMethod: () => void;
 }) {
   const payment = charge.activePayment;
 
@@ -37,6 +39,7 @@ export function PendingPayment({
             refreshing={refreshing}
             refreshIssue={refreshIssue}
             onRefresh={onRefresh}
+            onChangePaymentMethod={onChangePaymentMethod}
           />
         }
       />
@@ -50,7 +53,16 @@ export function PendingPayment({
         summary={<OrderSummary charge={charge} />}
         main={
           <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card sm:p-8">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-canfy-50 text-canfy-600">
+            <button
+              type="button"
+              onClick={onChangePaymentMethod}
+              className="inline-flex items-center gap-2 rounded-lg px-1 py-1 text-sm font-semibold text-slate-600 transition hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canfy-500 focus-visible:ring-offset-2"
+            >
+              <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+              Alterar forma de pagamento
+            </button>
+
+            <div className="mt-5 flex h-12 w-12 items-center justify-center rounded-full bg-canfy-50 text-canfy-600">
               <CreditCard aria-hidden="true" className="h-6 w-6" />
             </div>
             <h1 className="mt-5 text-2xl font-bold text-slate-950">
