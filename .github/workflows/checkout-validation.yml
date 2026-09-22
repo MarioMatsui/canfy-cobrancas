@@ -25,6 +25,7 @@ jobs:
           cache: npm
           cache-dependency-path: |
             checkout/package-lock.json
+            frontend/package-lock.json
             backend/package-lock.json
 
       - name: Install checkout dependencies
@@ -41,6 +42,20 @@ jobs:
 
       - name: Checkout build
         working-directory: checkout
+        env:
+          NEXT_PUBLIC_API_URL: /api
+        run: npm run build
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Frontend lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Frontend build
+        working-directory: frontend
         env:
           NEXT_PUBLIC_API_URL: /api
         run: npm run build

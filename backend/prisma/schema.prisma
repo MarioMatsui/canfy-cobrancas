@@ -493,6 +493,7 @@ model SplitResult {
   @@index([chargeId])
   @@index([receiverSubaccountId])
   @@index([paymentId])
+  @@unique([paymentId, receiverSubaccountId])
   @@map("split_results")
 }
 
@@ -524,7 +525,7 @@ model WebhookLog {
 
 // =====================================================================
 // ENDERECO DE ENTREGA — NOVA (migration 3)
-// Coletado no formulario do pagar.canfy antes do pagamento.
+// Mantido para integracoes/uso futuro; o pagar.canfy atual nao coleta endereco.
 // Um por cobranca (UNIQUE em charge_id). E SNAPSHOT do pedido: se o
 // cliente mudar de casa, o pedido antigo nao muda de destino.
 // =====================================================================

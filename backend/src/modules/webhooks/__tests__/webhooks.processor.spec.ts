@@ -43,9 +43,8 @@ describe('WebhooksProcessor', () => {
         findFirst: jest.fn(),
       },
       splitResult: {
-        findFirst: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn().mockResolvedValue({}),
         create: jest.fn().mockResolvedValue({}),
-        update: jest.fn().mockResolvedValue({}),
         count: jest.fn().mockResolvedValue(0),
       },
       webhookLog: {
@@ -135,8 +134,21 @@ describe('WebhooksProcessor', () => {
       },
     } as any);
 
-    expect(prisma.splitResult.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
+    expect(prisma.splitResult.upsert).toHaveBeenCalledWith({
+      where: {
+        paymentId_receiverSubaccountId: {
+          paymentId: 'payment-local',
+          receiverSubaccountId: 'supplier-1',
+        },
+      },
+      create: expect.objectContaining({
+        chargeId: 'charge-1',
+        paymentId: 'payment-local',
+        receiverSubaccountId: 'supplier-1',
+        value: 90,
+        fixedValue: 90,
+      }),
+      update: expect.objectContaining({
         chargeId: 'charge-1',
         paymentId: 'payment-local',
         receiverSubaccountId: 'supplier-1',
@@ -146,11 +158,7 @@ describe('WebhooksProcessor', () => {
     });
   });
 
-  it('nao duplica SplitResult se o processamento for repetido defensivamente', async () => {
-    prisma.splitResult.findFirst
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ id: 'split-result-1' });
-
+  it('usa upsert pela chave unica do pagamento e destinatario em reprocessamentos', async () => {
     const job = {
       data: {
         id: 'evt_received',
@@ -172,10 +180,15 @@ describe('WebhooksProcessor', () => {
       data: { ...job.data, webhookLogId: 'log-4' },
     });
 
-    expect(prisma.splitResult.create).toHaveBeenCalledTimes(1);
-    expect(prisma.splitResult.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'split-result-1' } }),
-    );
+    expect(prisma.splitResult.upsert).toHaveBeenCalledTimes(2);
+    for (const call of prisma.splitResult.upsert.mock.calls) {
+      expect(call[0].where).toEqual({
+        paymentId_receiverSubaccountId: {
+          paymentId: 'payment-local',
+          receiverSubaccountId: 'supplier-1',
+        },
+      });
+    }
   });
 
   it('mapeia PAYMENT_OVERDUE para Payment OVERDUE sem marcar a Charge como paga', async () => {

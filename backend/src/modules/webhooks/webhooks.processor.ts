@@ -346,22 +346,16 @@ export class WebhooksProcessor {
         status: providerSplit?.status || 'COMPLETED',
       };
 
-      const existing = await this.prisma.splitResult.findFirst({
+      await this.prisma.splitResult.upsert({
         where: {
-          paymentId: payment.id,
-          receiverSubaccountId: split.subaccountId,
+          paymentId_receiverSubaccountId: {
+            paymentId: payment.id,
+            receiverSubaccountId: split.subaccountId,
+          },
         },
-        select: { id: true },
+        create: data,
+        update: data,
       });
-
-      if (existing) {
-        await this.prisma.splitResult.update({
-          where: { id: existing.id },
-          data,
-        });
-      } else {
-        await this.prisma.splitResult.create({ data });
-      }
     }
   }
 

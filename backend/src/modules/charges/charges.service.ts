@@ -4,6 +4,7 @@ import {
   FulfillmentType,
   OrderKind,
   OrderStatus,
+  PaymentStatus,
   Prisma,
   QuoteSource,
   ShipmentType,
@@ -53,6 +54,15 @@ type CalculatedSplit = {
   commercialValue: Prisma.Decimal;
   shippingValue: Prisma.Decimal;
   calculatedValue: Prisma.Decimal;
+};
+
+type ProviderPaymentState = {
+  id: string;
+  status?: string;
+};
+
+type ProviderPaymentList = {
+  data?: ProviderPaymentState[];
 };
 
 @Injectable()
@@ -324,16 +334,131 @@ export class ChargesService {
   }
 
   async cancel(id: string) {
-    const charge = await this.prisma.charge.findUnique({ where: { id } });
-    if (!charge) throw new NotFoundException('Cobrança não encontrada');
+    return this.prisma.$transaction(
+      async (tx) => {
+        const initial = await tx.charge.findUnique({
+          where: { id },
+          select: { id: true },
+        });
+        if (!initial) throw new NotFoundException('Cobrança não encontrada');
 
-    // Somente o fluxo legado possui asaasId neste ponto.
-    if (charge.asaasId) await this.asaas.delete('/payments/' + charge.asaasId);
+        // Usa a mesma chave do checkout público. Assim, iniciar/trocar pagamento
+        // e cancelar a cobrança não podem correr em paralelo para a mesma venda.
+        await this.acquireLock(tx, 'charge:' + id);
 
-    return this.prisma.charge.update({
-      where: { id },
-      data: { orderStatus: 'CANCELLED', status: 'CANCELLED', isActive: false },
-    });
+        const charge = await tx.charge.findUnique({
+          where: { id },
+          select: {
+            id: true,
+            asaasId: true,
+            orderStatus: true,
+            isActive: true,
+            payments: {
+              select: {
+                id: true,
+                providerPaymentId: true,
+                status: true,
+              },
+              orderBy: { createdAt: 'desc' },
+            },
+          },
+        });
+        if (!charge) throw new NotFoundException('Cobrança não encontrada');
+
+        const paidLocally = charge.payments.some(
+          (payment) =>
+            payment.status === PaymentStatus.CONFIRMED ||
+            payment.status === PaymentStatus.RECEIVED,
+        );
+        if (charge.orderStatus === OrderStatus.PAID || paidLocally) {
+          throw new BadRequestException('Cobrança paga não pode ser cancelada');
+        }
+        if (charge.orderStatus === OrderStatus.REFUNDED) {
+          throw new BadRequestException('Cobrança estornada não pode ser cancelada');
+        }
+
+        if (charge.orderStatus === OrderStatus.CANCELLED || !charge.isActive) {
+          return tx.charge.update({
+            where: { id },
+            data: { orderStatus: 'CANCELLED', status: 'CANCELLED', isActive: false },
+          });
+        }
+
+        for (const payment of charge.payments) {
+          if (
+            payment.status !== PaymentStatus.PENDING &&
+            payment.status !== PaymentStatus.OVERDUE
+          ) {
+            continue;
+          }
+
+          let providerPaymentId = payment.providerPaymentId;
+          let providerStatus: string | undefined;
+
+          // Uma tentativa interrompida pode ter sido criada no Asaas antes de o
+          // providerPaymentId ser persistido. Reconcilia pelo externalReference
+          // antes de assumir que não existe cobrança remota pagável.
+          if (!providerPaymentId) {
+            const recovered = await this.asaas.get<ProviderPaymentList>(
+              '/payments?externalReference=' +
+                encodeURIComponent(this.externalReference(payment.id)) +
+                '&limit=1',
+            );
+            const remote = recovered.data?.[0];
+            if (remote?.id) {
+              providerPaymentId = remote.id;
+              providerStatus = remote.status;
+              await tx.payment.update({
+                where: { id: payment.id },
+                data: { providerPaymentId: remote.id },
+              });
+            }
+          }
+
+          if (providerPaymentId) {
+            if (!providerStatus) {
+              const remote = await this.asaas.get<ProviderPaymentState>(
+                '/payments/' + encodeURIComponent(providerPaymentId),
+              );
+              providerStatus = remote.status;
+            }
+
+            // Nunca apaga uma cobrança que o provedor já considera paga. A
+            // atualização definitiva para PAID continuará sendo feita pelo webhook.
+            if (providerStatus === 'CONFIRMED' || providerStatus === 'RECEIVED') {
+              throw new BadRequestException(
+                'O pagamento já foi confirmado no Asaas e a cobrança não pode ser cancelada',
+              );
+            }
+
+            await this.asaas.delete<void>(
+              '/payments/' + encodeURIComponent(providerPaymentId),
+            );
+          }
+
+          await tx.payment.update({
+            where: { id: payment.id },
+            data: {
+              status: PaymentStatus.CANCELLED,
+              failureReason: null,
+            },
+          });
+        }
+
+        // Compatibilidade com cobranças antigas, que guardavam o id remoto em Charge.
+        if (charge.asaasId) {
+          await this.asaas.delete<void>(
+            '/payments/' + encodeURIComponent(charge.asaasId),
+          );
+        }
+
+        return tx.charge.update({
+          where: { id },
+          data: { orderStatus: 'CANCELLED', status: 'CANCELLED', isActive: false },
+        });
+      },
+      { maxWait: 5_000, timeout: 30_000 },
+    );
   }
 
   async toggleActive(id: string) {
@@ -806,6 +931,16 @@ export class ChargesService {
 
   private percent(base: Prisma.Decimal, percentage: Prisma.Decimal) {
     return this.money(base.mul(percentage).div(100));
+  }
+
+  private externalReference(paymentId: string) {
+    return 'canfy-payment-' + paymentId;
+  }
+
+  private async acquireLock(tx: Prisma.TransactionClient, key: string) {
+    await tx.$queryRaw(
+      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`,
+    );
   }
 
   private money(value: number | string | Prisma.Decimal) {
