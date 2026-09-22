@@ -254,9 +254,17 @@ export class PublicCheckoutService {
             return resumed;
           }
 
+          // Ao selecionar outro método, preservamos a tentativa anterior.
+          // Antes de criar a alternativa, reconciliamos o estado remoto para
+          // evitar abrir uma segunda cobrança quando a primeira acabou de ser paga.
           for (const payment of activePayments) {
-            const paidWhileSwitching = await this.cancelPayablePayment(tx, charge, payment);
-            if (paidWhileSwitching) {
+            const paidWhileSelectingAlternative =
+              await this.reconcileAlternativePaymentBeforeStart(
+                tx,
+                charge,
+                payment,
+              );
+            if (paidWhileSelectingAlternative) {
               return { kind: 'success', response: { orderStatus: 'PAID' } };
             }
           }
@@ -359,9 +367,14 @@ export class PublicCheckoutService {
                 failureReason,
               },
             });
+            const orderStatus = await this.orderStatusAfterAttemptStops(
+              tx,
+              charge.id,
+              paymentId,
+            );
             await tx.charge.update({
               where: { id: charge.id },
-              data: { orderStatus: 'READY' },
+              data: { orderStatus },
             });
             return { kind: 'provider_error' };
           }
@@ -418,9 +431,14 @@ export class PublicCheckoutService {
             failureReason: 'PROVIDER_PAYMENT_NOT_FOUND',
           },
         });
+        const orderStatus = await this.orderStatusAfterAttemptStops(
+          tx,
+          charge.id,
+          payment.id,
+        );
         await tx.charge.update({
           where: { id: charge.id },
-          data: { orderStatus: 'READY' },
+          data: { orderStatus },
         });
         return { kind: 'provider_error' };
       } catch {
@@ -554,34 +572,42 @@ export class PublicCheckoutService {
     };
   }
 
-  private async cancelPayablePayment(
+  private async reconcileAlternativePaymentBeforeStart(
     tx: Prisma.TransactionClient,
     charge: StartChargeRecord,
     payment: StartPaymentRecord,
   ): Promise<boolean> {
-    if (!payment.providerPaymentId) {
-      await tx.payment.update({
-        where: { id: payment.id },
-        data: { status: 'CANCELLED' },
-      });
+    let current = payment;
+
+    if (!current.providerPaymentId) {
+      const recovered = await this.findProviderPayment(current.id);
+      if (!recovered?.id) {
+        await tx.payment.update({
+          where: { id: current.id },
+          data: {
+            status: 'FAILED',
+            failureReason: 'PROVIDER_PAYMENT_NOT_FOUND',
+          },
+        });
+        return false;
+      }
+      current = await this.attachRecoveredPayment(tx, current, recovered);
+      if (this.isProviderPaid(recovered.status)) {
+        await this.markPaid(tx, charge.id, current.id, recovered.status);
+        return true;
+      }
       return false;
     }
 
     const remote = await this.asaas.get<AsaasPayment>(
-      '/payments/' + encodeURIComponent(payment.providerPaymentId),
+      '/payments/' + encodeURIComponent(current.providerPaymentId),
     );
     if (this.isProviderPaid(remote.status)) {
-      await this.markPaid(tx, charge.id, payment.id, remote.status);
+      await this.markPaid(tx, charge.id, current.id, remote.status);
       return true;
     }
 
-    await this.asaas.delete<void>(
-      '/payments/' + encodeURIComponent(payment.providerPaymentId),
-    );
-    await tx.payment.update({
-      where: { id: payment.id },
-      data: { status: 'CANCELLED' },
-    });
+    // PENDING/OVERDUE do outro método permanece intacto e reutilizável.
     return false;
   }
 
@@ -817,6 +843,102 @@ export class PublicCheckoutService {
         status,
       },
     });
+
+    // Se o cliente deixou Pix e cartão abertos, somente o método vencedor
+    // continua válido. A limpeza é best-effort aqui; o webhook repete a
+    // reconciliação de forma autoritativa caso haja falha transitória.
+    await this.cancelAlternativePaymentsAfterPaid(tx, chargeId, paymentId);
+  }
+
+  private async cancelAlternativePaymentsAfterPaid(
+    tx: Prisma.TransactionClient,
+    chargeId: string,
+    winnerPaymentId: string,
+  ): Promise<void> {
+    const alternatives = await tx.payment.findMany({
+      where: {
+        chargeId,
+        id: { not: winnerPaymentId },
+        status: {
+          in: [PaymentStatus.PENDING, PaymentStatus.OVERDUE],
+        },
+      },
+      select: {
+        id: true,
+        providerPaymentId: true,
+      },
+    });
+
+    for (const alternative of alternatives) {
+      if (!alternative.providerPaymentId) {
+        await tx.payment.update({
+          where: { id: alternative.id },
+          data: { status: PaymentStatus.CANCELLED },
+        });
+        continue;
+      }
+
+      try {
+        const remote = await this.asaas.get<AsaasPayment>(
+          '/payments/' + encodeURIComponent(alternative.providerPaymentId),
+        );
+
+        if (this.isProviderPaid(remote.status)) {
+          const alternativeStatus =
+            remote.status === 'RECEIVED'
+              ? PaymentStatus.RECEIVED
+              : PaymentStatus.CONFIRMED;
+          await tx.payment.update({
+            where: { id: alternative.id },
+            data: {
+              status: alternativeStatus,
+              paidAt: new Date(),
+            },
+          });
+          this.logger.error(
+            'Mais de um método da mesma cobrança foi pago antes da conciliação.',
+          );
+          continue;
+        }
+
+        if (remote.status === 'REFUNDED') {
+          await tx.payment.update({
+            where: { id: alternative.id },
+            data: { status: PaymentStatus.REFUNDED },
+          });
+          continue;
+        }
+
+        await this.asaas.delete<void>(
+          '/payments/' + encodeURIComponent(alternative.providerPaymentId),
+        );
+        await tx.payment.update({
+          where: { id: alternative.id },
+          data: { status: PaymentStatus.CANCELLED },
+        });
+      } catch {
+        this.logger.error(
+          'Falha ao encerrar método alternativo depois da confirmação do pagamento.',
+        );
+      }
+    }
+  }
+
+  private async orderStatusAfterAttemptStops(
+    tx: Prisma.TransactionClient,
+    chargeId: string,
+    stoppedPaymentId: string,
+  ): Promise<'READY' | 'PENDING_PAYMENT'> {
+    const anotherActive = await tx.payment.count({
+      where: {
+        chargeId,
+        id: { not: stoppedPaymentId },
+        status: {
+          in: [PaymentStatus.PENDING, PaymentStatus.OVERDUE],
+        },
+      },
+    });
+    return anotherActive > 0 ? 'PENDING_PAYMENT' : 'READY';
   }
 
   private async toResponse(charge: PublicChargeRecord): Promise<PublicChargeResponseDto> {

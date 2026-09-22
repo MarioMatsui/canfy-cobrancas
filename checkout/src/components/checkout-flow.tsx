@@ -184,9 +184,10 @@ export function CheckoutFlow({
             id="switch-payment-description"
             className="mt-1 text-sm leading-6 text-slate-600"
           >
-            Vamos verificar o pagamento atual em {currentMethodLabel}. Se ele ainda estiver
-            pendente, essa tentativa será encerrada antes de iniciar {switchMethodLabel}. O
-            pedido e este link de pagamento continuam os mesmos.
+            O pagamento atual em {currentMethodLabel} continuará disponível. Vamos abrir
+            {switchMethodLabel} sem criar uma nova tentativa do método anterior. Se você voltar,
+            reutilizaremos o mesmo pagamento. Quando um dos métodos for confirmado, o outro será
+            encerrado automaticamente.
           </p>
           <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <button

@@ -32,7 +32,30 @@ export function CheckoutClient({ publicToken }: { publicToken: string }) {
       if (!mounted.current) return;
 
       if (result.kind === 'success') {
-        setState({ kind: 'success', charge: result.data });
+        setState((current) => {
+          // O backend pode manter Pix e cartão pendentes ao mesmo tempo.
+          // Durante o polling silencioso, preserve a forma que o cliente está
+          // visualizando; se a venda virar PAID, o novo estado sempre prevalece.
+          if (
+            options?.silent &&
+            current.kind === 'success' &&
+            current.charge.orderStatus === 'PENDING_PAYMENT' &&
+            result.data.orderStatus === 'PENDING_PAYMENT' &&
+            current.charge.activePayment &&
+            result.data.activePayment &&
+            current.charge.activePayment.method !== result.data.activePayment.method
+          ) {
+            return {
+              kind: 'success',
+              charge: {
+                ...result.data,
+                activePayment: current.charge.activePayment,
+              },
+            };
+          }
+
+          return { kind: 'success', charge: result.data };
+        });
         setRefreshIssue(false);
       } else if (options?.silent && result.kind === 'temporary_error') {
         setRefreshIssue(true);

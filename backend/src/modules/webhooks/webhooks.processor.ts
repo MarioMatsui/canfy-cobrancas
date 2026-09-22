@@ -3,7 +3,7 @@ import { Logger } from '@nestjs/common';
 import { PaymentStatus, Prisma } from '@prisma/client';
 import { Job } from 'bull';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { AsaasService } from '../../asaas/asaas.service';
+import { AsaasApiException, AsaasService } from '../../asaas/asaas.service';
 import {
   AsaasWebhookPayload,
   QueuedAsaasWebhookPayload,
@@ -139,8 +139,87 @@ export class WebhooksProcessor {
       }),
     ]);
 
+    await this.cancelAlternativePayments(localPayment.chargeId, localPayment.id);
     await this.syncSplitResults(localPayment, details.split ?? []);
     this.logger.log('Pagamento novo confirmado via Payment.');
+  }
+
+  private async cancelAlternativePayments(
+    chargeId: string,
+    winnerPaymentId: string,
+  ): Promise<void> {
+    const alternatives = await this.prisma.payment.findMany({
+      where: {
+        chargeId,
+        id: { not: winnerPaymentId },
+        status: {
+          in: [PaymentStatus.PENDING, PaymentStatus.OVERDUE],
+        },
+      },
+      select: {
+        id: true,
+        providerPaymentId: true,
+      },
+    });
+
+    for (const alternative of alternatives) {
+      if (!alternative.providerPaymentId) {
+        await this.prisma.payment.update({
+          where: { id: alternative.id },
+          data: { status: PaymentStatus.CANCELLED },
+        });
+        continue;
+      }
+
+      let remote: { status?: string };
+      try {
+        remote = await this.asaas.get<{ status?: string }>(
+          '/payments/' + encodeURIComponent(alternative.providerPaymentId),
+        );
+      } catch (error) {
+        if (error instanceof AsaasApiException && error.providerStatus === 404) {
+          await this.prisma.payment.update({
+            where: { id: alternative.id },
+            data: { status: PaymentStatus.CANCELLED },
+          });
+          continue;
+        }
+        throw error;
+      }
+
+      if (remote.status === 'CONFIRMED' || remote.status === 'RECEIVED') {
+        await this.prisma.payment.update({
+          where: { id: alternative.id },
+          data: {
+            status:
+              remote.status === 'RECEIVED'
+                ? PaymentStatus.RECEIVED
+                : PaymentStatus.CONFIRMED,
+            paidAt: new Date(),
+          },
+        });
+        this.logger.error(
+          'Mais de um método da mesma cobrança foi pago antes da conciliação.',
+        );
+        continue;
+      }
+
+      if (remote.status === 'REFUNDED') {
+        await this.prisma.payment.update({
+          where: { id: alternative.id },
+          data: { status: PaymentStatus.REFUNDED },
+        });
+        continue;
+      }
+
+      await this.asaas.delete<void>(
+        '/payments/' + encodeURIComponent(alternative.providerPaymentId),
+      );
+      await this.prisma.payment.update({
+        where: { id: alternative.id },
+        data: { status: PaymentStatus.CANCELLED },
+      });
+    }
   }
 
   private async handlePaymentOverdue(

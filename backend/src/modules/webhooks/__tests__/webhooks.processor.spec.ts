@@ -8,7 +8,7 @@ const D = (value: string) => ({ toString: () => value, valueOf: () => Number(val
 describe('WebhooksProcessor', () => {
   let processor: WebhooksProcessor;
   let prisma: any;
-  let asaas: { get: jest.Mock };
+  let asaas: { get: jest.Mock; delete: jest.Mock };
 
   const localPayment = {
     id: 'payment-local',
@@ -34,6 +34,7 @@ describe('WebhooksProcessor', () => {
     prisma = {
       payment: {
         findFirst: jest.fn().mockResolvedValue(localPayment),
+        findMany: jest.fn().mockResolvedValue([]),
         update: jest.fn().mockResolvedValue({}),
         count: jest.fn().mockResolvedValue(0),
       },
@@ -64,6 +65,7 @@ describe('WebhooksProcessor', () => {
           },
         ],
       }),
+      delete: jest.fn().mockResolvedValue(undefined),
     };
 
     const mod = await Test.createTestingModule({
@@ -116,6 +118,87 @@ describe('WebhooksProcessor', () => {
         data: expect.objectContaining({ orderStatus: 'PAID' }),
       }),
     );
+  });
+
+  it('cancela no Asaas o outro metodo pendente quando um pagamento e confirmado', async () => {
+    prisma.payment.findMany.mockResolvedValue([
+      {
+        id: 'payment-card',
+        providerPaymentId: 'pay_card_pending',
+      },
+    ]);
+    asaas.get
+      .mockResolvedValueOnce({
+        netValue: 105,
+        split: [],
+      })
+      .mockResolvedValueOnce({
+        id: 'pay_card_pending',
+        status: 'PENDING',
+      });
+
+    await processor.handleWebhookEvent({
+      data: {
+        id: 'evt_confirmed_cancel_alternative',
+        webhookLogId: 'log-cancel-alternative',
+        event: 'PAYMENT_CONFIRMED',
+        payment: {
+          id: 'pay_provider',
+          status: 'CONFIRMED',
+          value: 110,
+          customer: 'cus_1',
+          billingType: 'PIX',
+        },
+      },
+    } as any);
+
+    expect(asaas.delete).toHaveBeenCalledWith('/payments/pay_card_pending');
+    expect(prisma.payment.update).toHaveBeenCalledWith({
+      where: { id: 'payment-card' },
+      data: { status: 'CANCELLED' },
+    });
+  });
+
+  it('nao remove o metodo alternativo se ele tambem ja estiver pago', async () => {
+    prisma.payment.findMany.mockResolvedValue([
+      {
+        id: 'payment-card',
+        providerPaymentId: 'pay_card_paid',
+      },
+    ]);
+    asaas.get
+      .mockResolvedValueOnce({
+        netValue: 105,
+        split: [],
+      })
+      .mockResolvedValueOnce({
+        id: 'pay_card_paid',
+        status: 'CONFIRMED',
+      });
+
+    await processor.handleWebhookEvent({
+      data: {
+        id: 'evt_confirmed_double',
+        webhookLogId: 'log-double',
+        event: 'PAYMENT_CONFIRMED',
+        payment: {
+          id: 'pay_provider',
+          status: 'CONFIRMED',
+          value: 110,
+          customer: 'cus_1',
+          billingType: 'PIX',
+        },
+      },
+    } as any);
+
+    expect(asaas.delete).not.toHaveBeenCalled();
+    expect(prisma.payment.update).toHaveBeenCalledWith({
+      where: { id: 'payment-card' },
+      data: expect.objectContaining({
+        status: 'CONFIRMED',
+        paidAt: expect.any(Date),
+      }),
+    });
   });
 
   it('vincula SplitResult ao paymentId e usa o valor efetivo/fallback travado', async () => {

@@ -111,6 +111,8 @@ describe('PublicCheckoutService', () => {
       payment: {
         create: jest.fn().mockResolvedValue({}),
         update: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
       },
     };
 
@@ -458,7 +460,7 @@ describe('PublicCheckoutService', () => {
     expect(tx.$queryRaw).toHaveBeenCalled();
   });
 
-  it('cancela a tentativa pagavel anterior antes de trocar Pix para Cartao', async () => {
+  it('mantem Pix pendente ao iniciar Cartao e nao remove a cobranca anterior no Asaas', async () => {
     const pix = {
       id: 'payment-pix',
       providerPaymentId: 'pay_old_pix',
@@ -479,10 +481,14 @@ describe('PublicCheckoutService', () => {
       invoiceUrl: 'https://sandbox.asaas.com/i/pay_new_card',
     });
 
-    await service.startPayment(token, { method: 'CARD' });
+    const result = await service.startPayment(token, { method: 'CARD' });
 
-    expect(asaas.delete).toHaveBeenCalledWith('/payments/pay_old_pix');
-    expect(tx.payment.update).toHaveBeenCalledWith({
+    expect(result.activePayment).toMatchObject({
+      method: 'CARD',
+      invoiceUrl: 'https://sandbox.asaas.com/i/pay_new_card',
+    });
+    expect(asaas.delete).not.toHaveBeenCalled();
+    expect(tx.payment.update).not.toHaveBeenCalledWith({
       where: { id: 'payment-pix' },
       data: { status: 'CANCELLED' },
     });
@@ -492,7 +498,7 @@ describe('PublicCheckoutService', () => {
     );
   });
 
-  it('mantem estado seguro se Pix e cancelado mas a nova tentativa de Cartao falha', async () => {
+  it('preserva Pix e mantem a Charge pendente se a criacao do Cartao falhar', async () => {
     const pix = {
       id: 'payment-pix',
       providerPaymentId: 'pay_old_pix',
@@ -508,6 +514,7 @@ describe('PublicCheckoutService', () => {
     mockStartCharge(
       startCharge({ orderStatus: 'PENDING_PAYMENT', payments: [pix] }),
     );
+    tx.payment.count.mockResolvedValue(1);
     asaas.get.mockResolvedValue({ id: 'pay_old_pix', status: 'PENDING' });
     asaas.post.mockRejectedValue(
       new AsaasApiException(400, ['invalid_callback']),
@@ -517,8 +524,8 @@ describe('PublicCheckoutService', () => {
       service.startPayment(token, { method: 'CARD' }),
     ).rejects.toThrow(ServiceUnavailableException);
 
-    expect(asaas.delete).toHaveBeenCalledWith('/payments/pay_old_pix');
-    expect(tx.payment.update).toHaveBeenCalledWith({
+    expect(asaas.delete).not.toHaveBeenCalled();
+    expect(tx.payment.update).not.toHaveBeenCalledWith({
       where: { id: 'payment-pix' },
       data: { status: 'CANCELLED' },
     });
@@ -531,8 +538,48 @@ describe('PublicCheckoutService', () => {
       }),
     );
     expect(tx.charge.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { orderStatus: 'READY' } }),
+      expect.objectContaining({ data: { orderStatus: 'PENDING_PAYMENT' } }),
     );
+  });
+
+  it('reutiliza o Pix original mesmo quando tambem existe Cartao pendente', async () => {
+    const card = {
+      id: 'payment-card',
+      providerPaymentId: 'pay_card',
+      billingType: 'CREDIT_CARD',
+      amount: D('110.00'),
+      status: 'PENDING',
+      invoiceUrl: 'https://sandbox.asaas.com/i/pay_card',
+      pixQrCode: null,
+      pixCopyPaste: null,
+      dueDate: new Date(Date.now() + 86_400_000),
+      createdAt: new Date(),
+    };
+    const pix = {
+      id: 'payment-pix',
+      providerPaymentId: 'pay_pix',
+      billingType: 'PIX',
+      amount: D('110.00'),
+      status: 'PENDING',
+      invoiceUrl: null,
+      pixQrCode: 'QR_ORIGINAL',
+      pixCopyPaste: 'PAYLOAD_ORIGINAL',
+      dueDate: new Date(Date.now() + 86_400_000),
+      createdAt: new Date(Date.now() - 1_000),
+    };
+    mockStartCharge(
+      startCharge({ orderStatus: 'PENDING_PAYMENT', payments: [card, pix] }),
+    );
+
+    const result = await service.startPayment(token, { method: 'PIX' });
+
+    expect(result.activePayment).toMatchObject({
+      method: 'PIX',
+      pixQrCode: 'QR_ORIGINAL',
+      pixCopyPaste: 'PAYLOAD_ORIGINAL',
+    });
+    expect(asaas.post).not.toHaveBeenCalled();
+    expect(asaas.delete).not.toHaveBeenCalled();
   });
 
   it('nao troca de metodo se a tentativa anterior ja foi confirmada no provider', async () => {
