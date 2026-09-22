@@ -1,6 +1,24 @@
 import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+export class AsaasApiException extends HttpException {
+  constructor(
+    readonly providerStatus: number | undefined,
+    readonly errorCodes: string[] = [],
+  ) {
+    super(
+      {
+        message: 'Erro na comunicação com o Asaas',
+        ...(providerStatus !== undefined ? { providerStatus } : {}),
+        ...(errorCodes.length > 0 ? { providerErrorCodes: errorCodes } : {}),
+      },
+      providerStatus !== undefined && providerStatus < 500
+        ? HttpStatus.BAD_REQUEST
+        : HttpStatus.BAD_GATEWAY,
+    );
+  }
+}
+
 @Injectable()
 export class AsaasService {
   private readonly logger = new Logger(AsaasService.name);
@@ -50,6 +68,44 @@ export class AsaasService {
     }
   }
 
+  private extractErrorCodes(error: unknown): string[] {
+    if (!error || typeof error !== 'object') return [];
+
+    const errors = (error as { errors?: unknown }).errors;
+    if (!Array.isArray(errors)) return [];
+
+    const codes = errors
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return null;
+        const code = (entry as { code?: unknown }).code;
+        if (typeof code !== 'string') return null;
+
+        const sanitized = code
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9._-]+/g, '_')
+          .slice(0, 80);
+
+        return sanitized || null;
+      })
+      .filter((code): code is string => Boolean(code));
+
+    return [...new Set(codes)].slice(0, 5);
+  }
+
+  private providerError(
+    providerStatus: number,
+    error: unknown,
+  ): AsaasApiException {
+    const codes = this.extractErrorCodes(error);
+    this.logger.error(
+      'Asaas API error: HTTP ' +
+        providerStatus +
+        (codes.length > 0 ? ' codes=' + codes.join(',') : ''),
+    );
+    return new AsaasApiException(providerStatus, codes);
+  }
+
   private async fetchWithTimeout(
     url: string,
     options: RequestInit,
@@ -64,10 +120,7 @@ export class AsaasService {
       });
     } catch {
       this.logger.error('Falha de rede ou timeout na comunicação com o Asaas.');
-      throw new HttpException(
-        { message: 'Erro na comunicação com o Asaas' },
-        HttpStatus.BAD_GATEWAY,
-      );
+      throw new AsaasApiException(undefined);
     } finally {
       clearTimeout(timer);
     }
@@ -90,16 +143,7 @@ export class AsaasService {
 
     if (!response.ok) {
       const error = await this.parseErrorBody(response);
-      this.logger.error('Asaas API error: HTTP ' + response.status);
-      throw new HttpException(
-        {
-          message: 'Erro na comunicação com o Asaas',
-          details: error,
-        },
-        response.status >= 500
-          ? HttpStatus.BAD_GATEWAY
-          : HttpStatus.BAD_REQUEST,
-      );
+      throw this.providerError(response.status, error);
     }
 
     return this.parseBody<T>(response);
@@ -146,13 +190,7 @@ export class AsaasService {
 
     if (!response.ok) {
       const error = await this.parseErrorBody(response);
-      this.logger.error('Asaas API error: HTTP ' + response.status);
-      throw new HttpException(
-        { message: 'Erro na comunicação com o Asaas', details: error },
-        response.status >= 500
-          ? HttpStatus.BAD_GATEWAY
-          : HttpStatus.BAD_REQUEST,
-      );
+      throw this.providerError(response.status, error);
     }
 
     return this.parseBody<T>(response);

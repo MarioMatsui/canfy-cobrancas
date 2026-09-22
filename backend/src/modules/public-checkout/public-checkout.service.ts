@@ -8,7 +8,10 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PaymentStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { AsaasService } from '../../asaas/asaas.service';
+import {
+  AsaasApiException,
+  AsaasService,
+} from '../../asaas/asaas.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
   PublicActivePaymentDto,
@@ -344,12 +347,16 @@ export class PublicCheckoutService {
               throw error;
             }
 
-            this.logger.warn('Falha do provedor ao iniciar uma tentativa de pagamento.');
+            const failureReason = this.providerFailureReason(error);
+            this.logger.warn(
+              'Falha do provedor ao iniciar uma tentativa de pagamento: ' +
+                failureReason,
+            );
             await tx.payment.update({
               where: { id: paymentId },
               data: {
                 status: 'FAILED',
-                failureReason: 'PROVIDER_REQUEST_FAILED',
+                failureReason,
               },
             });
             await tx.charge.update({
@@ -729,16 +736,52 @@ export class PublicCheckoutService {
     }
 
     if (method === 'CARD') {
-      const checkoutBaseUrl = this.config.get<string>('CHECKOUT_FRONTEND_URL')?.trim().replace(/\/+$/, '');
-      if (checkoutBaseUrl) {
+      const callbackUrl = this.paymentCallbackSuccessUrl(charge.publicToken);
+      if (callbackUrl) {
         payload.callback = {
-          successUrl: checkoutBaseUrl + '/' + charge.publicToken,
+          successUrl: callbackUrl,
           autoRedirect: true,
         };
       }
     }
 
     return payload;
+  }
+
+  private paymentCallbackSuccessUrl(publicToken: string): string | undefined {
+    const configured = this.config
+      .get<string>('ASAAS_PAYMENT_CALLBACK_BASE_URL')
+      ?.trim();
+
+    // O callback da Asaas e opcional. Nao usamos CHECKOUT_FRONTEND_URL
+    // automaticamente porque a Asaas exige que successUrl pertença ao dominio
+    // cadastrado nos dados comerciais da conta. Uma URL invalida impede a
+    // propria criacao da cobranca. O retorno so e habilitado quando configurado
+    // explicitamente no ambiente.
+    if (!configured) return undefined;
+
+    try {
+      const base = new URL(configured);
+      if (base.protocol !== 'https:' && base.protocol !== 'http:') {
+        this.logger.warn(
+          'ASAAS_PAYMENT_CALLBACK_BASE_URL ignorada por usar protocolo invalido.',
+        );
+        return undefined;
+      }
+
+      base.search = '';
+      base.hash = '';
+      if (!base.pathname.endsWith('/')) {
+        base.pathname += '/';
+      }
+
+      return new URL(encodeURIComponent(publicToken), base).toString();
+    } catch {
+      this.logger.warn(
+        'ASAAS_PAYMENT_CALLBACK_BASE_URL ignorada por ser uma URL invalida.',
+      );
+      return undefined;
+    }
   }
 
   private async findProviderPayment(paymentId: string): Promise<AsaasPayment | null> {
@@ -1004,6 +1047,31 @@ export class PublicCheckoutService {
     if (charge.expiresAt && charge.expiresAt.getTime() < Date.now()) {
       throw new GoneException('Este link de pagamento expirou');
     }
+  }
+
+  private providerFailureReason(error: unknown): string {
+    if (!(error instanceof AsaasApiException)) {
+      return 'PROVIDER_REQUEST_FAILED';
+    }
+
+    const status = error.providerStatus
+      ? 'HTTP_' + error.providerStatus
+      : 'TRANSPORT';
+    const codes = error.errorCodes
+      .slice(0, 3)
+      .map((code) =>
+        code
+          .toUpperCase()
+          .replace(/[^A-Z0-9_-]+/g, '_')
+          .slice(0, 80),
+      )
+      .filter(Boolean);
+
+    return (
+      'ASAAS_' +
+      status +
+      (codes.length > 0 ? '_' + codes.join('_') : '')
+    ).slice(0, 255);
   }
 
   private publicProviderError(): ServiceUnavailableException {

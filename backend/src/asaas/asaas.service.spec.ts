@@ -1,10 +1,11 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AsaasService } from './asaas.service';
+import { AsaasApiException, AsaasService } from './asaas.service';
 
 describe('AsaasService', () => {
   let fetchSpy: jest.SpiedFunction<typeof fetch>;
   let debugSpy: jest.SpiedFunction<Logger['debug']>;
+  let errorSpy: jest.SpiedFunction<Logger['error']>;
 
   function createService(): AsaasService {
     const config = {
@@ -26,6 +27,7 @@ describe('AsaasService', () => {
       text: jest.fn().mockResolvedValue(JSON.stringify({ data: [] })),
     } as unknown as Response);
     debugSpy = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
+    errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
   });
 
   afterEach(() => {
@@ -49,6 +51,43 @@ describe('AsaasService', () => {
     expect(logged).not.toContain('12345678901');
     expect(logged).not.toContain('customer-sensitive');
     expect(logged).not.toContain('/customers?');
+  });
+
+  it('preserva status e codigos de validacao do Asaas sem registrar o corpo inteiro', async () => {
+    fetchSpy.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          errors: [
+            {
+              code: 'invalid_callback',
+              description: 'A URL informada nao pertence ao dominio cadastrado',
+            },
+          ],
+        }),
+      ),
+    } as unknown as Response);
+
+    const service = createService();
+
+    let thrown: unknown;
+    try {
+      await service.post('/payments', { billingType: 'CREDIT_CARD' });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AsaasApiException);
+    expect((thrown as AsaasApiException).providerStatus).toBe(400);
+    expect((thrown as AsaasApiException).errorCodes).toEqual(['invalid_callback']);
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Asaas API error: HTTP 400 codes=invalid_callback',
+    );
+
+    const logged = errorSpy.mock.calls.flat().join(' ');
+    expect(logged).not.toContain('A URL informada');
+    expect(logged).not.toContain('primary-secret-key');
   });
 
   it('nao registra chave customizada nem identificador da URL', async () => {

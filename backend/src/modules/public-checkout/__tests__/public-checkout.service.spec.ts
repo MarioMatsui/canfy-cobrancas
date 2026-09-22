@@ -5,7 +5,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
-import { AsaasService } from '../../../asaas/asaas.service';
+import {
+  AsaasApiException,
+  AsaasService,
+} from '../../../asaas/asaas.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { PublicCheckoutService } from '../public-checkout.service';
 
@@ -92,6 +95,7 @@ describe('PublicCheckoutService', () => {
     post: jest.Mock;
     delete: jest.Mock;
   };
+  let configGet: jest.Mock;
 
   beforeEach(async () => {
     tx = {
@@ -120,6 +124,9 @@ describe('PublicCheckoutService', () => {
       post: jest.fn(),
       delete: jest.fn().mockResolvedValue(undefined),
     };
+    configGet = jest.fn((key: string) =>
+      key === 'CHECKOUT_FRONTEND_URL' ? 'https://pagar.canfy.com.br' : undefined,
+    );
 
     const mod = await Test.createTestingModule({
       providers: [
@@ -128,11 +135,7 @@ describe('PublicCheckoutService', () => {
         { provide: AsaasService, useValue: asaas },
         {
           provide: ConfigService,
-          useValue: {
-            get: jest.fn((key: string) =>
-              key === 'CHECKOUT_FRONTEND_URL' ? 'https://pagar.canfy.com.br' : undefined,
-            ),
-          },
+          useValue: { get: configGet },
         },
       ],
     }).compile();
@@ -338,14 +341,40 @@ describe('PublicCheckoutService', () => {
     )?.[1];
     expect(providerBody).toMatchObject({
       billingType: 'CREDIT_CARD',
-      callback: {
-        successUrl: 'https://pagar.canfy.com.br/' + token,
-        autoRedirect: true,
-      },
     });
+    expect(providerBody).not.toHaveProperty('callback');
     expect(providerBody).not.toHaveProperty('creditCard');
     expect(providerBody).not.toHaveProperty('creditCardHolderInfo');
     expect(providerBody).not.toHaveProperty('installmentCount');
+  });
+
+  it('inclui callback de retorno somente quando configurado explicitamente', async () => {
+    configGet.mockImplementation((key: string) => {
+      if (key === 'ASAAS_PAYMENT_CALLBACK_BASE_URL') {
+        return 'https://pagar.canfy.com.br/pagamento';
+      }
+      if (key === 'CHECKOUT_FRONTEND_URL') {
+        return 'https://pagar.canfy.com.br';
+      }
+      return undefined;
+    });
+    mockStartCharge();
+    asaas.post.mockResolvedValue({
+      id: 'pay_card_callback',
+      status: 'PENDING',
+      billingType: 'CREDIT_CARD',
+      invoiceUrl: 'https://sandbox.asaas.com/i/pay_card_callback',
+    });
+
+    await service.startPayment(token, { method: 'CARD' });
+
+    const providerBody = asaas.post.mock.calls.find(
+      (call) => call[0] === '/payments',
+    )?.[1];
+    expect(providerBody.callback).toEqual({
+      successUrl: 'https://pagar.canfy.com.br/pagamento/' + token,
+      autoRedirect: true,
+    });
   });
 
   it('reutiliza Pix pendente sem criar outra cobranca Asaas', async () => {
@@ -463,6 +492,49 @@ describe('PublicCheckoutService', () => {
     );
   });
 
+  it('mantem estado seguro se Pix e cancelado mas a nova tentativa de Cartao falha', async () => {
+    const pix = {
+      id: 'payment-pix',
+      providerPaymentId: 'pay_old_pix',
+      billingType: 'PIX',
+      amount: D('110.00'),
+      status: 'PENDING',
+      invoiceUrl: null,
+      pixQrCode: 'QR',
+      pixCopyPaste: 'PAYLOAD',
+      dueDate: new Date(Date.now() + 86_400_000),
+      createdAt: new Date(),
+    };
+    mockStartCharge(
+      startCharge({ orderStatus: 'PENDING_PAYMENT', payments: [pix] }),
+    );
+    asaas.get.mockResolvedValue({ id: 'pay_old_pix', status: 'PENDING' });
+    asaas.post.mockRejectedValue(
+      new AsaasApiException(400, ['invalid_callback']),
+    );
+
+    await expect(
+      service.startPayment(token, { method: 'CARD' }),
+    ).rejects.toThrow(ServiceUnavailableException);
+
+    expect(asaas.delete).toHaveBeenCalledWith('/payments/pay_old_pix');
+    expect(tx.payment.update).toHaveBeenCalledWith({
+      where: { id: 'payment-pix' },
+      data: { status: 'CANCELLED' },
+    });
+    expect(tx.payment.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'FAILED',
+          failureReason: 'ASAAS_HTTP_400_INVALID_CALLBACK',
+        }),
+      }),
+    );
+    expect(tx.charge.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { orderStatus: 'READY' } }),
+    );
+  });
+
   it('nao troca de metodo se a tentativa anterior ja foi confirmada no provider', async () => {
     const pix = {
       id: 'payment-pix',
@@ -486,7 +558,7 @@ describe('PublicCheckoutService', () => {
     expect(asaas.post).not.toHaveBeenCalled();
   });
 
-  it('registra falha do provider no Payment e devolve erro publico generico', async () => {
+  it('registra falha generica do provider no Payment e devolve erro publico generico', async () => {
     mockStartCharge();
     asaas.post.mockRejectedValue(new Error('erro interno provider'));
 
@@ -499,6 +571,29 @@ describe('PublicCheckoutService', () => {
         data: expect.objectContaining({
           status: 'FAILED',
           failureReason: 'PROVIDER_REQUEST_FAILED',
+        }),
+      }),
+    );
+    expect(tx.charge.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { orderStatus: 'READY' } }),
+    );
+  });
+
+  it('preserva codigo Asaas sanitizado quando a criacao do pagamento e rejeitada', async () => {
+    mockStartCharge();
+    asaas.post.mockRejectedValue(
+      new AsaasApiException(400, ['invalid_callback']),
+    );
+
+    await expect(
+      service.startPayment(token, { method: 'CARD' }),
+    ).rejects.toThrow(ServiceUnavailableException);
+
+    expect(tx.payment.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'FAILED',
+          failureReason: 'ASAAS_HTTP_400_INVALID_CALLBACK',
         }),
       }),
     );

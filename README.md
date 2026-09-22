@@ -170,6 +170,10 @@ NODE_ENV=production
 ASAAS_API_KEY=$aact_prod_XXXXXXXXXXXXXX
 ASAAS_API_URL=https://www.asaas.com/api/v3
 # Para sandbox: https://api-sandbox.asaas.com/v3
+# Opcional: retorno automatico da fatura Asaas. O dominio precisa estar
+# cadastrado nos dados comerciais da conta Asaas; se omitido, a invoiceUrl
+# continua funcionando normalmente sem callback automatico.
+# ASAAS_PAYMENT_CALLBACK_BASE_URL=https://pagar.canfy.com.br
 
 # JWT — gere uma string aleatória forte
 JWT_SECRET=string-aleatoria-de-pelo-menos-32-caracteres
@@ -178,8 +182,9 @@ JWT_EXPIRES_IN=7d
 # Webhook (token que o Asaas vai enviar no header "asaas-access-token")
 WEBHOOK_SECRET=token-aleatorio-para-validar-webhooks
 
-# CORS (URL do frontend)
+# URLs das interfaces
 FRONTEND_URL=https://cobranca.canfy.com.br
+CHECKOUT_FRONTEND_URL=https://pagar.canfy.com.br
 ```
 
 ### Frontend (`frontend/.env.local`)
