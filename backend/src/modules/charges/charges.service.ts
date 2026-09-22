@@ -377,18 +377,17 @@ export class ChargesService {
           throw new BadRequestException('Cobrança estornada não pode ser cancelada');
         }
 
-        if (charge.orderStatus === OrderStatus.CANCELLED || !charge.isActive) {
-          return tx.charge.update({
-            where: { id },
-            data: { orderStatus: 'CANCELLED', status: 'CANCELLED', isActive: false },
-          });
-        }
-
         for (const payment of charge.payments) {
-          if (
-            payment.status !== PaymentStatus.PENDING &&
-            payment.status !== PaymentStatus.OVERDUE
-          ) {
+          const isPayableAttempt =
+            payment.status === PaymentStatus.PENDING ||
+            payment.status === PaymentStatus.OVERDUE;
+          const isAmbiguousFailedAttempt =
+            payment.status === PaymentStatus.FAILED && !payment.providerPaymentId;
+
+          // Mesmo uma Charge já cancelada/inativa pode ter sido produzida pela
+          // lógica antiga, que não cancelava Payment.providerPaymentId. Não
+          // retornamos antes de reconciliar tentativas ainda potencialmente pagáveis.
+          if (!isPayableAttempt && !isAmbiguousFailedAttempt) {
             continue;
           }
 

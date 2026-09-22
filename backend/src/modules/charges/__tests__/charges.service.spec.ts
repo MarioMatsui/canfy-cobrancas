@@ -148,6 +148,60 @@ describe('ChargesService cancel', () => {
     },
   );
 
+  it('saneia Payment pendente mesmo se a Charge ja estava cancelada pela logica antiga', async () => {
+    mockCharge(
+      charge({
+        orderStatus: 'CANCELLED',
+        isActive: false,
+      }),
+    );
+    asaas.get.mockResolvedValue({ id: 'pay_1', status: 'PENDING' });
+
+    await service.cancel('charge-1');
+
+    expect(asaas.get).toHaveBeenCalledWith('/payments/pay_1');
+    expect(asaas.delete).toHaveBeenCalledWith('/payments/pay_1');
+    expect(tx.payment.update).toHaveBeenCalledWith({
+      where: { id: 'payment-1' },
+      data: {
+        status: PaymentStatus.CANCELLED,
+        failureReason: null,
+      },
+    });
+  });
+
+  it('reconcilia tentativa FAILED sem providerPaymentId antes de cancelar', async () => {
+    mockCharge(
+      charge({
+        orderStatus: 'READY',
+        payments: [
+          {
+            id: 'payment-timeout',
+            providerPaymentId: null,
+            status: PaymentStatus.FAILED,
+          },
+        ],
+      }),
+    );
+    asaas.get.mockResolvedValue({
+      data: [{ id: 'pay_after_timeout', status: 'PENDING' }],
+    });
+
+    await service.cancel('charge-1');
+
+    expect(asaas.get).toHaveBeenCalledWith(
+      '/payments?externalReference=canfy-payment-payment-timeout&limit=1',
+    );
+    expect(asaas.delete).toHaveBeenCalledWith('/payments/pay_after_timeout');
+    expect(tx.payment.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 'payment-timeout' },
+      data: {
+        status: PaymentStatus.CANCELLED,
+        failureReason: null,
+      },
+    });
+  });
+
   it('preserva o cancelamento legado por Charge.asaasId', async () => {
     mockCharge(
       charge({
