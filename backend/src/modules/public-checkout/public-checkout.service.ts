@@ -236,6 +236,8 @@ export class PublicCheckoutService {
             return { kind: 'success', response: { orderStatus: 'PAID' } };
           }
 
+          this.assertPayableTotal(charge.totalAmount);
+
           const billingType = this.billingTypeFor(dto.method);
           const activePayments = charge.payments.filter((payment) =>
             ACTIVE_PAYMENT_STATUSES.has(payment.status),
@@ -967,6 +969,13 @@ export class PublicCheckoutService {
   private assertToken(token: string): void {
     if (!PUBLIC_TOKEN_V4.test(token)) {
       throw new NotFoundException('Cobrança não encontrada');
+    }
+  }
+
+  private assertPayableTotal(value: Prisma.Decimal | number | null | undefined): void {
+    const total = this.decimalToNumber(value);
+    if (!Number.isFinite(total) || total <= 0) {
+      throw new GoneException('Esta cobrança não está disponível para pagamento');
     }
   }
 

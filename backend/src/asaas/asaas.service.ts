@@ -75,7 +75,7 @@ export class AsaasService {
 
   async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const url = this.apiUrl + path;
-    this.logger.debug(method + ' ' + url);
+    this.logger.debug(method + ' request to Asaas API');
 
     const options: RequestInit = {
       method,
@@ -128,7 +128,7 @@ export class AsaasService {
     body?: unknown,
   ): Promise<T> {
     const url = this.apiUrl + path;
-    this.logger.debug(method + ' ' + url + ' (custom apiKey)');
+    this.logger.debug(method + ' request to Asaas API (custom credential)');
 
     const options: RequestInit = {
       method,

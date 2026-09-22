@@ -219,6 +219,20 @@ describe('PublicCheckoutService', () => {
     expect(tx.payment.create).not.toHaveBeenCalled();
   });
 
+  it.each(['0.00', '-0.01'])(
+    'nao inicia pagamento quando o total persistido e invalido (%s)',
+    async (total) => {
+      mockStartCharge(startCharge({ totalAmount: D(total) }));
+
+      await expect(
+        service.startPayment(token, { method: 'PIX' }),
+      ).rejects.toThrow(GoneException);
+
+      expect(asaas.post).not.toHaveBeenCalled();
+      expect(tx.payment.create).not.toHaveBeenCalled();
+    },
+  );
+
   it('inicia Pix real, persiste Payment e usa o calculatedValue travado no split', async () => {
     mockStartCharge();
     asaas.post.mockResolvedValue({
