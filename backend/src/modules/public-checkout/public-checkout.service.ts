@@ -961,8 +961,19 @@ export class PublicCheckoutService {
     tx: Prisma.TransactionClient,
     key: string,
   ): Promise<void> {
+    // pg_advisory_xact_lock() retorna o tipo PostgreSQL "void". Quando a funcao
+    // e selecionada diretamente, o Prisma tenta desserializar essa coluna e
+    // falha com P2010 ("Failed to deserialize column of type 'void'").
+    // O CTE materializado garante a execucao do lock, mas devolve ao Prisma
+    // apenas um inteiro suportado. O lock continua transaction-scoped.
     await tx.$queryRaw(
-      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`,
+      Prisma.sql`
+        WITH acquired_lock AS MATERIALIZED (
+          SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))
+        )
+        SELECT 1 AS locked
+        FROM acquired_lock
+      `,
     );
   }
 
