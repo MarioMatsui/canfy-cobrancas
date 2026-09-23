@@ -19,7 +19,7 @@ export function CheckoutPaid({ charge }: { charge: PublicCharge }) {
           </h1>
           <p className="mt-3 text-base font-semibold text-canfy-700">Pagamento confirmado com sucesso</p>
           <p className="mt-3 max-w-xl text-sm leading-6 text-slate-600">
-            Recebemos seu pagamento e já registramos tudo por aqui. Você não precisa realizar uma nova tentativa neste link. A CanFy dará continuidade ao seu atendimento.
+            Recebemos seu pagamento e já registramos tudo por aqui. Você não precisa realizar uma nova tentativa neste link. A Canfy dará continuidade ao seu atendimento.
           </p>
         </section>
       }

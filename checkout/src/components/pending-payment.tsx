@@ -58,7 +58,7 @@ export function PendingPayment({
           </div>
           <h1 className="mt-5 text-2xl font-bold text-slate-950">Pagamento com cartão</h1>
           <p className="mt-3 max-w-xl text-sm leading-6 text-slate-600">
-            O pagamento é concluído na página segura da Asaas. Esta aba da CanFy pode permanecer aberta enquanto aguardamos a confirmação.
+            O pagamento é concluído na página segura da Asaas. Esta aba da Canfy pode permanecer aberta enquanto aguardamos a confirmação.
           </p>
 
           {invoiceUrl ? (

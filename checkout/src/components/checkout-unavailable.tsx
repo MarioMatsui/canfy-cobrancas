@@ -2,10 +2,10 @@ import { AlertCircle, FileQuestion, RefreshCw, TimerOff } from 'lucide-react';
 
 type UnavailableKind = 'not_found' | 'gone' | 'temporary_error' | 'unexpected_response';
 const copy: Record<UnavailableKind,{title:string;body:string}> = {
-  not_found:{title:'Não encontramos este pagamento.',body:'Confira se você abriu exatamente o link enviado pela CanFy.'},
-  gone:{title:'Este link de pagamento não está mais disponível.',body:'Entre em contato com a CanFy caso ainda precise concluir este pedido.'},
+  not_found:{title:'Não encontramos este pagamento.',body:'Confira se você abriu exatamente o link enviado pela Canfy.'},
+  gone:{title:'Este link de pagamento não está mais disponível.',body:'Entre em contato com a Canfy caso ainda precise concluir este pedido.'},
   temporary_error:{title:'Não foi possível carregar o pagamento agora.',body:'Sua cobrança não foi alterada. Tente novamente em instantes.'},
-  unexpected_response:{title:'Não foi possível exibir este pagamento.',body:'Tente novamente. Se o problema continuar, fale com a CanFy.'},
+  unexpected_response:{title:'Não foi possível exibir este pagamento.',body:'Tente novamente. Se o problema continuar, fale com a Canfy.'},
 };
 
 export function CheckoutUnavailable({kind,onRetry}:{kind:UnavailableKind;onRetry?:()=>void}) {

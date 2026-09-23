@@ -4,8 +4,13 @@ import './globals.css';
 import { CheckoutHeader } from '@/components/checkout-header';
 
 export const metadata: Metadata = {
-  title: 'Pagamento | CanFy',
-  description: 'Checkout de pagamento CanFy',
+  title: 'Pagamento | Canfy',
+  description: 'Checkout de pagamento Canfy',
+  icons: {
+    icon: '/logoreduzida.png',
+    shortcut: '/logoreduzida.png',
+    apple: '/logoreduzida.png',
+  },
   robots: { index: false, follow: false, noarchive: true },
 };
 
@@ -16,7 +21,9 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
     <html lang="pt-BR"><body><div className="flex min-h-screen flex-col">
       <CheckoutHeader />
       <div className="flex flex-1 flex-col">{children}</div>
-      <footer className="border-t border-slate-200 bg-white px-4 py-5 text-center text-xs text-slate-500">CanFy · Pagamento</footer>
+      <footer className="border-t border-slate-200 bg-white px-4 py-5 text-center text-xs text-slate-500">
+        Canfy · Pagamento · CNPJ 62.206.622/0001-28
+      </footer>
     </div></body></html>
   );
 }

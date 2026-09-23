@@ -21,7 +21,6 @@ export function OrderSummary({ charge, compact = false }: { charge: PublicCharge
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card">
       <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
         <p className="text-sm font-semibold text-slate-900">Resumo do pedido</p>
-        {charge.description && !compact && <p className="mt-1 break-words text-xs leading-5 text-slate-500">{charge.description}</p>}
       </div>
       {!compact && <div className="border-b border-slate-100 px-5 py-5 sm:px-6"><OrderItems items={charge.items} /></div>}
       <div className="px-5 py-5 sm:px-6"><PriceBreakdown charge={charge} /></div>

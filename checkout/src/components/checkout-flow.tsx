@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { CreditCard, LoaderCircle, QrCode, ShieldCheck } from 'lucide-react';
+import Image from 'next/image';
+import { CreditCard, LoaderCircle, QrCode } from 'lucide-react';
 import { firstName } from '@/lib/format';
 import { startPublicPayment } from '@/lib/public-api';
 import type {
@@ -13,7 +14,7 @@ import type {
 function friendlyStartError(kind: string): string {
   if (kind === 'gone') return 'Este link de pagamento não está mais disponível.';
   if (kind === 'not_found') {
-    return 'Não encontramos este pagamento. Confira o link enviado pela CanFy.';
+    return 'Não encontramos este pagamento. Confira o link enviado pela Canfy.';
   }
   return 'Não foi possível iniciar o pagamento agora. Tente novamente em alguns instantes.';
 }
@@ -111,8 +112,14 @@ export function CheckoutFlow({
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card sm:p-7">
       <div>
-        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-canfy-50 text-canfy-600">
-          <ShieldCheck aria-hidden="true" className="h-5 w-5" />
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-canfy-50">
+          <Image
+            src="/logoreduzida.png"
+            alt=""
+            width={28}
+            height={28}
+            className="h-7 w-7 object-contain"
+          />
         </div>
         <h1 className="mt-4 text-xl font-bold text-slate-950 sm:text-2xl">
           {customerFirstName ? customerFirstName + ', escolha como pagar' : 'Escolha como pagar'}
@@ -153,7 +160,7 @@ export function CheckoutFlow({
 
       {error && <p className="mt-5 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm leading-5 text-red-700" role="alert">{error}</p>}
       <p className="mt-5 text-xs leading-5 text-slate-500">
-        A CanFy não solicita nem armazena os dados do seu cartão neste checkout.
+        A Canfy não armazena os dados do seu cartão neste checkout.
       </p>
     </section>
   );
