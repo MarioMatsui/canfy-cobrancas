@@ -179,8 +179,16 @@ ASAAS_API_URL=https://www.asaas.com/api/v3
 JWT_SECRET=string-aleatoria-de-pelo-menos-32-caracteres
 JWT_EXPIRES_IN=7d
 
-# Webhook (token que o Asaas vai enviar no header "asaas-access-token")
-WEBHOOK_SECRET=token-aleatorio-para-validar-webhooks
+# Webhook (token enviado pelo Asaas no header "asaas-access-token")
+# Obrigatorio: 32-255 caracteres, sem espacos e diferente da ASAAS_API_KEY.
+WEBHOOK_SECRET=token-aleatorio-seguro-com-pelo-menos-32-caracteres
+
+# Provisionamento idempotente do webhook na inicializacao do backend.
+ASAAS_WEBHOOK_AUTO_CONFIGURE=true
+# Opcional: se omitido, a URL e derivada de FRONTEND_URL.
+# ASAAS_WEBHOOK_URL=https://cobranca.canfy.com.br/api/webhooks/asaas
+# Opcional: usado somente se a conta Asaas nao fornecer e-mail comercial.
+# ASAAS_WEBHOOK_EMAIL=operacao@canfy.com.br
 
 # URLs das interfaces
 FRONTEND_URL=https://cobranca.canfy.com.br
@@ -380,11 +388,23 @@ POST https://cobranca.canfy.com.br/api/webhooks/asaas
 
 ### Configurar no Asaas:
 
-1. Painel Asaas → **Configurações** → **Integrações** → **Webhooks**
-2. Adicione a URL acima
-3. Token de autenticação: o mesmo valor de `WEBHOOK_SECRET` no `.env` (o Asaas envia esse valor no
-   header `asaas-access-token`, que é o que o backend valida)
-4. Eventos: marque **PAYMENT_CONFIRMED** e **PAYMENT_RECEIVED** no mínimo
+Em produção, o backend faz o provisionamento de forma idempotente ao iniciar: lista os Webhooks da
+conta, cria o Webhook da CanFy se ele não existir ou atualiza o existente, reativa uma fila
+interrompida, aplica o `WEBHOOK_SECRET` e mantém somente os eventos que o processador conhece.
+
+Para isso:
+
+1. mantenha `ASAAS_WEBHOOK_AUTO_CONFIGURE=true`;
+2. use um `WEBHOOK_SECRET` exclusivo de 32 a 255 caracteres, sem espaços e diferente da API key;
+3. deixe `FRONTEND_URL=https://cobranca.canfy.com.br` ou informe
+   `ASAAS_WEBHOOK_URL=https://cobranca.canfy.com.br/api/webhooks/asaas`;
+4. se a conta não retornar e-mail comercial, informe `ASAAS_WEBHOOK_EMAIL`.
+
+Se o provisionamento automático estiver desativado, a configuração manual continua possível no
+painel Asaas usando a URL acima e o mesmo `WEBHOOK_SECRET`.
+
+O endpoint persiste o evento, devolve **HTTP 200** explicitamente e delega o processamento para a
+fila Bull/Redis. O `providerEventId` impede processamento duplicado do mesmo evento.
 
 ### Eventos processados:
 
@@ -417,9 +437,10 @@ pm2 logs mario-backend --lines 50
 
 ### Cobrança paga mas não atualizou no painel
 
-- Aguarde até 5 minutos (sync automático)
-- Ou force a sincronização clicando em **Atualizar** no painel
-- Verifique se o webhook está configurado no Asaas
+- O Webhook é o caminho principal e deve atualizar a cobrança assim que o Asaas entregar o evento.
+- Como fallback, o sync a cada 5 minutos reconcilia também os registros do modelo novo `Payment`.
+- Verifique `pm2 logs mario-backend` para confirmar o provisionamento do Webhook e o processamento.
+- No painel Asaas, confira **Integrações → Logs de Webhooks** se houver falha de entrega.
 
 ### Split não aconteceu
 
