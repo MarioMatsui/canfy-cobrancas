@@ -157,6 +157,7 @@ describe('PublicCheckoutService', () => {
     const result = await service.findByToken(token);
 
     expect(result.orderStatus).toBe('READY');
+    expect(result.availablePayments).toEqual([]);
     expect(result.totalAmount).toBe(110);
     expect(result.items[0]).toMatchObject({
       quantity: 2,
@@ -706,11 +707,76 @@ describe('PublicCheckoutService', () => {
 
     const result = await service.findByToken(token);
 
+    expect(result.availablePayments).toHaveLength(1);
+    expect(result.availablePayments[0]).toMatchObject({
+      method: 'PIX',
+      pixQrCode: 'QR_ATUAL',
+      pixCopyPaste: 'PAYLOAD_ATUAL',
+    });
     expect(result.activePayment).toMatchObject({
       method: 'PIX',
       pixQrCode: 'QR_ATUAL',
       pixCopyPaste: 'PAYLOAD_ATUAL',
     });
     expect(JSON.stringify(result)).not.toContain('pay_internal');
+  });
+
+  it('retorna Pix e Cartao reutilizaveis no mesmo GET sem efeitos colaterais', async () => {
+    prisma.charge.findUnique.mockResolvedValue({
+      ...publicCharge,
+      orderStatus: 'PENDING_PAYMENT',
+      payments: [
+        {
+          providerPaymentId: 'pay_card_internal',
+          billingType: 'CREDIT_CARD',
+          amount: D('110.00'),
+          status: 'PENDING',
+          invoiceUrl: 'https://sandbox.asaas.com/i/card',
+          pixQrCode: null,
+          pixCopyPaste: null,
+          createdAt: new Date(),
+        },
+        {
+          providerPaymentId: 'pay_pix_internal',
+          billingType: 'PIX',
+          amount: D('110.00'),
+          status: 'PENDING',
+          invoiceUrl: null,
+          pixQrCode: 'QR_PIX',
+          pixCopyPaste: 'PAYLOAD_PIX',
+          createdAt: new Date(Date.now() - 1_000),
+        },
+      ],
+    });
+    asaas.get.mockResolvedValue({
+      encodedImage: 'QR_PIX_ATUAL',
+      payload: 'PAYLOAD_PIX_ATUAL',
+      expirationDate: '2026-09-23T03:00:00.000Z',
+    });
+
+    const result = await service.findByToken(token);
+
+    expect(result.availablePayments.map((payment) => payment.method)).toEqual([
+      'CARD',
+      'PIX',
+    ]);
+    expect(
+      result.availablePayments.find((payment) => payment.method === 'PIX'),
+    ).toMatchObject({
+      pixQrCode: 'QR_PIX_ATUAL',
+      pixCopyPaste: 'PAYLOAD_PIX_ATUAL',
+    });
+    expect(
+      result.availablePayments.find((payment) => payment.method === 'CARD'),
+    ).toMatchObject({
+      invoiceUrl: 'https://sandbox.asaas.com/i/card',
+    });
+    expect(result.activePayment?.method).toBe('CARD');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.payment.create).not.toHaveBeenCalled();
+    expect(asaas.post).not.toHaveBeenCalled();
+    expect(asaas.delete).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain('pay_card_internal');
+    expect(JSON.stringify(result)).not.toContain('pay_pix_internal');
   });
 });

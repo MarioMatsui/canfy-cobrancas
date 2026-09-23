@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { useState } from 'react';
-import { ArrowLeft, Check, Copy, LoaderCircle, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Check, Copy, LoaderCircle } from 'lucide-react';
 import { formatDateTime, formatMoney } from '@/lib/format';
 import type { PublicActivePayment } from '@/lib/types';
 
@@ -26,15 +26,11 @@ async function copyWithFallback(value: string): Promise<void> {
 
 export function PixPayment({
   payment,
-  refreshing,
   refreshIssue,
-  onRefresh,
   onChangePaymentMethod,
 }: {
   payment: PublicActivePayment;
-  refreshing: boolean;
   refreshIssue: boolean;
-  onRefresh: () => void;
   onChangePaymentMethod: () => void;
 }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
@@ -123,7 +119,7 @@ export function PixPayment({
         </>
       ) : (
         <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-900">
-          Não foi possível recuperar o QR Code agora. Atualize o status para tentar novamente.
+          Não foi possível recuperar o QR Code agora. A atualização automática tentará novamente.
         </div>
       )}
 
@@ -140,18 +136,6 @@ export function PixPayment({
             A última atualização de status falhou, mas seu Pix continua preservado.
           </p>
         )}
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={refreshing}
-          className="mx-auto mt-4 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canfy-500 focus-visible:ring-offset-2"
-        >
-          <RefreshCw
-            aria-hidden="true"
-            className={'h-4 w-4 ' + (refreshing ? 'animate-spin' : '')}
-          />
-          {refreshing ? 'Atualizando...' : 'Atualizar status'}
-        </button>
       </div>
     </section>
   );

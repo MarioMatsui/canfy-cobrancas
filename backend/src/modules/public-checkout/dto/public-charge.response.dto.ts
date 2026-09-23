@@ -108,6 +108,11 @@ export class PublicChargeResponseDto {
   @ApiPropertyOptional({ example: '2026-09-28T23:59:59.999Z' })
   expiresAt?: string;
 
+  @ApiProperty({ type: [PublicActivePaymentDto] })
+  availablePayments!: PublicActivePaymentDto[];
+
+  // Compatibilidade com clientes anteriores. O checkout novo seleciona
+  // explicitamente a tentativa em availablePayments.
   @ApiPropertyOptional({ type: PublicActivePaymentDto })
   activePayment?: PublicActivePaymentDto;
 }

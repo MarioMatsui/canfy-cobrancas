@@ -44,6 +44,7 @@ export type PublicCharge = {
   maxInstallments: number;
   shipments: PublicChargeShipment[];
   expiresAt?: string;
+  availablePayments?: PublicActivePayment[];
   activePayment?: PublicActivePayment;
 };
 

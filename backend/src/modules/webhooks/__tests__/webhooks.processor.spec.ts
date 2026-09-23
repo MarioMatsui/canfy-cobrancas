@@ -120,6 +120,36 @@ describe('WebhooksProcessor', () => {
     );
   });
 
+  it('tambem promove a Charge para PAID quando o Cartao e confirmado', async () => {
+    await processor.handleWebhookEvent({
+      data: {
+        id: 'evt_card_confirmed',
+        webhookLogId: 'log-card-confirmed',
+        event: 'PAYMENT_CONFIRMED',
+        payment: {
+          id: 'pay_provider',
+          status: 'CONFIRMED',
+          value: 110,
+          customer: 'cus_1',
+          billingType: 'CREDIT_CARD',
+        },
+      },
+    } as any);
+
+    expect(prisma.payment.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'payment-local' },
+        data: expect.objectContaining({ status: 'CONFIRMED' }),
+      }),
+    );
+    expect(prisma.charge.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'charge-1' },
+        data: expect.objectContaining({ orderStatus: 'PAID' }),
+      }),
+    );
+  });
+
   it('cancela no Asaas o outro metodo pendente quando um pagamento e confirmado', async () => {
     prisma.payment.findMany.mockResolvedValue([
       {
@@ -264,6 +294,8 @@ describe('WebhooksProcessor', () => {
     });
 
     expect(prisma.splitResult.upsert).toHaveBeenCalledTimes(2);
+    expect(prisma.splitResult.create).not.toHaveBeenCalled();
+    expect(prisma.charge.update).toHaveBeenCalledTimes(2);
     for (const call of prisma.splitResult.upsert.mock.calls) {
       expect(call[0].where).toEqual({
         paymentId_receiverSubaccountId: {

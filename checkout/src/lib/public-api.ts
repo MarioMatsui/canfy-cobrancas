@@ -121,6 +121,13 @@ function isPublicCharge(value: unknown): value is PublicCharge {
   if (!Number.isInteger(value.maxInstallments) || Number(value.maxInstallments) < 1) return false;
   if (!Array.isArray(value.shipments) || !value.shipments.every(isShipment)) return false;
   if (!isOptionalString(value.expiresAt)) return false;
+  if (
+    value.availablePayments !== undefined &&
+    (!Array.isArray(value.availablePayments) ||
+      !value.availablePayments.every(isActivePayment))
+  ) {
+    return false;
+  }
   if (value.activePayment !== undefined && !isActivePayment(value.activePayment)) return false;
   return true;
 }

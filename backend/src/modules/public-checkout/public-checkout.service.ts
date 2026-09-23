@@ -973,7 +973,8 @@ export class PublicCheckoutService {
         : {}),
     }));
 
-    const activePayment = await this.resolveActivePayment(charge);
+    const availablePayments = await this.resolveAvailablePayments(charge);
+    const activePayment = availablePayments[0];
 
     return {
       publicToken: charge.publicToken,
@@ -989,22 +990,41 @@ export class PublicCheckoutService {
       maxInstallments: charge.maxInstallments,
       shipments,
       expiresAt: charge.expiresAt?.toISOString(),
+      availablePayments,
       ...(activePayment ? { activePayment } : {}),
     };
   }
 
-  private async resolveActivePayment(
+  private async resolveAvailablePayments(
     charge: PublicChargeRecord,
-  ): Promise<PublicActivePaymentDto | undefined> {
-    if (charge.orderStatus !== 'PENDING_PAYMENT') return undefined;
+  ): Promise<PublicActivePaymentDto[]> {
+    if (charge.orderStatus !== 'PENDING_PAYMENT') return [];
 
-    const payment = charge.payments.find(
-      (candidate) =>
-        ACTIVE_PAYMENT_STATUSES.has(candidate.status) ||
-        PAID_PAYMENT_STATUSES.has(candidate.status),
-    );
+    const byMethod = new Map<
+      PublicPaymentMethod,
+      PublicChargeRecord['payments'][number]
+    >();
 
-    if (payment) {
+    // A ordenacao createdAt DESC permanece util apenas para escolher a
+    // tentativa reutilizavel mais recente de CADA metodo. Ela nao decide mais
+    // qual tela o cliente esta vendo.
+    for (const candidate of charge.payments) {
+      if (
+        !ACTIVE_PAYMENT_STATUSES.has(candidate.status) &&
+        !PAID_PAYMENT_STATUSES.has(candidate.status)
+      ) {
+        continue;
+      }
+
+      const method: PublicPaymentMethod =
+        candidate.billingType === 'PIX' ? 'PIX' : 'CARD';
+      if (!byMethod.has(method)) {
+        byMethod.set(method, candidate);
+      }
+    }
+
+    const available: PublicActivePaymentDto[] = [];
+    for (const payment of byMethod.values()) {
       let pixExpirationDate: string | undefined;
       let pixQrCode = payment.pixQrCode;
       let pixCopyPaste = payment.pixCopyPaste;
@@ -1018,39 +1038,49 @@ export class PublicCheckoutService {
           pixCopyPaste = pix.payload ?? pixCopyPaste;
           pixExpirationDate = pix.expirationDate ?? undefined;
         } catch {
-          this.logger.warn('Não foi possível atualizar os dados Pix durante uma leitura pública.');
+          this.logger.warn(
+            'Não foi possível atualizar os dados Pix durante uma leitura pública.',
+          );
         }
       }
 
-      return this.toPublicPayment(
-        { ...payment, pixQrCode, pixCopyPaste },
-        pixExpirationDate,
+      available.push(
+        this.toPublicPayment(
+          { ...payment, pixQrCode, pixCopyPaste },
+          pixExpirationDate,
+        ),
       );
     }
 
+    if (available.length > 0) return available;
+
     if (charge.billingType === 'PIX' && (charge.pixQrCode || charge.pixCopiaECola)) {
-      return {
-        method: 'PIX',
-        status: 'PENDING',
-        amount: this.decimalToNumber(charge.totalAmount ?? charge.value),
-        ...(charge.pixQrCode ? { pixQrCode: charge.pixQrCode } : {}),
-        ...(charge.pixCopiaECola ? { pixCopyPaste: charge.pixCopiaECola } : {}),
-      };
+      return [
+        {
+          method: 'PIX',
+          status: 'PENDING',
+          amount: this.decimalToNumber(charge.totalAmount ?? charge.value),
+          ...(charge.pixQrCode ? { pixQrCode: charge.pixQrCode } : {}),
+          ...(charge.pixCopiaECola ? { pixCopyPaste: charge.pixCopiaECola } : {}),
+        },
+      ];
     }
 
     if (
       (charge.billingType === 'CREDIT_CARD' || charge.billingType === 'UNDEFINED') &&
       charge.invoiceUrl
     ) {
-      return {
-        method: 'CARD',
-        status: 'PENDING',
-        amount: this.decimalToNumber(charge.totalAmount ?? charge.value),
-        invoiceUrl: charge.invoiceUrl,
-      };
+      return [
+        {
+          method: 'CARD',
+          status: 'PENDING',
+          amount: this.decimalToNumber(charge.totalAmount ?? charge.value),
+          invoiceUrl: charge.invoiceUrl,
+        },
+      ];
     }
 
-    return undefined;
+    return [];
   }
 
   private toPublicPayment(

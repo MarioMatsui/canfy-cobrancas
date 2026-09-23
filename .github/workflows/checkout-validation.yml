@@ -68,6 +68,10 @@ jobs:
         working-directory: backend
         run: npx prisma generate
 
+      - name: Backend lint
+        working-directory: backend
+        run: npm run lint
+
       - name: Backend build
         working-directory: backend
         run: npm run build
@@ -130,13 +134,12 @@ jobs:
                 estimatedDaysMax: 5
               }
             ],
-            expiresAt: '2026-09-28T23:59:59.999Z'
+            expiresAt: '2026-09-28T23:59:59.999Z',
+            availablePayments: []
           };
 
           const tokens = {
             product: '11111111-1111-4111-8111-111111111111',
-            card: '22222222-2222-4222-8222-222222222222',
-            pendingPix: '33333333-3333-4333-8333-333333333333',
             paid: '44444444-4444-4444-8444-444444444444',
             missing: '55555555-5555-4555-8555-555555555555',
             gone: '66666666-6666-4666-8666-666666666666',
@@ -144,17 +147,6 @@ jobs:
           };
 
           const state = new Map();
-          state.set(tokens.pendingPix, {
-            orderStatus: 'PENDING_PAYMENT',
-            activePayment: {
-              method: 'PIX',
-              status: 'PENDING',
-              amount: 110,
-              pixQrCode: qr,
-              pixCopyPaste: '00020101021226890014BR.GOV.BCB.PIX5204000053039865406110.005802BR',
-              pixExpirationDate: '2026-09-23T03:00:00.000Z'
-            }
-          });
 
           function send(res, status, payload) {
             res.statusCode = status;
@@ -163,19 +155,52 @@ jobs:
             res.end(JSON.stringify(payload));
           }
 
-          function chargeFor(token) {
+          function currentState(token) {
             if (token === tokens.paid) {
-              return { ...base, publicToken: token, orderStatus: 'PAID' };
+              return { orderStatus: 'PAID', availablePayments: [] };
             }
+            return state.get(token) || { orderStatus: 'READY', availablePayments: [] };
+          }
+
+          function chargeFor(token) {
+            const current = currentState(token);
             return {
               ...base,
               publicToken: token,
-              ...(state.get(token) || {})
+              ...current,
+              activePayment: current.availablePayments?.[0]
+            };
+          }
+
+          function pixPayment() {
+            return {
+              method: 'PIX',
+              status: 'PENDING',
+              amount: 110,
+              pixQrCode: qr,
+              pixCopyPaste: '00020101021226890014BR.GOV.BCB.PIX5204000053039865406110.005802BR',
+              pixExpirationDate: '2026-09-23T03:00:00.000Z'
+            };
+          }
+
+          function cardPayment() {
+            return {
+              method: 'CARD',
+              status: 'PENDING',
+              amount: 110,
+              invoiceUrl: 'http://127.0.0.1:4020/mock-card-destination'
             };
           }
 
           http.createServer((req, res) => {
             const url = new URL(req.url || '/', 'http://127.0.0.1:3001');
+
+            if (req.method === 'POST' && url.pathname.startsWith('/__ci/mark-paid/')) {
+              const token = url.pathname.split('/').filter(Boolean).pop();
+              state.set(token, { orderStatus: 'PAID', availablePayments: [] });
+              return send(res, 200, { ok: true });
+            }
+
             const parts = url.pathname.split('/').filter(Boolean);
             const start = parts[parts.length - 1] === 'start';
             const token = start ? parts[parts.length - 2] : parts[parts.length - 1];
@@ -194,44 +219,39 @@ jobs:
               });
               req.on('end', () => {
                 const parsed = JSON.parse(body || '{}');
+                const current = currentState(token);
 
-                if (parsed.method === 'PIX') {
-                  const activePayment = {
-                    method: 'PIX',
-                    status: 'PENDING',
-                    amount: 110,
-                    pixQrCode: qr,
-                    pixCopyPaste: '00020101021226890014BR.GOV.BCB.PIX5204000053039865406110.005802BR',
-                    pixExpirationDate: '2026-09-23T03:00:00.000Z'
-                  };
-                  state.set(token, {
-                    orderStatus: 'PENDING_PAYMENT',
-                    activePayment
-                  });
-                  return send(res, 200, {
-                    orderStatus: 'PENDING_PAYMENT',
-                    activePayment
-                  });
+                if (current.orderStatus === 'PAID') {
+                  return send(res, 200, { orderStatus: 'PAID' });
                 }
 
-                if (parsed.method === 'CARD') {
-                  const activePayment = {
-                    method: 'CARD',
-                    status: 'PENDING',
-                    amount: 110,
-                    invoiceUrl: 'http://127.0.0.1:4020/mock-card-destination'
-                  };
-                  state.set(token, {
-                    orderStatus: 'PENDING_PAYMENT',
-                    activePayment
-                  });
-                  return send(res, 200, {
-                    orderStatus: 'PENDING_PAYMENT',
-                    activePayment
-                  });
+                const existing = current.availablePayments.find(
+                  (payment) => payment.method === parsed.method,
+                );
+                const activePayment =
+                  existing ||
+                  (parsed.method === 'PIX'
+                    ? pixPayment()
+                    : parsed.method === 'CARD'
+                      ? cardPayment()
+                      : null);
+
+                if (!activePayment) {
+                  return send(res, 400, { message: 'Método inválido' });
                 }
 
-                return send(res, 400, { message: 'Método inválido' });
+                const availablePayments = existing
+                  ? current.availablePayments
+                  : [activePayment, ...current.availablePayments];
+                state.set(token, {
+                  orderStatus: 'PENDING_PAYMENT',
+                  availablePayments
+                });
+
+                return send(res, 200, {
+                  orderStatus: 'PENDING_PAYMENT',
+                  activePayment
+                });
               });
               return;
             }
@@ -267,10 +287,9 @@ jobs:
           import { chromium } from 'playwright';
 
           const base = 'http://127.0.0.1:4020';
+          const mock = 'http://127.0.0.1:3001';
           const tokens = {
             product: '11111111-1111-4111-8111-111111111111',
-            card: '22222222-2222-4222-8222-222222222222',
-            pendingPix: '33333333-3333-4333-8333-333333333333',
             paid: '44444444-4444-4444-8444-444444444444',
             missing: '55555555-5555-4555-8555-555555555555',
             gone: '66666666-6666-4666-8666-666666666666',
@@ -290,6 +309,11 @@ jobs:
             if (overflow) throw new Error(label + ' horizontal overflow detected');
           }
 
+          async function assertNoManualRefresh(page) {
+            const count = await page.getByRole('button', { name: /Atualizar status/i }).count();
+            if (count !== 0) throw new Error('Manual refresh button is still visible');
+          }
+
           try {
             const desktopContext = await browser.newContext({
               viewport: { width: 1440, height: 900 },
@@ -303,66 +327,91 @@ jobs:
               }
             });
 
-            await desktop.goto(base + '/' + tokens.product, { waitUntil: 'domcontentloaded' });
+            const productUrl = base + '/' + tokens.product;
+            await desktop.goto(productUrl, { waitUntil: 'domcontentloaded' });
             await assertText(desktop, 'Resumo do pedido');
             await assertText(desktop, 'R$ 110,00');
             await desktop.getByRole('button', { name: 'Pix' }).waitFor();
             await desktop.getByRole('button', { name: 'Cartão' }).waitFor();
-            if (await desktop.getByText('Endereço de entrega', { exact: true }).count()) {
-              throw new Error('Address step is still visible');
-            }
-            if (await desktop.getByText('Entrega', { exact: true }).count()) {
-              throw new Error('Legacy stepper is still visible');
-            }
-            await assertNoOverflow(desktop, 'Desktop');
+            await assertNoOverflow(desktop, 'Desktop MENU');
 
             await desktop.getByRole('button', { name: 'Pix' }).click();
             await assertText(desktop, 'Pagamento via Pix');
             await desktop.getByAltText('QR Code Pix para pagamento').waitFor();
-            await assertText(desktop, '000201010212');
-            await desktop.getByRole('button', { name: 'Copiar código Pix' }).click();
-            await assertText(desktop, 'Código copiado');
+            await assertNoManualRefresh(desktop);
+            const startsBeforePixReload = startRequests;
+            await desktop.reload({ waitUntil: 'domcontentloaded' });
+            await assertText(desktop, 'Pagamento via Pix');
+            if (startRequests !== startsBeforePixReload) {
+              throw new Error('Reloading PIX unexpectedly started a payment');
+            }
 
-            const startsBeforeBack = startRequests;
+            await desktop.getByRole('button', { name: 'Alterar forma de pagamento' }).click();
+            await desktop.getByRole('button', { name: 'Cartão' }).waitFor();
+            const startsBeforeCard = startRequests;
+            const popupPromise = desktopContext.waitForEvent('page');
+            await desktop.getByRole('button', { name: 'Cartão' }).click();
+            const cardPopup = await popupPromise;
+            await cardPopup.waitForURL('**/mock-card-destination');
+            await assertText(desktop, 'Pagamento com cartão');
+            if (desktop.url() !== productUrl) {
+              throw new Error('Original CanFy tab navigated away during card payment');
+            }
+            if (startRequests !== startsBeforeCard + 1) {
+              throw new Error('Card selection did not start exactly one request');
+            }
+            const openerIsNull = await cardPopup.evaluate(() => window.opener === null);
+            if (!openerIsNull) throw new Error('Card popup kept window.opener');
+            await cardPopup.close();
+            await assertNoManualRefresh(desktop);
+
+            const startsBeforeCardReload = startRequests;
+            await desktop.reload({ waitUntil: 'domcontentloaded' });
+            await assertText(desktop, 'Pagamento com cartão');
+            if (startRequests !== startsBeforeCardReload) {
+              throw new Error('Reloading CARD unexpectedly started a payment');
+            }
+
             await desktop.getByRole('button', { name: 'Alterar forma de pagamento' }).click();
             await desktop.getByRole('button', { name: 'Pix' }).waitFor();
+            const startsBeforeMenuReload = startRequests;
+            await desktop.reload({ waitUntil: 'domcontentloaded' });
+            await desktop.getByRole('button', { name: 'Pix' }).waitFor();
             await desktop.getByRole('button', { name: 'Cartão' }).waitFor();
-            await desktop.waitForTimeout(100);
-            if (startRequests !== startsBeforeBack) {
-              throw new Error('Returning to payment selection unexpectedly started a new payment');
+            if (startRequests !== startsBeforeMenuReload) {
+              throw new Error('Reloading MENU unexpectedly started a payment');
             }
 
             await desktop.getByRole('button', { name: 'Pix' }).click();
             await assertText(desktop, 'Pagamento via Pix');
-
-            await desktop.getByRole('button', { name: 'Alterar forma de pagamento' }).click();
-            const startsBeforeCardSwitch = startRequests;
-            await desktop.getByRole('button', { name: 'Cartão' }).click();
-            await desktop.waitForURL('**/mock-card-destination');
-            if (startRequests !== startsBeforeCardSwitch + 1) {
-              throw new Error('Switching from Pix to card did not start exactly one card request');
+            const startsBeforeBothReload = startRequests;
+            await desktop.reload({ waitUntil: 'domcontentloaded' });
+            await assertText(desktop, 'Pagamento via Pix');
+            if (startRequests !== startsBeforeBothReload) {
+              throw new Error('Reloading PIX with CARD also pending unexpectedly started a payment');
             }
 
-            await desktop.goto(base + '/' + tokens.pendingPix, { waitUntil: 'domcontentloaded' });
-            await assertText(desktop, 'Pagamento via Pix');
-            await desktop.getByAltText('QR Code Pix para pagamento').waitFor();
+            await desktopContext.request.post(mock + '/__ci/mark-paid/' + tokens.product);
+            await desktop.evaluate(() => window.dispatchEvent(new Event('focus')));
+            await assertText(desktop, 'Obrigado, Mario!');
+            await assertText(desktop, 'Pagamento confirmado com sucesso');
+            await assertText(desktop, 'Produto teste');
+            await assertText(desktop, 'R$ 110,00');
+
+            await desktop.reload({ waitUntil: 'domcontentloaded' });
+            await assertText(desktop, 'Pagamento confirmado com sucesso');
+            await assertText(desktop, 'Resumo do pedido');
 
             await desktop.goto(base + '/' + tokens.paid, { waitUntil: 'domcontentloaded' });
-            await assertText(desktop, 'Pagamento confirmado');
+            await assertText(desktop, 'Pagamento confirmado com sucesso');
+            await desktop.reload({ waitUntil: 'domcontentloaded' });
+            await assertText(desktop, 'Pagamento confirmado com sucesso');
 
             await desktop.goto(base + '/' + tokens.missing, { waitUntil: 'domcontentloaded' });
             await assertText(desktop, 'Não encontramos este pagamento');
 
             await desktop.goto(base + '/' + tokens.gone, { waitUntil: 'domcontentloaded' });
             await assertText(desktop, 'não está mais disponível');
-
-            const card = await desktopContext.newPage();
-            await card.goto(base + '/' + tokens.card, { waitUntil: 'domcontentloaded' });
-            await card.getByRole('button', { name: 'Cartão' }).click();
-            await card.waitForURL('**/mock-card-destination');
-            if (card.url() !== base + '/mock-card-destination') {
-              throw new Error('Card did not navigate to expected invoiceUrl');
-            }
 
             const mobileContext = await browser.newContext({
               viewport: { width: 375, height: 812 }
@@ -372,12 +421,20 @@ jobs:
             await assertText(mobile, 'Resumo do pedido');
             await mobile.getByRole('button', { name: 'Pix' }).waitFor();
             await mobile.getByRole('button', { name: 'Cartão' }).waitFor();
-            await assertNoOverflow(mobile, 'Mobile READY');
+            await assertNoOverflow(mobile, 'Mobile MENU');
 
             await mobile.getByRole('button', { name: 'Pix' }).click();
             await assertText(mobile, 'Pagamento via Pix');
             await mobile.getByAltText('QR Code Pix para pagamento').waitFor();
+            await assertNoManualRefresh(mobile);
             await assertNoOverflow(mobile, 'Mobile PIX');
+
+            await mobileContext.request.post(
+              mock + '/__ci/mark-paid/' + tokens.mobileProduct,
+            );
+            await mobile.evaluate(() => window.dispatchEvent(new Event('focus')));
+            await assertText(mobile, 'Pagamento confirmado com sucesso');
+            await assertNoOverflow(mobile, 'Mobile PAID');
 
             console.log('browser-smoke-tests: passed');
             await desktopContext.close();
