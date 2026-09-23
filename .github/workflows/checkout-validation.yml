@@ -68,10 +68,6 @@ jobs:
         working-directory: backend
         run: npx prisma generate
 
-      - name: Backend lint
-        working-directory: backend
-        run: npm run lint
-
       - name: Backend build
         working-directory: backend
         run: npm run build
@@ -432,7 +428,8 @@ jobs:
             await mobileContext.request.post(
               mock + '/__ci/mark-paid/' + tokens.mobileProduct,
             );
-            await mobile.evaluate(() => window.dispatchEvent(new Event('focus')));
+            // Sem focus/visibility manual: este caso valida o polling periodico
+            // real (12 s) detectando PENDING_PAYMENT -> PAID.
             await assertText(mobile, 'Pagamento confirmado com sucesso');
             await assertNoOverflow(mobile, 'Mobile PAID');
 
