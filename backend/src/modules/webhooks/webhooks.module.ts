@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bull';
 import { WebhooksService } from './webhooks.service';
 import { WebhooksController } from './webhooks.controller';
 import { WebhooksProcessor } from './webhooks.processor';
+import { WebhookRegistrationService } from './webhook-registration.service';
 import { AsaasModule } from '../../asaas/asaas.module';
 
 @Module({
@@ -13,6 +14,10 @@ import { AsaasModule } from '../../asaas/asaas.module';
     AsaasModule,
   ],
   controllers: [WebhooksController],
-  providers: [WebhooksService, WebhooksProcessor],
+  providers: [
+    WebhooksService,
+    WebhooksProcessor,
+    WebhookRegistrationService,
+  ],
 })
 export class WebhooksModule {}
