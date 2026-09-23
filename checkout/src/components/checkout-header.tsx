@@ -1,5 +1,5 @@
 import Image from 'next/image';
-import { Instagram, Linkedin, LockKeyhole, Youtube } from 'lucide-react';
+import { LockKeyhole } from 'lucide-react';
 
 const socialLinkClass =
   'inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-canfy-200 hover:bg-canfy-50 hover:text-canfy-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canfy-500 focus-visible:ring-offset-2';
@@ -22,7 +22,7 @@ export function CheckoutHeader() {
               title="Instagram"
               className={socialLinkClass}
             >
-              <Instagram aria-hidden="true" className="h-4 w-4" />
+              <span aria-hidden="true" className="text-[11px] font-bold tracking-tight">IG</span>
             </a>
             <a
               href="https://www.youtube.com/@canfybr/"
@@ -32,7 +32,7 @@ export function CheckoutHeader() {
               title="YouTube"
               className={socialLinkClass}
             >
-              <Youtube aria-hidden="true" className="h-4 w-4" />
+              <span aria-hidden="true" className="text-[11px] font-bold tracking-tight">YT</span>
             </a>
             <a
               href="https://www.linkedin.com/company/canfybr/"
@@ -42,7 +42,7 @@ export function CheckoutHeader() {
               title="LinkedIn"
               className={socialLinkClass}
             >
-              <Linkedin aria-hidden="true" className="h-4 w-4" />
+              <span aria-hidden="true" className="text-xs font-bold tracking-tight">in</span>
             </a>
             <a
               href="https://www.reclameaqui.com.br/empresa/canfy-tecnologia-e-solucoes-ltda/"
