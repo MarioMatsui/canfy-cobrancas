@@ -43,7 +43,10 @@ export class WebhooksService {
     }
     const tokenBuf = Buffer.from(token);
     const secretBuf = Buffer.from(this.webhookSecret);
-    if (tokenBuf.length !== secretBuf.length || !crypto.timingSafeEqual(tokenBuf, secretBuf)) {
+    if (
+      tokenBuf.length !== secretBuf.length ||
+      !crypto.timingSafeEqual(tokenBuf, secretBuf)
+    ) {
       throw new ForbiddenException('Token de webhook inválido');
     }
   }
@@ -76,23 +79,27 @@ export class WebhooksService {
         typeof error === 'object' && error !== null && 'code' in error
           ? String((error as { code?: unknown }).code)
           : '';
+
       if (payload.id && code === 'P2002') {
-        this.logger.log('Webhook duplicado ignorado com segurança.');
+        const existing = await this.prisma.webhookLog.findUnique({
+          where: { providerEventId: payload.id },
+          select: { id: true, status: true },
+        });
+
+        // Se a primeira entrega persistiu no banco, mas falhou antes de entrar
+        // na fila, uma repetição do mesmo evento precisa tentar enfileirar de
+        // novo. O jobId estável impede duas execuções simultâneas.
+        if (existing && existing.status !== 'PROCESSED') {
+          await this.enqueueWebhook(payload, existing.id);
+        }
+
+        this.logger.log('Webhook duplicado recebido com idempotência.');
         return { received: true, duplicate: true };
       }
       throw error;
     }
 
-    const queuedPayload: QueuedAsaasWebhookPayload = {
-      ...payload,
-      webhookLogId: log.id,
-    };
-
-    await this.webhooksQueue.add('process', queuedPayload, {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 5000 },
-      removeOnComplete: true,
-    });
+    await this.enqueueWebhook(payload, log.id);
 
     this.logger.log('Webhook recebido e enfileirado: ' + payload.event);
     return { received: true };
@@ -109,5 +116,24 @@ export class WebhooksService {
       this.prisma.webhookLog.count(),
     ]);
     return { data, total, page, limit };
+  }
+
+  private async enqueueWebhook(
+    payload: AsaasWebhookPayload,
+    webhookLogId: string,
+  ): Promise<void> {
+    const queuedPayload: QueuedAsaasWebhookPayload = {
+      ...payload,
+      webhookLogId,
+    };
+
+    await this.webhooksQueue.add('process', queuedPayload, {
+      jobId: payload.id
+        ? 'asaas:' + payload.id
+        : 'asaas-log:' + webhookLogId,
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5000 },
+      removeOnComplete: true,
+    });
   }
 }
