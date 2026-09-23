@@ -16,6 +16,7 @@ describe('WebhooksService', () => {
       },
       webhookLog: {
         create: jest.fn().mockResolvedValue({ id: 'log-1' }),
+        findUnique: jest.fn(),
         findMany: jest.fn(),
         count: jest.fn(),
       },
@@ -74,8 +75,12 @@ describe('WebhooksService', () => {
     );
   });
 
-  it('ignora reentrega com providerEventId ja persistido', async () => {
+  it('ignora reentrega ja processada com providerEventId persistido', async () => {
     prisma.webhookLog.create.mockRejectedValue({ code: 'P2002' });
+    prisma.webhookLog.findUnique.mockResolvedValue({
+      id: 'log-1',
+      status: 'PROCESSED',
+    });
 
     const result = await service.handleWebhook(
       {
