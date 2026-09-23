@@ -20,6 +20,7 @@ import {
   CreateChargeItemDto,
   DiscountTypeDto,
   ListChargesDto,
+  ProductTypeDto,
 } from './charges.dto';
 
 type Rules = {
@@ -36,6 +37,7 @@ type Item = {
   productId: string | null;
   productName: string;
   productSku: string | null;
+  productType: ProductTypeDto | null;
   quantity: number;
   unitPrice: Prisma.Decimal;
   lineTotal: Prisma.Decimal;
@@ -205,6 +207,7 @@ export class ChargesService {
           productId: item.productId,
           productName: item.productName,
           productSku: item.productSku,
+          productType: item.productType,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           lineTotal: item.lineTotal,
@@ -508,7 +511,12 @@ export class ChargesService {
 
       let supplierSubaccountId: string | null = null;
       let fulfillmentType: FulfillmentType = FulfillmentType.NATIONAL;
+      let productType: ProductTypeDto | null = null;
       if (orderKind === OrderKind.PRODUCT) {
+        if (!entry.productType) {
+          throw new BadRequestException('Item ' + (index + 1) + ' (' + name + '): informe o tipo do produto');
+        }
+        productType = entry.productType;
         supplierSubaccountId = product?.supplierSubaccountId ?? entry.supplierSubaccountId ?? null;
         if (!supplierSubaccountId) {
           throw new BadRequestException('Item ' + (index + 1) + ' (' + name + '): informe o fornecedor');
@@ -525,6 +533,7 @@ export class ChargesService {
         productId: product?.id ?? null,
         productName: name,
         productSku: product?.sku ?? null,
+        productType,
         quantity: entry.quantity,
         unitPrice,
         lineTotal: this.money(unitPrice.mul(entry.quantity)),

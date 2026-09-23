@@ -336,6 +336,8 @@ model ChargeItem {
   productId            String?         @map("product_id")
   productName          String          @map("product_name")
   productSku           String?         @map("product_sku")
+  /// Snapshot do tipo comercial escolhido na cobranca. NULL = legado/consulta.
+  productType          String?         @map("product_type")
   quantity             Int             @default(1)
   unitPrice            Decimal         @map("unit_price") @db.Decimal(12, 2)
   lineTotal            Decimal         @map("line_total") @db.Decimal(12, 2)

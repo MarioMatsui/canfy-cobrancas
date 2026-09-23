@@ -64,6 +64,9 @@ function isItem(value: unknown): value is PublicChargeItem {
   ) {
     return false;
   }
+  if (value.productType !== undefined && typeof value.productType !== 'string') {
+    return false;
+  }
   return true;
 }
 

@@ -3,6 +3,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export type PublicOrderKind = 'PRODUCT' | 'CONSULTATION';
 export type PublicOrderStatus = 'READY' | 'PENDING_PAYMENT' | 'PAID';
 export type PublicFulfillmentType = 'NATIONAL' | 'INTERNATIONAL';
+export type PublicProductType = 'OIL' | 'GUMMY' | 'CAPSULE' | 'CREAM' | 'NASAL_SPRAY';
 export type PublicShipmentType = 'NATIONAL' | 'INTERNATIONAL';
 export type PublicPaymentMethod = 'PIX' | 'CARD';
 export type PublicPaymentStatus = 'PENDING' | 'CONFIRMED' | 'RECEIVED' | 'OVERDUE';
@@ -22,6 +23,12 @@ export class PublicChargeItemDto {
 
   @ApiPropertyOptional({ enum: ['NATIONAL', 'INTERNATIONAL'], example: 'NATIONAL' })
   fulfillmentType?: PublicFulfillmentType;
+
+  @ApiPropertyOptional({
+    enum: ['OIL', 'GUMMY', 'CAPSULE', 'CREAM', 'NASAL_SPRAY'],
+    example: 'OIL',
+  })
+  productType?: PublicProductType;
 }
 
 export class PublicChargeShipmentDto {

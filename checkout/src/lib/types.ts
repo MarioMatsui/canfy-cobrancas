@@ -1,6 +1,7 @@
 export type PublicOrderKind = 'PRODUCT' | 'CONSULTATION';
 export type PublicOrderStatus = 'READY' | 'PENDING_PAYMENT' | 'PAID';
 export type PublicFulfillmentType = 'NATIONAL' | 'INTERNATIONAL';
+export type PublicProductType = 'OIL' | 'GUMMY' | 'CAPSULE' | 'CREAM' | 'NASAL_SPRAY';
 export type PublicShipmentType = 'NATIONAL' | 'INTERNATIONAL';
 export type PaymentMethod = 'PIX' | 'CARD';
 export type PublicPaymentStatus = 'PENDING' | 'CONFIRMED' | 'RECEIVED' | 'OVERDUE';
@@ -11,6 +12,7 @@ export type PublicChargeItem = {
   unitPrice: number;
   lineTotal: number;
   fulfillmentType?: PublicFulfillmentType;
+  productType?: string;
 };
 
 export type PublicChargeShipment = {

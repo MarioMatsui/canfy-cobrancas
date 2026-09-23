@@ -32,6 +32,14 @@ export enum FulfillmentTypeDto {
   INTERNATIONAL = 'INTERNATIONAL',
 }
 
+export enum ProductTypeDto {
+  OIL = 'OIL',
+  GUMMY = 'GUMMY',
+  CAPSULE = 'CAPSULE',
+  CREAM = 'CREAM',
+  NASAL_SPRAY = 'NASAL_SPRAY',
+}
+
 export enum SplitCalculationTypeDto {
   PERCENTAGE = 'PERCENTAGE',
   FIXED = 'FIXED',
@@ -57,6 +65,14 @@ export class CreateChargeItemDto {
   @IsString()
   @IsOptional()
   productName?: string;
+
+  @ApiPropertyOptional({
+    enum: ProductTypeDto,
+    description: 'Tipo comercial do produto. Obrigatório em novas cobranças de produto e ausente em consultas.',
+  })
+  @IsEnum(ProductTypeDto)
+  @IsOptional()
+  productType?: ProductTypeDto;
 
   @ApiProperty({ example: 1, default: 1 })
   @Type(() => Number)

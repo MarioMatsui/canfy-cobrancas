@@ -22,7 +22,14 @@ export function OrderSummary({ charge, compact = false }: { charge: PublicCharge
       <div className="border-b border-slate-100 px-5 py-4 sm:px-6">
         <p className="text-sm font-semibold text-slate-900">Resumo do pedido</p>
       </div>
-      {!compact && <div className="border-b border-slate-100 px-5 py-5 sm:px-6"><OrderItems items={charge.items} /></div>}
+      {!compact && (
+        <div className="border-b border-slate-100 px-5 py-5 sm:px-6">
+          <OrderItems
+            items={charge.items}
+            showImages={charge.orderKind !== 'CONSULTATION'}
+          />
+        </div>
+      )}
       <div className="px-5 py-5 sm:px-6"><PriceBreakdown charge={charge} /></div>
       {(expiresAt || estimates.length > 0) && !compact && (
         <div className="space-y-2 border-t border-slate-100 bg-slate-50/70 px-5 py-4 text-xs text-slate-600 sm:px-6">

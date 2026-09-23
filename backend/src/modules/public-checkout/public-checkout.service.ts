@@ -24,6 +24,7 @@ import {
   PublicPaymentMethod,
   PublicPaymentStartResponseDto,
   PublicPaymentStatus,
+  PublicProductType,
   PublicShipmentType,
 } from './dto/public-charge.response.dto';
 import { StartPublicPaymentDto } from './dto/start-public-payment.dto';
@@ -63,6 +64,7 @@ const PUBLIC_CHARGE_SELECT = {
   items: {
     select: {
       productName: true,
+      productType: true,
       quantity: true,
       unitPrice: true,
       lineTotal: true,
@@ -950,7 +952,12 @@ export class PublicCheckoutService {
             unitPrice: this.decimalToNumber(item.unitPrice),
             lineTotal: this.decimalToNumber(item.lineTotal),
             ...(charge.orderKind === 'PRODUCT'
-              ? { fulfillmentType: item.fulfillmentType as PublicFulfillmentType }
+              ? {
+                  fulfillmentType: item.fulfillmentType as PublicFulfillmentType,
+                  ...(item.productType
+                    ? { productType: item.productType as PublicProductType }
+                    : {}),
+                }
               : {}),
           }))
         : [

@@ -38,6 +38,7 @@ const publicCharge = {
   items: [
     {
       productName: 'Produto teste',
+      productType: 'OIL',
       quantity: 2,
       unitPrice: D('50.00'),
       lineTotal: D('100.00'),
@@ -163,10 +164,34 @@ describe('PublicCheckoutService', () => {
       quantity: 2,
       unitPrice: 50,
       lineTotal: 100,
+      productType: 'OIL',
     });
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(asaas.post).not.toHaveBeenCalled();
     expect(asaas.delete).not.toHaveBeenCalled();
+  });
+
+  it('mantem compatibilidade com item legado sem productType', async () => {
+    prisma.charge.findUnique.mockResolvedValue({
+      ...publicCharge,
+      items: [{ ...publicCharge.items[0], productType: null }],
+    });
+
+    const result = await service.findByToken(token);
+
+    expect(result.items[0]).not.toHaveProperty('productType');
+  });
+
+  it('nao expoe productType em cobranca de consulta', async () => {
+    prisma.charge.findUnique.mockResolvedValue({
+      ...publicCharge,
+      orderKind: 'CONSULTATION',
+    });
+
+    const result = await service.findByToken(token);
+
+    expect(result.orderKind).toBe('CONSULTATION');
+    expect(result.items[0]).not.toHaveProperty('productType');
   });
 
   it('usa allowlist e nao expoe dados financeiros internos no GET', async () => {

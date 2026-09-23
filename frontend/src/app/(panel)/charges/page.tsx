@@ -9,6 +9,7 @@ import api from '@/lib/api';
 
 type OrderKind = 'PRODUCT' | 'CONSULTATION';
 type FulfillmentType = 'NATIONAL' | 'INTERNATIONAL';
+type ProductType = 'OIL' | 'GUMMY' | 'CAPSULE' | 'CREAM' | 'NASAL_SPRAY';
 type DiscountType = 'NONE' | 'PERCENTAGE' | 'FIXED';
 type SplitCalculationType = 'PERCENTAGE' | 'FIXED';
 type RecipientType = 'SUPPLIER' | 'DOCTOR';
@@ -70,6 +71,7 @@ type ApiErrorBody = { message?: string | string[] };
 type Item = {
   productId: string;
   productName: string;
+  productType: ProductType | '';
   quantity: number;
   unitPrice: string;
   supplierSubaccountId: string;
@@ -91,6 +93,7 @@ type SplitRow = {
 const blankProduct = (): Item => ({
   productId: '',
   productName: '',
+  productType: '',
   quantity: 1,
   unitPrice: '',
   supplierSubaccountId: '',
@@ -100,6 +103,7 @@ const blankProduct = (): Item => ({
 const blankConsultation = (): Item => ({
   productId: '',
   productName: 'Consulta médica',
+  productType: '',
   quantity: 1,
   unitPrice: '',
   supplierSubaccountId: '',
@@ -515,6 +519,10 @@ export default function ChargesPage() {
         toast.error('Valor ou quantidade inválidos no item ' + (index + 1));
         return;
       }
+      if (orderKind === 'PRODUCT' && !item.productType) {
+        toast.error('Selecione o tipo de produto do item ' + (index + 1));
+        return;
+      }
       if (orderKind === 'PRODUCT' && !item.supplierSubaccountId) {
         toast.error('Selecione o fornecedor do item ' + (index + 1));
         return;
@@ -573,6 +581,7 @@ export default function ChargesPage() {
         productName: item.productId ? undefined : item.productName.trim(),
         quantity: item.quantity,
         unitPrice: Number(item.unitPrice),
+        productType: orderKind === 'PRODUCT' ? item.productType : undefined,
         supplierSubaccountId:
           orderKind === 'PRODUCT' ? item.supplierSubaccountId : undefined,
         fulfillmentType: orderKind === 'PRODUCT' ? item.fulfillmentType : undefined,
@@ -796,7 +805,7 @@ export default function ChargesPage() {
                     </select>
                   )}
 
-                  <div className="grid md:grid-cols-2 xl:grid-cols-6 gap-3">
+                  <div className="grid md:grid-cols-2 xl:grid-cols-7 gap-3">
                     <input
                       className="border rounded-lg px-3 py-2 text-sm xl:col-span-2"
                       placeholder="Nome *"
@@ -830,6 +839,22 @@ export default function ChargesPage() {
                     />
                     {orderKind === 'PRODUCT' && (
                       <>
+                        <select
+                          className="border rounded-lg px-3 py-2 text-sm bg-white"
+                          value={item.productType}
+                          onChange={(event) =>
+                            updateItem(index, {
+                              productType: event.target.value as ProductType | '',
+                            })
+                          }
+                        >
+                          <option value="">Tipo de produto *</option>
+                          <option value="OIL">Óleo</option>
+                          <option value="GUMMY">Gummy</option>
+                          <option value="CAPSULE">Cápsula</option>
+                          <option value="CREAM">Creme</option>
+                          <option value="NASAL_SPRAY">Spray nasal</option>
+                        </select>
                         <select
                           className="border rounded-lg px-3 py-2 text-sm"
                           disabled={Boolean(catalog?.supplierSubaccountId)}
