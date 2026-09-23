@@ -1,4 +1,15 @@
-import { Controller, Post, Get, Body, Headers, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  Headers,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { WebhooksService, AsaasWebhookPayload } from './webhooks.service';
@@ -9,6 +20,8 @@ export class WebhooksController {
   constructor(private webhooksService: WebhooksService) {}
 
   @Post('asaas')
+  @HttpCode(HttpStatus.OK)
+  @Header('Cache-Control', 'no-store')
   @ApiOperation({ summary: 'Endpoint para receber webhooks do Asaas' })
   handleWebhook(
     @Body() payload: AsaasWebhookPayload,
