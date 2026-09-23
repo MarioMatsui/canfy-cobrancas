@@ -336,10 +336,12 @@ jobs:
             await assertText(desktop, 'Pagamento via Pix');
 
             await desktop.getByRole('button', { name: 'Alterar forma de pagamento' }).click();
+            const startsBeforeCardSwitch = startRequests;
             await desktop.getByRole('button', { name: 'Cartão' }).click();
-            await assertText(desktop, 'Alterar forma de pagamento?');
-            await desktop.getByRole('button', { name: 'Alterar para Cartão' }).click();
             await desktop.waitForURL('**/mock-card-destination');
+            if (startRequests !== startsBeforeCardSwitch + 1) {
+              throw new Error('Switching from Pix to card did not start exactly one card request');
+            }
 
             await desktop.goto(base + '/' + tokens.pendingPix, { waitUntil: 'domcontentloaded' });
             await assertText(desktop, 'Pagamento via Pix');
