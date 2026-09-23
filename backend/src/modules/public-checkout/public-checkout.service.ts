@@ -1196,7 +1196,11 @@ export class PublicCheckoutService {
     if (!EXIBIVEL.has(charge.orderStatus as PublicOrderStatus)) {
       throw new GoneException('Esta cobrança não está mais disponível');
     }
-    if (charge.expiresAt && charge.expiresAt.getTime() < Date.now()) {
+    if (
+      charge.orderStatus !== 'PAID' &&
+      charge.expiresAt &&
+      charge.expiresAt.getTime() < Date.now()
+    ) {
       throw new GoneException('Este link de pagamento expirou');
     }
   }

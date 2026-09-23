@@ -215,6 +215,31 @@ describe('PublicCheckoutService', () => {
     await expect(service.findByToken(token)).rejects.toThrow(GoneException);
   });
 
+  it('mantem a confirmacao PAID acessivel mesmo depois da validade do link', async () => {
+    const expiredAt = new Date(Date.now() - 1_000);
+    prisma.charge.findUnique.mockResolvedValue({
+      ...publicCharge,
+      orderStatus: 'PAID',
+      expiresAt: expiredAt,
+    });
+
+    const loaded = await service.findByToken(token);
+    expect(loaded.orderStatus).toBe('PAID');
+
+    mockStartCharge(
+      startCharge({
+        orderStatus: 'PAID',
+        expiresAt: expiredAt,
+      }),
+    );
+
+    await expect(
+      service.startPayment(token, { method: 'PIX' }),
+    ).resolves.toEqual({ orderStatus: 'PAID' });
+    expect(asaas.post).not.toHaveBeenCalled();
+    expect(tx.payment.create).not.toHaveBeenCalled();
+  });
+
   it('nao inicia nova tentativa quando a Charge ja esta PAID', async () => {
     mockStartCharge(startCharge({ orderStatus: 'PAID' }));
 

@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { AsaasService } from '../../asaas/asaas.service';
 
 const WEBHOOK_NAME = 'CanFy - pagamentos';
@@ -52,15 +53,24 @@ export class WebhookRegistrationService implements OnApplicationBootstrap {
     // Não bloqueia o boot da API por uma chamada externa. A configuração é
     // idempotente e pode ser refeita no próximo restart se o Asaas estiver fora.
     const timer = setTimeout(() => {
-      void this.ensureConfigured().catch(() => {
-        this.logger.error(
-          'Não foi possível garantir a configuração do webhook no Asaas. ' +
-            'O sync periódico continuará como fallback.',
-        );
-      });
+      void this.reconcileConfiguration();
     }, 1_500);
 
     timer.unref();
+  }
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async reconcileConfiguration(): Promise<void> {
+    if (!this.autoConfigureEnabled()) return;
+
+    try {
+      await this.ensureConfigured();
+    } catch {
+      this.logger.error(
+        'Não foi possível garantir a configuração do webhook no Asaas. ' +
+          'Uma nova tentativa será feita automaticamente; o sync periódico continua como fallback.',
+      );
+    }
   }
 
   async ensureConfigured(): Promise<'skipped' | 'created' | 'updated'> {

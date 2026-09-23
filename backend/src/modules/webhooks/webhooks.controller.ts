@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { WebhooksService, AsaasWebhookPayload } from './webhooks.service';
 
@@ -20,6 +21,7 @@ export class WebhooksController {
   constructor(private webhooksService: WebhooksService) {}
 
   @Post('asaas')
+  @SkipThrottle()
   @HttpCode(HttpStatus.OK)
   @Header('Cache-Control', 'no-store')
   @ApiOperation({ summary: 'Endpoint para receber webhooks do Asaas' })

@@ -391,6 +391,8 @@ POST https://cobranca.canfy.com.br/api/webhooks/asaas
 Em produção, o backend faz o provisionamento de forma idempotente ao iniciar: lista os Webhooks da
 conta, cria o Webhook da CanFy se ele não existir ou atualiza o existente, reativa uma fila
 interrompida, aplica o `WEBHOOK_SECRET` e mantém somente os eventos que o processador conhece.
+A configuração também é reconciliada automaticamente a cada hora, portanto uma indisponibilidade
+temporária do Asaas no boot não exige reiniciar o backend para recuperar o webhook.
 
 Para isso:
 

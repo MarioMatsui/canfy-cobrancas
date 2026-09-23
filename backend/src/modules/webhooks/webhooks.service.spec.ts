@@ -75,6 +75,7 @@ describe('WebhooksService', () => {
       expect.objectContaining({
         jobId: 'asaas:evt_1',
         attempts: 3,
+        removeOnFail: true,
       }),
     );
   });

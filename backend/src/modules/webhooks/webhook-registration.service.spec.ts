@@ -84,6 +84,15 @@ describe('WebhookRegistrationService', () => {
     expect(asaas.post).not.toHaveBeenCalled();
   });
 
+  it('retries provisioning safely after a transient Asaas failure', async () => {
+    const { service, asaas } = makeService(baseConfig);
+    asaas.get.mockRejectedValueOnce(new Error('temporary provider failure'));
+
+    await expect(service.reconcileConfiguration()).resolves.toBeUndefined();
+
+    expect(asaas.get).toHaveBeenCalledWith('/webhooks?offset=0&limit=100');
+  });
+
   it('does not call Asaas when WEBHOOK_SECRET is invalid', async () => {
     const { service, asaas } = makeService({
       ...baseConfig,
