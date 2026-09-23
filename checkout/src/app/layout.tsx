@@ -7,9 +7,8 @@ export const metadata: Metadata = {
   title: 'Pagamento | Canfy',
   description: 'Checkout de pagamento Canfy',
   icons: {
-    icon: '/logoreduzida.png',
-    shortcut: '/logoreduzida.png',
-    apple: '/logoreduzida.png',
+    icon: '/logoreduzida.ico',
+    shortcut: '/logoreduzida.ico',
   },
   robots: { index: false, follow: false, noarchive: true },
 };

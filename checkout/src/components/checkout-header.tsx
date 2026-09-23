@@ -2,7 +2,40 @@ import Image from 'next/image';
 import { LockKeyhole } from 'lucide-react';
 
 const socialLinkClass =
-  'inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-canfy-200 hover:bg-canfy-50 hover:text-canfy-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canfy-500 focus-visible:ring-offset-2';
+  'group inline-flex h-8 w-8 items-center justify-center focus-visible:rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canfy-500 focus-visible:ring-offset-2';
+
+const socialLinks = [
+  {
+    href: 'https://www.instagram.com/canfy.brasil/',
+    label: 'Instagram da Canfy',
+    title: 'Instagram',
+    icon: '/redesSociais/instagram.svg',
+  },
+  {
+    href: 'https://www.youtube.com/@canfybr/',
+    label: 'YouTube da Canfy',
+    title: 'YouTube',
+    icon: '/redesSociais/youtube.svg',
+  },
+  {
+    href: 'https://www.linkedin.com/company/canfybr/',
+    label: 'LinkedIn da Canfy',
+    title: 'LinkedIn',
+    icon: '/redesSociais/linkedin.svg',
+  },
+  {
+    href: 'https://www.reclameaqui.com.br/empresa/canfy-tecnologia-e-solucoes-ltda/',
+    label: 'Canfy no Reclame Aqui',
+    title: 'Reclame Aqui',
+    icon: '/redesSociais/reclameAqui.svg',
+  },
+  {
+    href: 'https://share.google/KRQa2XpKOYIQXuwB6',
+    label: 'Canfy no Google',
+    title: 'Google',
+    icon: '/redesSociais/google.svg',
+  },
+] as const;
 
 export function CheckoutHeader() {
   return (
@@ -14,60 +47,30 @@ export function CheckoutHeader() {
           </div>
 
           <nav aria-label="Redes sociais da Canfy" className="flex items-center gap-1.5">
-            <a
-              href="https://www.instagram.com/canfy.brasil/"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Instagram da Canfy"
-              title="Instagram"
-              className={socialLinkClass}
-            >
-              <span aria-hidden="true" className="text-[11px] font-bold tracking-tight">IG</span>
-            </a>
-            <a
-              href="https://www.youtube.com/@canfybr/"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="YouTube da Canfy"
-              title="YouTube"
-              className={socialLinkClass}
-            >
-              <span aria-hidden="true" className="text-[11px] font-bold tracking-tight">YT</span>
-            </a>
-            <a
-              href="https://www.linkedin.com/company/canfybr/"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="LinkedIn da Canfy"
-              title="LinkedIn"
-              className={socialLinkClass}
-            >
-              <span aria-hidden="true" className="text-xs font-bold tracking-tight">in</span>
-            </a>
-            <a
-              href="https://www.reclameaqui.com.br/empresa/canfy-tecnologia-e-solucoes-ltda/"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Canfy no Reclame Aqui"
-              title="Reclame Aqui"
-              className={socialLinkClass}
-            >
-              <span aria-hidden="true" className="text-[10px] font-bold tracking-tight">RA</span>
-            </a>
-            <a
-              href="https://share.google/KRQa2XpKOYIQXuwB6"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Canfy no Google"
-              title="Google"
-              className={socialLinkClass}
-            >
-              <span aria-hidden="true" className="text-sm font-bold">G</span>
-            </a>
+            {socialLinks.map((social) => (
+              <a
+                key={social.title}
+                href={social.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={social.label}
+                title={social.title}
+                className={socialLinkClass}
+              >
+                <Image
+                  src={social.icon}
+                  alt=""
+                  width={20}
+                  height={20}
+                  aria-hidden="true"
+                  className="h-5 w-5 object-contain transition-[filter] duration-150 ease-out group-hover:brightness-75 group-focus-visible:brightness-75"
+                />
+              </a>
+            ))}
           </nav>
         </div>
 
-        <div className="flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+        <div className="hidden w-fit items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600 sm:flex">
           <LockKeyhole aria-hidden="true" className="h-4 w-4 text-canfy-600" />
           <span>Checkout Canfy</span>
         </div>
