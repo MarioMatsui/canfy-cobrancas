@@ -19,6 +19,7 @@ type Subaccount = {
   name: string;
   type: 'DOCTOR' | 'SUPPLIER' | 'OTHER';
   walletId: string | null;
+  fulfillmentType: FulfillmentType | null;
 };
 
 type Product = {
@@ -27,7 +28,6 @@ type Product = {
   sku: string | null;
   defaultPrice: number | string;
   supplierSubaccountId: string | null;
-  fulfillmentType: FulfillmentType;
 };
 
 type Setting = { key: string; value: string };
@@ -75,7 +75,6 @@ type Item = {
   quantity: number;
   unitPrice: string;
   supplierSubaccountId: string;
-  fulfillmentType: FulfillmentType;
 };
 
 type SplitDraft = { mode: SplitCalculationType; value: string };
@@ -97,7 +96,6 @@ const blankProduct = (): Item => ({
   quantity: 1,
   unitPrice: '',
   supplierSubaccountId: '',
-  fulfillmentType: 'NATIONAL',
 });
 
 const blankConsultation = (): Item => ({
@@ -107,7 +105,6 @@ const blankConsultation = (): Item => ({
   quantity: 1,
   unitPrice: '',
   supplierSubaccountId: '',
-  fulfillmentType: 'NATIONAL',
 });
 
 const money = (value: unknown) =>
@@ -238,6 +235,13 @@ export default function ChargesPage() {
     [subaccounts.data],
   );
   const products = useMemo(() => productQuery.data?.data ?? [], [productQuery.data]);
+  const suppliersById = useMemo(
+    () => new Map(suppliers.map((supplier) => [supplier.id, supplier])),
+    [suppliers],
+  );
+
+  const itemFulfillment = (item: Item): FulfillmentType | null =>
+    suppliersById.get(item.supplierSubaccountId)?.fulfillmentType ?? null;
 
   const setting = (key: string, fallback: number) => {
     const parsed = Number(settingsQuery.data?.find((entry) => entry.key === key)?.value);
@@ -258,9 +262,9 @@ export default function ChargesPage() {
   );
 
   const hasNational =
-    orderKind === 'PRODUCT' && items.some((item) => item.fulfillmentType === 'NATIONAL');
+    orderKind === 'PRODUCT' && items.some((item) => itemFulfillment(item) === 'NATIONAL');
   const hasInternational =
-    orderKind === 'PRODUCT' && items.some((item) => item.fulfillmentType === 'INTERNATIONAL');
+    orderKind === 'PRODUCT' && items.some((item) => itemFulfillment(item) === 'INTERNATIONAL');
 
   const nationalShipping =
     hasNational ? Number(nationalShippingAmount) || 0 : 0;
@@ -279,7 +283,7 @@ export default function ChargesPage() {
 
     const bases = new Map<string, number>();
     items.forEach((item) => {
-      if (item.fulfillmentType !== fulfillmentType || !item.supplierSubaccountId) return;
+      if (itemFulfillment(item) !== fulfillmentType || !item.supplierSubaccountId) return;
       const lineTotal = (Number(item.unitPrice) || 0) * item.quantity;
       bases.set(
         item.supplierSubaccountId,
@@ -423,7 +427,6 @@ export default function ChargesPage() {
         productName: '',
         unitPrice: '',
         supplierSubaccountId: '',
-        fulfillmentType: 'NATIONAL',
       });
       return;
     }
@@ -436,7 +439,6 @@ export default function ChargesPage() {
       productName: product.name,
       unitPrice: String(product.defaultPrice),
       supplierSubaccountId: product.supplierSubaccountId || '',
-      fulfillmentType: product.fulfillmentType,
     });
   };
 
@@ -527,6 +529,22 @@ export default function ChargesPage() {
         toast.error('Selecione o fornecedor do item ' + (index + 1));
         return;
       }
+      if (orderKind === 'PRODUCT') {
+        const supplier = suppliersById.get(item.supplierSubaccountId);
+        if (!supplier) {
+          toast.error('O fornecedor do item ' + (index + 1) + ' não está disponível');
+          return;
+        }
+        if (!supplier.fulfillmentType) {
+          toast.error(
+            'O fornecedor "' +
+              supplier.name +
+              '" ainda não possui modalidade Nacional/Internacional configurada. ' +
+              'Edite a subconta antes de criar a cobrança.',
+          );
+          return;
+        }
+      }
     }
 
     for (const split of computedSplits) {
@@ -584,7 +602,6 @@ export default function ChargesPage() {
         productType: orderKind === 'PRODUCT' ? item.productType : undefined,
         supplierSubaccountId:
           orderKind === 'PRODUCT' ? item.supplierSubaccountId : undefined,
-        fulfillmentType: orderKind === 'PRODUCT' ? item.fulfillmentType : undefined,
       })),
       splits: computedSplits.map((split) => ({
         subaccountId: split.id,
@@ -805,7 +822,7 @@ export default function ChargesPage() {
                     </select>
                   )}
 
-                  <div className="grid md:grid-cols-2 xl:grid-cols-7 gap-3">
+                  <div className="grid md:grid-cols-2 xl:grid-cols-6 gap-3">
                     <input
                       className="border rounded-lg px-3 py-2 text-sm xl:col-span-2"
                       placeholder="Nome *"
@@ -867,21 +884,9 @@ export default function ChargesPage() {
                           {suppliers.map((supplier) => (
                             <option key={supplier.id} value={supplier.id}>
                               {supplier.name}
+                              {!supplier.fulfillmentType ? ' — modalidade pendente' : ''}
                             </option>
                           ))}
-                        </select>
-                        <select
-                          className="border rounded-lg px-3 py-2 text-sm"
-                          disabled={Boolean(catalog)}
-                          value={item.fulfillmentType}
-                          onChange={(event) =>
-                            updateItem(index, {
-                              fulfillmentType: event.target.value as FulfillmentType,
-                            })
-                          }
-                        >
-                          <option value="NATIONAL">Nacional</option>
-                          <option value="INTERNATIONAL">Internacional</option>
                         </select>
                       </>
                     )}

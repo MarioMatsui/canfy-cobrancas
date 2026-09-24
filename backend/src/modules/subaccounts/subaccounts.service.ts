@@ -1,7 +1,14 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, HttpException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AsaasService } from '../../asaas/asaas.service';
-import { CreateSubaccountDto, UpdateSubaccountDto, ListSubaccountsDto, LinkExistingSubaccountDto } from './subaccounts.dto';
+import { FulfillmentType, SubaccountType } from '@prisma/client';
+import {
+  CreateSubaccountDto,
+  UpdateSubaccountDto,
+  UpdateSubaccountMetadataDto,
+  ListSubaccountsDto,
+  LinkExistingSubaccountDto,
+} from './subaccounts.dto';
 
 @Injectable()
 export class SubaccountsService {
@@ -26,6 +33,27 @@ export class SubaccountsService {
   // para operações que dependem de um ID de conta Asaas real.
   private isRealAsaasId(asaasId: string | null | undefined): boolean {
     return !!asaasId && !asaasId.startsWith('external_');
+  }
+
+  private validateLocalMetadata(
+    type: SubaccountType,
+    fulfillmentType: FulfillmentType | null | undefined,
+    requireSupplierFulfillment = false,
+  ): void {
+    if (type === SubaccountType.SUPPLIER) {
+      if (requireSupplierFulfillment && !fulfillmentType) {
+        throw new BadRequestException(
+          'Fornecedores precisam ter a modalidade Nacional ou Internacional configurada.',
+        );
+      }
+      return;
+    }
+
+    if (fulfillmentType != null) {
+      throw new BadRequestException(
+        'A modalidade Nacional/Internacional só pode ser configurada em subcontas do tipo Fornecedor.',
+      );
+    }
   }
 
   // Consulta GET /myAccount/status (com a apiKey DA PRÓPRIA SUBCONTA) e atualiza
@@ -108,6 +136,9 @@ export class SubaccountsService {
   }
 
   async create(dto: CreateSubaccountDto) {
+    const localType = dto.type as SubaccountType;
+    this.validateLocalMetadata(localType, dto.fulfillmentType, true);
+
     // Cria subconta no Asaas
     const asaasPayload: Record<string, unknown> = {
       name: dto.name,
@@ -151,7 +182,9 @@ export class SubaccountsService {
                 cpfCnpj: dto.cpfCnpj,
                 phone: dto.phone,
                 mobilePhone: dto.mobilePhone,
-                type: dto.type,
+                type: localType,
+                fulfillmentType:
+                  localType === SubaccountType.SUPPLIER ? dto.fulfillmentType! : null,
                 active: true,
                 deletedAt: null,
               },
@@ -175,7 +208,9 @@ export class SubaccountsService {
         email: dto.email,
         phone: dto.phone,
         mobilePhone: dto.mobilePhone,
-        type: dto.type,
+        type: localType,
+        fulfillmentType:
+          localType === SubaccountType.SUPPLIER ? dto.fulfillmentType! : null,
       },
     });
 
@@ -184,6 +219,9 @@ export class SubaccountsService {
   }
 
   async linkExisting(dto: LinkExistingSubaccountDto) {
+    const localType = (dto.type ?? SubaccountType.OTHER) as SubaccountType;
+    this.validateLocalMetadata(localType, dto.fulfillmentType, true);
+
     // Verifica se já existe localmente (ativa)
     const existing = await this.prisma.subaccount.findFirst({
       where: { OR: [{ walletId: dto.walletId }, { asaasId: dto.walletId }], deletedAt: null },
@@ -226,7 +264,9 @@ export class SubaccountsService {
         name: accountName!,
         cpfCnpj: accountCpfCnpj!,
         email: accountEmail || null,
-        type: dto.type || 'OTHER',
+        type: localType,
+        fulfillmentType:
+          localType === SubaccountType.SUPPLIER ? dto.fulfillmentType! : null,
       },
     });
 
@@ -327,6 +367,40 @@ export class SubaccountsService {
     }
 
     const updated = await this.prisma.subaccount.update({ where: { id }, data: dto });
+    return this.sanitize(updated);
+  }
+
+  async updateMetadata(id: string, dto: UpdateSubaccountMetadataDto) {
+    const subaccount = await this.prisma.subaccount.findFirst({
+      where: { id, deletedAt: null },
+    });
+    if (!subaccount) throw new NotFoundException('Subconta não encontrada');
+
+    const nextType = (dto.type ?? subaccount.type) as SubaccountType;
+
+    if (nextType !== SubaccountType.SUPPLIER && dto.fulfillmentType != null) {
+      this.validateLocalMetadata(nextType, dto.fulfillmentType, false);
+    }
+
+    const requestedFulfillment =
+      nextType === SubaccountType.SUPPLIER
+        ? dto.fulfillmentType !== undefined
+          ? dto.fulfillmentType
+          : subaccount.fulfillmentType
+        : null;
+
+    this.validateLocalMetadata(nextType, requestedFulfillment, true);
+
+    const updated = await this.prisma.subaccount.update({
+      where: { id },
+      data: {
+        type: nextType,
+        fulfillmentType:
+          nextType === SubaccountType.SUPPLIER ? requestedFulfillment! : null,
+      },
+    });
+
+    // Deliberadamente NÃO chama Asaas: type/fulfillmentType são metadados internos.
     return this.sanitize(updated);
   }
 

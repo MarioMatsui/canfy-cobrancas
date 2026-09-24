@@ -2,7 +2,13 @@ import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UseGuard
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SubaccountsService } from './subaccounts.service';
-import { CreateSubaccountDto, UpdateSubaccountDto, ListSubaccountsDto, LinkExistingSubaccountDto } from './subaccounts.dto';
+import {
+  CreateSubaccountDto,
+  UpdateSubaccountDto,
+  UpdateSubaccountMetadataDto,
+  ListSubaccountsDto,
+  LinkExistingSubaccountDto,
+} from './subaccounts.dto';
 
 @ApiTags('Subcontas')
 @ApiBearerAuth()
@@ -42,9 +48,15 @@ export class SubaccountsController {
   }
 
   @Put(':id')
-  @ApiOperation({ summary: 'Atualizar subconta' })
+  @ApiOperation({ summary: 'Atualizar dados cadastrais da subconta (sincroniza com Asaas)' })
   update(@Param('id') id: string, @Body() dto: UpdateSubaccountDto) {
     return this.subaccountsService.update(id, dto);
+  }
+
+  @Patch(':id/metadata')
+  @ApiOperation({ summary: 'Atualizar metadados internos Canfy sem alterar a conta no Asaas' })
+  updateMetadata(@Param('id') id: string, @Body() dto: UpdateSubaccountMetadataDto) {
+    return this.subaccountsService.updateMetadata(id, dto);
   }
 
   @Patch(':id/toggle')

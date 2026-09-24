@@ -1,6 +1,7 @@
 import { IsString, IsEmail, IsOptional, IsBoolean, IsNumber, IsEnum, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type, Transform } from 'class-transformer';
+import { FulfillmentType } from '@prisma/client';
 
 export enum SubaccountTypeDto {
   DOCTOR = 'DOCTOR',
@@ -28,6 +29,14 @@ export class CreateSubaccountDto {
   @ApiProperty({ enum: SubaccountTypeDto, default: 'OTHER', description: 'Tipo: DOCTOR, SUPPLIER ou OTHER' })
   @IsEnum(SubaccountTypeDto)
   type!: SubaccountTypeDto;
+
+  @ApiPropertyOptional({
+    enum: FulfillmentType,
+    description: 'Metadado interno Canfy. Obrigatório quando type=SUPPLIER; não é enviado ao Asaas.',
+  })
+  @IsOptional()
+  @IsEnum(FulfillmentType)
+  fulfillmentType?: FulfillmentType;
 
   @ApiProperty({ example: 'joao@email.com' })
   @IsEmail()
@@ -101,6 +110,26 @@ export class UpdateSubaccountDto {
   mobilePhone?: string;
 }
 
+export class UpdateSubaccountMetadataDto {
+  @ApiPropertyOptional({
+    enum: SubaccountTypeDto,
+    description: 'Classificação interna Canfy. Não altera dados cadastrais no Asaas.',
+  })
+  @IsOptional()
+  @IsEnum(SubaccountTypeDto)
+  type?: SubaccountTypeDto;
+
+  @ApiPropertyOptional({
+    enum: FulfillmentType,
+    nullable: true,
+    description:
+      'Modalidade interna do fornecedor. Obrigatória para SUPPLIER e deve ser nula para DOCTOR/OTHER.',
+  })
+  @IsOptional()
+  @IsEnum(FulfillmentType)
+  fulfillmentType?: FulfillmentType | null;
+}
+
 export class ListSubaccountsDto {
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()
@@ -152,6 +181,14 @@ export class LinkExistingSubaccountDto {
   @IsOptional()
   @IsEmail()
   email?: string;
+
+  @ApiPropertyOptional({
+    enum: FulfillmentType,
+    description: 'Metadado interno Canfy. Obrigatório quando type=SUPPLIER; não é enviado ao Asaas.',
+  })
+  @IsOptional()
+  @IsEnum(FulfillmentType)
+  fulfillmentType?: FulfillmentType;
 
   @ApiPropertyOptional({ enum: SubaccountTypeDto, default: 'OTHER', description: 'Tipo: DOCTOR, SUPPLIER ou OTHER' })
   @IsOptional()

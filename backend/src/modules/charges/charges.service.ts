@@ -95,8 +95,6 @@ export class ChargesService {
       }
     }
 
-    if (orderKind === OrderKind.PRODUCT) await this.validateSuppliers(items);
-
     const shipping = this.calculateShipping(dto, orderKind, items, rules);
     const shippingBySupplier = this.allocateShippingToSuppliers(items, shipping.rows);
     const splits = this.buildSplits(
@@ -488,44 +486,127 @@ export class ChargesService {
   }
 
   private async resolveItems(input: CreateChargeItemDto[], orderKind: OrderKind): Promise<Item[]> {
-    const ids = [...new Set(input.map((item) => item.productId).filter((id): id is string => Boolean(id)))];
-    const products = ids.length
-      ? await this.prisma.product.findMany({ where: { id: { in: ids }, active: true } })
+    const productIds = [
+      ...new Set(
+        input.map((item) => item.productId).filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const products = productIds.length
+      ? await this.prisma.product.findMany({
+          where: { id: { in: productIds }, active: true },
+        })
       : [];
-    if (products.length !== ids.length) {
+    if (products.length !== productIds.length) {
       throw new BadRequestException('Um ou mais produtos do catálogo não existem ou estão inativos');
     }
-    const byId = new Map(products.map((product) => [product.id, product]));
+    const productsById = new Map(products.map((product) => [product.id, product]));
+
+    const supplierIds =
+      orderKind === OrderKind.PRODUCT
+        ? [
+            ...new Set(
+              input
+                .map((entry) => {
+                  const product = entry.productId
+                    ? productsById.get(entry.productId)
+                    : undefined;
+                  return product?.supplierSubaccountId ?? entry.supplierSubaccountId ?? null;
+                })
+                .filter((id): id is string => Boolean(id)),
+            ),
+          ]
+        : [];
+
+    const suppliers = supplierIds.length
+      ? await this.prisma.subaccount.findMany({
+          where: { id: { in: supplierIds } },
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            active: true,
+            deletedAt: true,
+            walletId: true,
+            fulfillmentType: true,
+          },
+        })
+      : [];
+    const suppliersById = new Map(suppliers.map((supplier) => [supplier.id, supplier]));
 
     return input.map((entry, index) => {
-      const product = entry.productId ? byId.get(entry.productId) : undefined;
+      const product = entry.productId ? productsById.get(entry.productId) : undefined;
       const name = product?.name ?? entry.productName?.trim();
       if (!name) {
-        throw new BadRequestException('Item ' + (index + 1) + ': informe um produto do catálogo ou o nome do item');
+        throw new BadRequestException(
+          'Item ' + (index + 1) + ': informe um produto do catálogo ou o nome do item',
+        );
       }
 
       const unitPrice = this.money(entry.unitPrice ?? product?.defaultPrice ?? 0);
       if (unitPrice.lte(0)) {
-        throw new BadRequestException('Item ' + (index + 1) + ': o valor unitário deve ser maior que zero');
+        throw new BadRequestException(
+          'Item ' + (index + 1) + ': o valor unitário deve ser maior que zero',
+        );
       }
 
       let supplierSubaccountId: string | null = null;
       let fulfillmentType: FulfillmentType = FulfillmentType.NATIONAL;
       let productType: ProductTypeDto | null = null;
+
       if (orderKind === OrderKind.PRODUCT) {
         if (!entry.productType) {
-          throw new BadRequestException('Item ' + (index + 1) + ' (' + name + '): informe o tipo do produto');
+          throw new BadRequestException(
+            'Item ' + (index + 1) + ' (' + name + '): informe o tipo do produto',
+          );
         }
         productType = entry.productType;
-        supplierSubaccountId = product?.supplierSubaccountId ?? entry.supplierSubaccountId ?? null;
+        supplierSubaccountId =
+          product?.supplierSubaccountId ?? entry.supplierSubaccountId ?? null;
+
         if (!supplierSubaccountId) {
-          throw new BadRequestException('Item ' + (index + 1) + ' (' + name + '): informe o fornecedor');
+          throw new BadRequestException(
+            'Item ' + (index + 1) + ' (' + name + '): informe o fornecedor',
+          );
         }
-        const fulfillment = product?.fulfillmentType ?? entry.fulfillmentType;
-        if (!fulfillment) {
-          throw new BadRequestException('Item ' + (index + 1) + ' (' + name + '): informe se é nacional ou internacional');
+
+        const supplier = suppliersById.get(supplierSubaccountId);
+        if (!supplier) {
+          throw new BadRequestException(
+            'Fornecedor do item ' + (index + 1) + ' (' + name + ') não encontrado',
+          );
         }
-        fulfillmentType = fulfillment as FulfillmentType;
+        if (supplier.deletedAt) {
+          throw new BadRequestException(
+            'O fornecedor "' + supplier.name + '" foi excluído e não pode ser usado',
+          );
+        }
+        if (supplier.type !== 'SUPPLIER') {
+          throw new BadRequestException(
+            'A subconta "' + supplier.name + '" não está classificada como Fornecedor',
+          );
+        }
+        if (!supplier.active) {
+          throw new BadRequestException(
+            'O fornecedor "' + supplier.name + '" está inativo',
+          );
+        }
+        if (!supplier.walletId) {
+          throw new BadRequestException(
+            'Fornecedor "' + supplier.name + '" não possui walletId do Asaas',
+          );
+        }
+        if (!supplier.fulfillmentType) {
+          throw new BadRequestException(
+            'O fornecedor "' +
+              supplier.name +
+              '" ainda não possui modalidade Nacional/Internacional configurada. ' +
+              'Edite a subconta antes de criar a cobrança.',
+          );
+        }
+
+        // Fonte de verdade para NOVAS cobranças. Product.fulfillmentType e qualquer
+        // fulfillmentType recebido no payload são deliberadamente ignorados.
+        fulfillmentType = supplier.fulfillmentType;
       }
 
       return {
@@ -538,24 +619,10 @@ export class ChargesService {
         unitPrice,
         lineTotal: this.money(unitPrice.mul(entry.quantity)),
         supplierSubaccountId,
+        // Snapshot histórico: alterações futuras no fornecedor não mudam esta venda.
         fulfillmentType,
       };
     });
-  }
-
-  private async validateSuppliers(items: Item[]) {
-    const ids = [...new Set(items.map((item) => item.supplierSubaccountId).filter((id): id is string => Boolean(id)))];
-    const suppliers = await this.prisma.subaccount.findMany({
-      where: { id: { in: ids }, type: 'SUPPLIER', active: true, deletedAt: null },
-      select: { id: true, name: true, walletId: true },
-    });
-    if (suppliers.length !== ids.length) {
-      throw new BadRequestException('Um ou mais fornecedores não existem, estão inativos ou têm tipo inválido');
-    }
-    const withoutWallet = suppliers.find((supplier) => !supplier.walletId);
-    if (withoutWallet) {
-      throw new BadRequestException('Fornecedor "' + withoutWallet.name + '" não possui walletId do Asaas');
-    }
   }
 
   private calculateDiscount(dto: CreateChargeDto, subtotal: Prisma.Decimal) {

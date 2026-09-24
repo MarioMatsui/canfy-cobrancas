@@ -149,8 +149,11 @@ model Subaccount {
   email                String?
   phone                String?
   mobilePhone          String?        @map("mobile_phone")
-  type                 SubaccountType @default(OTHER)
-  active               Boolean        @default(true)
+  type                 SubaccountType  @default(OTHER)
+  /// Metadado interno Canfy. Fonte canônica da modalidade para NOVAS cobranças de fornecedor.
+  /// Nulo para médicos/outros e para fornecedores legados ainda não configurados.
+  fulfillmentType      FulfillmentType? @map("fulfillment_type")
+  active               Boolean         @default(true)
   balance              Decimal        @default(0) @db.Decimal(12, 2)
   apiKey               String?        @map("api_key")
   deletedAt            DateTime?      @map("deleted_at")
@@ -211,6 +214,8 @@ model Product {
   heightCm             Decimal?        @map("height_cm") @db.Decimal(8, 2)
   widthCm              Decimal?        @map("width_cm") @db.Decimal(8, 2)
   lengthCm             Decimal?        @map("length_cm") @db.Decimal(8, 2)
+  /// LEGADO/compatibilidade de catálogo. Não determina a modalidade de novas cobranças:
+  /// a fonte canônica é Subaccount.fulfillmentType do fornecedor.
   fulfillmentType      FulfillmentType @default(NATIONAL) @map("fulfillment_type")
   active               Boolean         @default(true)
   createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)

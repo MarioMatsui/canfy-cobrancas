@@ -1,25 +1,35 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, ToggleLeft, ToggleRight, History, Stethoscope, Package, Users as UsersIcon, X, Link2, Trash2, MailCheck } from 'lucide-react';
+import { Plus, Search, ToggleLeft, ToggleRight, History, Stethoscope, Package, Users as UsersIcon, X, Link2, Trash2, MailCheck, Pencil } from 'lucide-react';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 
 type SubaccountType = 'DOCTOR' | 'SUPPLIER' | 'OTHER';
+type FulfillmentType = 'NATIONAL' | 'INTERNATIONAL';
 
 interface Subaccount {
   id: string;
   name: string;
   cpfCnpj: string;
-  email: string;
+  email: string | null;
+  phone?: string | null;
+  mobilePhone?: string | null;
+  asaasId?: string;
+  walletId?: string | null;
   type: SubaccountType;
+  fulfillmentType: FulfillmentType | null;
   active: boolean;
-  balance: number;
+  balance: number | string;
   totalReceived: number;
+  asaasGeneralStatus?: string | null;
+  asaasStatusCheckedAt?: string | null;
+  activationResentAt?: string | null;
   canResendActivation?: boolean;
   _count: { chargeSplits: number; splitResults: number };
   createdAt: string;
+  updatedAt?: string;
 }
 
 interface PaginatedResponse {
@@ -76,6 +86,9 @@ export default function SubaccountsPage() {
   const [typeFilter, setTypeFilter] = useState<SubaccountType | ''>('');
   const [page, setPage] = useState(1);
   const [historyId, setHistoryId] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editType, setEditType] = useState<SubaccountType>('OTHER');
+  const [editFulfillmentType, setEditFulfillmentType] = useState<FulfillmentType | ''>('');
   const [showForm, setShowForm] = useState(false);
   const [formMode, setFormMode] = useState<'create' | 'link'>('create');
 
@@ -84,6 +97,7 @@ export default function SubaccountsPage() {
   const [formCpfCnpj, setFormCpfCnpj] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formType, setFormType] = useState<SubaccountType>('DOCTOR');
+  const [formFulfillmentType, setFormFulfillmentType] = useState<FulfillmentType | ''>('');
   const [formPhone, setFormPhone] = useState('');
   const [formMobilePhone, setFormMobilePhone] = useState('');
   const [formBirthDate, setFormBirthDate] = useState('');
@@ -110,6 +124,12 @@ export default function SubaccountsPage() {
     enabled: !!historyId,
   });
 
+  const editQuery = useQuery<Subaccount>({
+    queryKey: ['subaccount-edit', editId],
+    queryFn: () => api.get(`/subaccounts/${editId}`).then((r) => r.data),
+    enabled: !!editId,
+  });
+
   const createMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => api.post('/subaccounts', payload),
     onSuccess: () => {
@@ -125,7 +145,14 @@ export default function SubaccountsPage() {
   });
 
   const linkMutation = useMutation({
-    mutationFn: (payload: { walletId: string; name?: string; cpfCnpj?: string; email?: string; type?: string }) => api.post('/subaccounts/link', payload),
+    mutationFn: (payload: {
+      walletId: string;
+      name?: string;
+      cpfCnpj?: string;
+      email?: string;
+      type?: string;
+      fulfillmentType?: FulfillmentType;
+    }) => api.post('/subaccounts/link', payload),
     onSuccess: () => {
       toast.success('Conta vinculada com sucesso!');
       resetForm();
@@ -135,6 +162,31 @@ export default function SubaccountsPage() {
       const err = error as { response?: { data?: { message?: string } } };
       const msg = err.response?.data?.message || 'Erro ao vincular conta';
       toast.error(msg);
+    },
+  });
+
+  const updateMetadataMutation = useMutation({
+    mutationFn: (payload: {
+      id: string;
+      type: SubaccountType;
+      fulfillmentType: FulfillmentType | null;
+    }) =>
+      api.patch(`/subaccounts/${payload.id}/metadata`, {
+        type: payload.type,
+        fulfillmentType: payload.fulfillmentType,
+      }),
+    onSuccess: () => {
+      toast.success('Metadados da subconta atualizados');
+      setEditId(null);
+      queryClient.invalidateQueries({ queryKey: ['subaccounts'] });
+      queryClient.invalidateQueries({ queryKey: ['subaccounts-active'] });
+      queryClient.invalidateQueries({ queryKey: ['products-active'] });
+    },
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { message?: string | string[] } } };
+      const raw = err.response?.data?.message;
+      const msg = Array.isArray(raw) ? raw[0] : raw;
+      toast.error(msg || 'Erro ao atualizar metadados da subconta');
     },
   });
 
@@ -165,6 +217,7 @@ export default function SubaccountsPage() {
     setFormCpfCnpj('');
     setFormEmail('');
     setFormType('DOCTOR');
+    setFormFulfillmentType('');
     setFormPhone('');
     setFormMobilePhone('');
     setFormBirthDate('');
@@ -196,6 +249,10 @@ export default function SubaccountsPage() {
       toast.error('Celular é obrigatório (Asaas exige mobilePhone para criar a subconta)');
       return;
     }
+    if (formType === 'SUPPLIER' && !formFulfillmentType) {
+      toast.error('Defina se o fornecedor é Nacional ou Internacional');
+      return;
+    }
     if (!formIncomeValue || parseFloat(formIncomeValue) <= 0) {
       toast.error('Renda/faturamento mensal é obrigatório');
       return;
@@ -223,6 +280,8 @@ export default function SubaccountsPage() {
       cpfCnpj: formCpfCnpj.replace(/\D/g, ''),
       email: formEmail.trim(),
       type: formType,
+      fulfillmentType:
+        formType === 'SUPPLIER' ? (formFulfillmentType as FulfillmentType) : undefined,
       phone: formPhone.trim() || undefined,
       mobilePhone,
       birthDate: docType === 'CPF' && formBirthDate ? formBirthDate : undefined,
@@ -245,12 +304,39 @@ export default function SubaccountsPage() {
       toast.error('Preencha o nome e CPF/CNPJ da conta');
       return;
     }
+    if (formType === 'SUPPLIER' && !formFulfillmentType) {
+      toast.error('Defina se o fornecedor é Nacional ou Internacional');
+      return;
+    }
     linkMutation.mutate({
       walletId: formWalletId.trim(),
       name: formName.trim(),
       cpfCnpj: formCpfCnpj.replace(/\D/g, ''),
       email: formEmail.trim() || undefined,
       type: formType,
+      fulfillmentType:
+        formType === 'SUPPLIER' ? (formFulfillmentType as FulfillmentType) : undefined,
+    });
+  };
+
+  const openEdit = (sub: Subaccount) => {
+    setEditId(sub.id);
+    setEditType(sub.type);
+    setEditFulfillmentType(sub.fulfillmentType || '');
+  };
+
+  const saveMetadata = () => {
+    if (!editId) return;
+    if (editType === 'SUPPLIER' && !editFulfillmentType) {
+      toast.error('Defina se o fornecedor é Nacional ou Internacional');
+      return;
+    }
+
+    updateMetadataMutation.mutate({
+      id: editId,
+      type: editType,
+      fulfillmentType:
+        editType === 'SUPPLIER' ? (editFulfillmentType as FulfillmentType) : null,
     });
   };
 
@@ -275,7 +361,7 @@ export default function SubaccountsPage() {
     }
   };
 
-  const resendActivation = (id: string, email: string) => {
+  const resendActivation = (id: string, email: string | null | undefined) => {
     const emailInfo = email ? `\n\nE-mail cadastrado: ${email}` : '';
     const confirmed = confirm(
       `Reenviar o link de ativação para esta subconta?\n\nO Asaas permite apenas um reenvio do link de ativação. Utilize esta opção quando o link original tiver expirado.\n\nO novo link será enviado pelo Asaas ao e-mail de login cadastrado da subconta.${emailInfo}`,
@@ -284,8 +370,11 @@ export default function SubaccountsPage() {
     resendActivationMutation.mutate(id);
   };
 
-  const formatCurrency = (value: number) =>
-    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+  const formatCurrency = (value: number | string) =>
+    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value || 0));
+
+  const formatDateTime = (value: string | null | undefined) =>
+    value ? new Date(value).toLocaleString('pt-BR') : '—';
 
   return (
     <div className="space-y-6">
@@ -332,7 +421,12 @@ export default function SubaccountsPage() {
               const cfg = typeConfig[t];
               const Icon = cfg.icon;
               return (
-                <button key={t} onClick={() => setFormType(t)}
+                <button
+                  key={t}
+                  onClick={() => {
+                    setFormType(t);
+                    if (t !== 'SUPPLIER') setFormFulfillmentType('');
+                  }}
                   className={`flex-1 p-3 rounded-lg border-2 transition-colors text-center ${formType === t ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
                   <Icon size={20} className="mx-auto mb-1" />
                   <div className="text-sm font-medium">{cfg.label}</div>
@@ -340,6 +434,26 @@ export default function SubaccountsPage() {
               );
             })}
           </div>
+
+          {formType === 'SUPPLIER' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Modalidade do fornecedor *
+              </label>
+              <select
+                value={formFulfillmentType}
+                onChange={(e) => setFormFulfillmentType(e.target.value as FulfillmentType | '')}
+                className="w-full rounded-lg border px-3 py-2 text-sm bg-white"
+              >
+                <option value="">Selecione...</option>
+                <option value="NATIONAL">Nacional</option>
+                <option value="INTERNATIONAL">Internacional</option>
+              </select>
+              <p className="mt-1 text-xs text-gray-500">
+                Configuração interna da Canfy. Ela não é enviada ao Asaas.
+              </p>
+            </div>
+          )}
 
           {formMode === 'link' ? (
             <>
@@ -543,6 +657,19 @@ export default function SubaccountsPage() {
                         <TypeIcon size={14} />
                         {typeInfo.label}
                       </span>
+                      {sub.type === 'SUPPLIER' && (
+                        <div
+                          className={`mt-1 text-xs ${
+                            sub.fulfillmentType ? 'text-gray-500' : 'text-amber-600'
+                          }`}
+                        >
+                          {sub.fulfillmentType === 'NATIONAL'
+                            ? 'Nacional'
+                            : sub.fulfillmentType === 'INTERNATIONAL'
+                              ? 'Internacional'
+                              : 'Modalidade não configurada'}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-gray-600">{sub.cpfCnpj}</td>
                     <td className="px-6 py-4 text-gray-600">{sub.email || '—'}</td>
@@ -565,6 +692,13 @@ export default function SubaccountsPage() {
                           title="Histórico financeiro"
                         >
                           <History size={20} />
+                        </button>
+                        <button
+                          onClick={() => openEdit(sub)}
+                          className="text-gray-400 hover:text-blue-600 transition-colors"
+                          title="Editar"
+                        >
+                          <Pencil size={18} />
                         </button>
                         <button
                           onClick={() => toggleActive(sub.id)}
@@ -626,6 +760,139 @@ export default function SubaccountsPage() {
           </div>
         )}
       </div>
+
+      {/* Modal de edição segura de metadados internos */}
+      {editId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <div>
+                <h2 className="text-lg font-semibold">Editar subconta</h2>
+                <p className="text-xs text-gray-500 mt-1">
+                  Dados cadastrais/Asaas são somente leitura. Apenas metadados internos da Canfy são salvos aqui.
+                </p>
+              </div>
+              <button
+                onClick={() => setEditId(null)}
+                className="text-gray-400 hover:text-gray-600"
+                aria-label="Fechar"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto max-h-[72vh]">
+              {editQuery.isLoading ? (
+                <p className="text-center text-gray-500 py-10">Carregando subconta...</p>
+              ) : editQuery.isError ? (
+                <div className="text-center py-10">
+                  <p className="text-red-600 mb-3">Não foi possível carregar esta subconta.</p>
+                  <button
+                    onClick={() => editQuery.refetch()}
+                    className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50"
+                  >
+                    Tentar novamente
+                  </button>
+                </div>
+              ) : editQuery.data ? (
+                <div className="space-y-6">
+                  <section>
+                    <h3 className="font-semibold text-sm mb-3">Dados cadastrais e Asaas</h3>
+                    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {[
+                        ['Nome', editQuery.data.name],
+                        ['CPF/CNPJ', editQuery.data.cpfCnpj],
+                        ['E-mail', editQuery.data.email],
+                        ['Telefone', editQuery.data.phone],
+                        ['Celular', editQuery.data.mobilePhone],
+                        ['Asaas ID', editQuery.data.asaasId],
+                        ['Wallet ID', editQuery.data.walletId],
+                        ['Status Asaas', editQuery.data.asaasGeneralStatus],
+                        ['Situação Canfy', editQuery.data.active ? 'Ativa' : 'Inativa'],
+                        ['Saldo registrado', formatCurrency(editQuery.data.balance)],
+                        ['Criada em', formatDateTime(editQuery.data.createdAt)],
+                        ['Atualizada em', formatDateTime(editQuery.data.updatedAt)],
+                        ['Status Asaas consultado em', formatDateTime(editQuery.data.asaasStatusCheckedAt)],
+                      ].map(([label, value]) => (
+                        <div key={String(label)}>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">
+                            {label}
+                          </label>
+                          <div className="min-h-[38px] rounded-lg border bg-gray-50 px-3 py-2 text-sm text-gray-700 break-all">
+                            {value == null || value === '' ? '—' : String(value)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="border-t pt-5">
+                    <h3 className="font-semibold text-sm mb-1">Metadados Canfy</h3>
+                    <p className="text-xs text-gray-500 mb-4">
+                      Estes campos são locais e não geram PUT/PATCH cadastral no Asaas.
+                    </p>
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Classificação
+                        </label>
+                        <select
+                          value={editType}
+                          onChange={(e) => {
+                            const next = e.target.value as SubaccountType;
+                            setEditType(next);
+                            if (next !== 'SUPPLIER') setEditFulfillmentType('');
+                          }}
+                          className="w-full rounded-lg border px-3 py-2 text-sm bg-white"
+                        >
+                          <option value="DOCTOR">Médico</option>
+                          <option value="SUPPLIER">Fornecedor</option>
+                          <option value="OTHER">Outro</option>
+                        </select>
+                      </div>
+
+                      {editType === 'SUPPLIER' && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Modalidade do fornecedor *
+                          </label>
+                          <select
+                            value={editFulfillmentType}
+                            onChange={(e) =>
+                              setEditFulfillmentType(e.target.value as FulfillmentType | '')
+                            }
+                            className="w-full rounded-lg border px-3 py-2 text-sm bg-white"
+                          >
+                            <option value="">Não configurado</option>
+                            <option value="NATIONAL">Nacional</option>
+                            <option value="INTERNATIONAL">Internacional</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex justify-end gap-3 px-6 py-4 border-t bg-gray-50">
+              <button
+                onClick={() => setEditId(null)}
+                className="px-4 py-2 text-sm rounded-lg border bg-white hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={saveMetadata}
+                disabled={editQuery.isLoading || editQuery.isError || updateMetadataMutation.isPending}
+                className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {updateMetadataMutation.isPending ? 'Salvando...' : 'Salvar alterações'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal de Histórico Financeiro */}
       {historyId && (

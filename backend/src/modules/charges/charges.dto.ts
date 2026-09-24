@@ -93,7 +93,12 @@ export class CreateChargeItemDto {
   @IsOptional()
   supplierSubaccountId?: string;
 
-  @ApiPropertyOptional({ enum: FulfillmentTypeDto, description: 'Obrigatório em item avulso de pedido de produto.' })
+  @ApiPropertyOptional({
+    enum: FulfillmentTypeDto,
+    deprecated: true,
+    description:
+      'LEGADO: aceito apenas por compatibilidade e ignorado. A modalidade é resolvida pela subconta do fornecedor.',
+  })
   @IsEnum(FulfillmentTypeDto)
   @IsOptional()
   fulfillmentType?: FulfillmentTypeDto;
