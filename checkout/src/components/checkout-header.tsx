@@ -1,5 +1,4 @@
 import Image from 'next/image';
-import { LockKeyhole } from 'lucide-react';
 
 const socialLinkClass =
   'group inline-flex h-8 w-8 items-center justify-center focus-visible:rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canfy-500 focus-visible:ring-offset-2';
@@ -37,6 +36,9 @@ const socialLinks = [
   },
 ] as const;
 
+const communityUrl =
+  'https://chat.whatsapp.com/EJ6NVkywoYAIPxpK5rbCqw?s=cl&p=i&mlu=4&ilr=4';
+
 export function CheckoutHeader() {
   return (
     <header className="border-b border-slate-200/80 bg-white/95">
@@ -70,10 +72,23 @@ export function CheckoutHeader() {
           </nav>
         </div>
 
-        <div className="hidden w-fit items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600 sm:flex">
-          <LockKeyhole aria-hidden="true" className="h-4 w-4 text-canfy-600" />
-          <span>Checkout Canfy</span>
-        </div>
+        <a
+          href={communityUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Entrar na Comunidade Canfy no WhatsApp"
+          className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-canfy-100 bg-canfy-50 px-4 py-2.5 text-sm font-semibold text-canfy-700 transition-colors duration-150 hover:bg-canfy-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canfy-500 focus-visible:ring-offset-2 sm:w-fit sm:shrink-0"
+        >
+          <Image
+            src="/redesSociais/whatsapp-icon.svg"
+            alt=""
+            width={20}
+            height={20}
+            aria-hidden="true"
+            className="h-5 w-5 object-contain"
+          />
+          <span>Entrar na Comunidade</span>
+        </a>
       </div>
     </header>
   );
