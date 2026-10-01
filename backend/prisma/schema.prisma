@@ -612,10 +612,10 @@ model IntegrationApiKey {
   createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
   lastUsedAt      DateTime?               @map("last_used_at") @db.Timestamptz(6)
-  createdByUserId String                  @map("created_by_user_id")
+  createdByUserId String?                 @map("created_by_user_id")
   revokedAt       DateTime?               @map("revoked_at") @db.Timestamptz(6)
 
-  createdBy User @relation("IntegrationApiKeyCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdBy User? @relation("IntegrationApiKeyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   @@index([status])
   @@index([createdByUserId])
