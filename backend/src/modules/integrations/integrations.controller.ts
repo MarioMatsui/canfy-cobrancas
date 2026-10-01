@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Request, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, Param, Post, Request, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
@@ -20,6 +20,7 @@ export class IntegrationsController {
   }
 
   @Post()
+  @Header('Cache-Control', 'no-store')
   @ApiOperation({ summary: 'Criar integração/API Key (admin)' })
   create(
     @Body() dto: CreateIntegrationDto,
@@ -35,6 +36,7 @@ export class IntegrationsController {
   }
 
   @Post(':id/rotate')
+  @Header('Cache-Control', 'no-store')
   @ApiOperation({ summary: 'Rotacionar integração/API Key (admin)' })
   rotate(@Param('id') id: string) {
     return this.integrationsService.rotate(id);
