@@ -8,7 +8,7 @@ CREATE TABLE "integration_api_keys" (
     "key_prefix" TEXT NOT NULL,
     "key_hash" TEXT NOT NULL,
     "status" "IntegrationApiKeyStatus" NOT NULL DEFAULT 'ACTIVE',
-    "scopes" TEXT[] DEFAULT ARRAY[]::TEXT[],
+    "scopes" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL,
     "last_used_at" TIMESTAMPTZ(6),
