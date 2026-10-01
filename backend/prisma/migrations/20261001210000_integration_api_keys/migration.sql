@@ -12,7 +12,7 @@ CREATE TABLE "integration_api_keys" (
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL,
     "last_used_at" TIMESTAMPTZ(6),
-    "created_by_user_id" TEXT NOT NULL,
+    "created_by_user_id" TEXT,
     "revoked_at" TIMESTAMPTZ(6),
 
     CONSTRAINT "integration_api_keys_pkey" PRIMARY KEY ("id")
@@ -34,4 +34,4 @@ CREATE INDEX "integration_api_keys_created_by_user_id_idx" ON "integration_api_k
 ALTER TABLE "integration_api_keys"
 ADD CONSTRAINT "integration_api_keys_created_by_user_id_fkey"
 FOREIGN KEY ("created_by_user_id") REFERENCES "users"("id")
-ON DELETE RESTRICT ON UPDATE CASCADE;
+ON DELETE SET NULL ON UPDATE CASCADE;
