@@ -127,14 +127,20 @@ export class IntegrationsService {
     }
 
     const usedAt = new Date();
-    await this.prisma.integrationApiKey.updateMany({
+    const touch = await this.prisma.integrationApiKey.updateMany({
       where: {
         id: integration.id,
+        keyHash: integration.keyHash,
         status: 'ACTIVE',
         revokedAt: null,
       },
       data: { lastUsedAt: usedAt },
     });
+
+    // Fecha a janela de corrida entre validar e uma revogação/rotação concorrente.
+    if (touch.count !== 1) {
+      throw this.invalidCredential();
+    }
 
     return {
       id: integration.id,
