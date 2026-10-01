@@ -17,6 +17,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { UsersModule } from './modules/users/users.module';
 import { PublicCheckoutModule } from './modules/public-checkout/public-checkout.module';
+import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -47,6 +48,7 @@ import { HealthController } from './health.controller';
     SettingsModule,
     UsersModule,
     PublicCheckoutModule,
+    IntegrationsModule,
     WebhooksModule,
     SyncModule,
     DashboardModule,
