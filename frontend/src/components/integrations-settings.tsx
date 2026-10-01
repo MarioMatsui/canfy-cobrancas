@@ -41,7 +41,9 @@ const SCOPE_OPTIONS = [
   { value: 'charges:cancel', label: 'Cancelar cobranças' },
 ] as const;
 
-const scopeLabel = new Map(SCOPE_OPTIONS.map((scope) => [scope.value, scope.label]));
+const scopeLabel: Record<string, string> = Object.fromEntries(
+  SCOPE_OPTIONS.map((scope) => [scope.value, scope.label]),
+);
 
 function formatDate(value: string | null) {
   if (!value) return 'Nunca utilizada';
@@ -220,7 +222,7 @@ export function IntegrationsSettings() {
                 <div className="flex flex-wrap gap-2">
                   {integration.scopes.map((scope) => (
                     <span key={scope} className="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-700">
-                      {scopeLabel.get(scope) ?? scope}
+                      {scopeLabel[scope] ?? scope}
                     </span>
                   ))}
                 </div>
