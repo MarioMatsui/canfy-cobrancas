@@ -239,7 +239,7 @@ export class IntegrationReadService {
       sku: row.sku,
       description: row.description,
       defaultPrice: row.defaultPrice.toString(),
-      productType: row.productType,
+      productType: row.productType as IntegrationProductDto['productType'],
       active: row.active,
       supplier: row.supplier?.fulfillmentType
         ? {
