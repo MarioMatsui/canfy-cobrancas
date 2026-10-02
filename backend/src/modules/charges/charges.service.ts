@@ -569,19 +569,47 @@ export class ChargesService {
       let productType: ProductTypeDto | null = null;
 
       if (orderKind === OrderKind.PRODUCT) {
-        if (!entry.productType) {
-          throw new BadRequestException(
-            'Item ' + (index + 1) + ' (' + name + '): informe o tipo do produto',
-          );
-        }
-        productType = entry.productType;
-        supplierSubaccountId =
-          product?.supplierSubaccountId ?? entry.supplierSubaccountId ?? null;
+        if (product) {
+          if (!product.productType) {
+            throw new BadRequestException(
+              'Item ' + (index + 1) + ' (' + name + '): o produto do catálogo não possui tipo configurado',
+            );
+          }
+          if (!product.supplierSubaccountId) {
+            throw new BadRequestException(
+              'Item ' + (index + 1) + ' (' + name + '): o produto do catálogo não possui fornecedor configurado',
+            );
+          }
 
-        if (!supplierSubaccountId) {
-          throw new BadRequestException(
-            'Item ' + (index + 1) + ' (' + name + '): informe o fornecedor',
-          );
+          if (entry.productType && entry.productType !== product.productType) {
+            throw new BadRequestException(
+              'Item ' + (index + 1) + ' (' + name + '): o tipo enviado diverge do catálogo',
+            );
+          }
+          if (
+            entry.supplierSubaccountId &&
+            entry.supplierSubaccountId !== product.supplierSubaccountId
+          ) {
+            throw new BadRequestException(
+              'Item ' + (index + 1) + ' (' + name + '): o fornecedor enviado diverge do catálogo',
+            );
+          }
+
+          productType = product.productType as ProductTypeDto;
+          supplierSubaccountId = product.supplierSubaccountId;
+        } else {
+          if (!entry.productType) {
+            throw new BadRequestException(
+              'Item ' + (index + 1) + ' (' + name + '): informe o tipo do produto',
+            );
+          }
+          if (!entry.supplierSubaccountId) {
+            throw new BadRequestException(
+              'Item ' + (index + 1) + ' (' + name + '): informe o fornecedor',
+            );
+          }
+          productType = entry.productType;
+          supplierSubaccountId = entry.supplierSubaccountId;
         }
 
         const supplier = suppliersById.get(supplierSubaccountId);
@@ -634,7 +662,7 @@ export class ChargesService {
         unitPrice,
         lineTotal: this.money(unitPrice.mul(entry.quantity)),
         supplierSubaccountId,
-        // Snapshot histórico: alterações futuras no fornecedor não mudam esta venda.
+        // Snapshot histórico: alterações futuras no catálogo/fornecedor não mudam esta venda.
         fulfillmentType,
       };
     });
