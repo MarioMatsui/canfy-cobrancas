@@ -65,6 +65,7 @@ describe('ChargesService supplier fulfillment', () => {
         name: 'Produto catálogo',
         sku: 'SKU-1',
         defaultPrice: new Prisma.Decimal(120),
+        productType: 'OIL',
         supplierSubaccountId: 'supplier-1',
         fulfillmentType: FulfillmentType.INTERNATIONAL,
       },
@@ -74,7 +75,6 @@ describe('ChargesService supplier fulfillment', () => {
     const items = await resolve([
       {
         productId: 'product-1',
-        productType: 'OIL',
         quantity: 1,
         fulfillmentType: FulfillmentType.INTERNATIONAL,
       },
@@ -82,6 +82,53 @@ describe('ChargesService supplier fulfillment', () => {
 
     expect(items[0].supplierSubaccountId).toBe('supplier-1');
     expect(items[0].fulfillmentType).toBe(FulfillmentType.NATIONAL);
+  });
+
+  it('produto de catálogo resolve productType pelo catálogo e rejeita sobrescrita divergente', async () => {
+    prisma.product.findMany.mockResolvedValue([
+      {
+        id: 'product-1',
+        name: 'Produto catálogo',
+        sku: 'SKU-1',
+        defaultPrice: new Prisma.Decimal(120),
+        productType: 'GUMMY',
+        supplierSubaccountId: 'supplier-1',
+        fulfillmentType: FulfillmentType.INTERNATIONAL,
+      },
+    ]);
+    prisma.subaccount.findMany.mockResolvedValue([supplier()]);
+
+    const items = await resolve([{ productId: 'product-1', quantity: 1 }]);
+    expect(items[0].productType).toBe('GUMMY');
+
+    await expect(
+      resolve([{ productId: 'product-1', productType: 'OIL', quantity: 1 }]),
+    ).rejects.toThrow('o tipo enviado diverge do catálogo');
+  });
+
+  it('produto de catálogo rejeita fornecedor enviado que diverge do catálogo', async () => {
+    prisma.product.findMany.mockResolvedValue([
+      {
+        id: 'product-1',
+        name: 'Produto catálogo',
+        sku: 'SKU-1',
+        defaultPrice: new Prisma.Decimal(120),
+        productType: 'OIL',
+        supplierSubaccountId: 'supplier-1',
+        fulfillmentType: FulfillmentType.INTERNATIONAL,
+      },
+    ]);
+    prisma.subaccount.findMany.mockResolvedValue([supplier()]);
+
+    await expect(
+      resolve([
+        {
+          productId: 'product-1',
+          quantity: 1,
+          supplierSubaccountId: 'supplier-2',
+        },
+      ]),
+    ).rejects.toThrow('o fornecedor enviado diverge do catálogo');
   });
 
   it('resolve cobrança mista com modalidades de fornecedores diferentes', async () => {

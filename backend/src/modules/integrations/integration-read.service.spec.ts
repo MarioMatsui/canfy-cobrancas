@@ -31,6 +31,7 @@ describe('IntegrationReadService', () => {
         sku: 'CBD-3000',
         description: 'Óleo',
         defaultPrice: { toString: () => '399.90' },
+        productType: 'OIL',
         active: true,
         supplier: {
           id: '22222222-2222-4222-8222-222222222222',
@@ -51,6 +52,7 @@ describe('IntegrationReadService', () => {
           sku: 'CBD-3000',
           description: 'Óleo',
           defaultPrice: '399.90',
+          productType: 'OIL',
           active: true,
           supplier: {
             id: '22222222-2222-4222-8222-222222222222',
@@ -86,20 +88,19 @@ describe('IntegrationReadService', () => {
 
     const call = prisma.product.findMany.mock.calls[0][0];
     expect(call.where.active).toBe(true);
-    expect(call.where.AND[0].OR).toEqual([
-      { supplierSubaccountId: null },
-      {
-        supplier: {
-          is: expect.objectContaining({
-            type: 'SUPPLIER',
-            active: true,
-            deletedAt: null,
-            walletId: { not: null },
-            fulfillmentType: { not: null },
-          }),
-        },
+    expect(call.where.productType).toEqual({ not: null });
+    expect(call.where.supplierSubaccountId).toEqual({ not: null });
+    expect(call.where.AND[0]).toEqual({
+      supplier: {
+        is: expect.objectContaining({
+          type: 'SUPPLIER',
+          active: true,
+          deletedAt: null,
+          walletId: { not: null },
+          fulfillmentType: { not: null },
+        }),
       },
-    ]);
+    });
   });
 
   it('lista apenas fornecedores elegíveis sem expor campos internos', async () => {

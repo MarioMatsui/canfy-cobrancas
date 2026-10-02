@@ -94,6 +94,9 @@ export class IntegrationProductDto {
   })
   defaultPrice!: string;
 
+  @ApiProperty({ enum: ProductTypeDto })
+  productType!: ProductTypeDto;
+
   @ApiProperty()
   active!: boolean;
 
@@ -171,7 +174,7 @@ export class IntegrationCreateChargeItemDto {
 
   @ApiPropertyOptional({
     enum: ProductTypeDto,
-    description: 'Tipo comercial exigido pelo domínio atual para pedidos de produto.',
+    description: 'Tipo comercial do item avulso. Para productId, o catálogo é a fonte de verdade.',
   })
   @IsEnum(ProductTypeDto)
   @IsOptional()
@@ -195,7 +198,7 @@ export class IntegrationCreateChargeItemDto {
   unitPrice?: number;
 
   @ApiPropertyOptional({
-    description: 'Fornecedor para item avulso. Produto de catálogo continua usando o fornecedor vinculado ao próprio produto.',
+    description: 'Fornecedor do item avulso. Para productId, o catálogo é a fonte de verdade.',
   })
   @IsUUID('4')
   @IsOptional()

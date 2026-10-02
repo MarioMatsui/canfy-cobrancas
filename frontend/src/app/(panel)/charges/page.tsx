@@ -26,8 +26,14 @@ type Product = {
   id: string;
   name: string;
   sku: string | null;
+  productType: ProductType | null;
   defaultPrice: number | string;
   supplierSubaccountId: string | null;
+  supplier: {
+    id: string;
+    name: string;
+    fulfillmentType: FulfillmentType | null;
+  } | null;
 };
 
 type Setting = { key: string; value: string };
@@ -217,7 +223,7 @@ export default function ChargesPage() {
     queryKey: ['products-active'],
     queryFn: () =>
       api
-        .get('/products', { params: { limit: 200, active: true } })
+        .get('/products', { params: { limit: 200, active: true, eligible: true } })
         .then((response) => response.data),
   });
 
@@ -427,6 +433,7 @@ export default function ChargesPage() {
         productName: '',
         unitPrice: '',
         supplierSubaccountId: '',
+        productType: '',
       });
       return;
     }
@@ -439,6 +446,7 @@ export default function ChargesPage() {
       productName: product.name,
       unitPrice: String(product.defaultPrice),
       supplierSubaccountId: product.supplierSubaccountId || '',
+      productType: product.productType || '',
     });
   };
 
@@ -599,9 +607,10 @@ export default function ChargesPage() {
         productName: item.productId ? undefined : item.productName.trim(),
         quantity: item.quantity,
         unitPrice: Number(item.unitPrice),
-        productType: orderKind === 'PRODUCT' ? item.productType : undefined,
+        productType:
+          orderKind === 'PRODUCT' && !item.productId ? item.productType : undefined,
         supplierSubaccountId:
-          orderKind === 'PRODUCT' ? item.supplierSubaccountId : undefined,
+          orderKind === 'PRODUCT' && !item.productId ? item.supplierSubaccountId : undefined,
       })),
       splits: computedSplits.map((split) => ({
         subaccountId: split.id,
@@ -857,7 +866,8 @@ export default function ChargesPage() {
                     {orderKind === 'PRODUCT' && (
                       <>
                         <select
-                          className="border rounded-lg px-3 py-2 text-sm bg-white"
+                          className="border rounded-lg px-3 py-2 text-sm bg-white disabled:bg-gray-100 disabled:text-gray-600"
+                          disabled={Boolean(catalog)}
                           value={item.productType}
                           onChange={(event) =>
                             updateItem(index, {
@@ -873,8 +883,8 @@ export default function ChargesPage() {
                           <option value="NASAL_SPRAY">Spray nasal</option>
                         </select>
                         <select
-                          className="border rounded-lg px-3 py-2 text-sm"
-                          disabled={Boolean(catalog?.supplierSubaccountId)}
+                          className="border rounded-lg px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-600"
+                          disabled={Boolean(catalog)}
                           value={item.supplierSubaccountId}
                           onChange={(event) =>
                             updateItem(index, { supplierSubaccountId: event.target.value })
@@ -892,9 +902,18 @@ export default function ChargesPage() {
                     )}
                   </div>
 
-                  <div className="text-right text-sm">
-                    Total do item:{' '}
-                    <strong>{money((Number(item.unitPrice) || 0) * item.quantity)}</strong>
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <div className="text-xs text-gray-500">
+                      {catalog?.supplier?.fulfillmentType === 'NATIONAL'
+                        ? 'Modalidade: 🇧🇷 Nacional'
+                        : catalog?.supplier?.fulfillmentType === 'INTERNATIONAL'
+                          ? 'Modalidade: 🌎 Internacional'
+                          : ''}
+                    </div>
+                    <div>
+                      Total do item:{' '}
+                      <strong>{money((Number(item.unitPrice) || 0) * item.quantity)}</strong>
+                    </div>
                   </div>
                 </div>
               );
