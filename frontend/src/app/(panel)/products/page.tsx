@@ -185,6 +185,19 @@ export default function ProductsPage() {
     setFieldErrors({});
   };
 
+  useEffect(() => {
+    if (!showForm) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setShowForm(false);
+      setEditing(null);
+      setForm(emptyForm());
+      setFieldErrors({});
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showForm]);
+
   const openCreate = () => {
     setEditing(null);
     setForm(emptyForm());
