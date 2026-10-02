@@ -1,6 +1,13 @@
 import { BadRequestException } from '@nestjs/common';
-import { FulfillmentType, Prisma, ProductType, SubaccountType } from '@prisma/client';
+import {
+  FulfillmentType,
+  Prisma,
+  ProductPriceCurrency,
+  ProductType,
+  SubaccountType,
+} from '@prisma/client';
 import { PrismaService } from '../../../common/prisma/prisma.service';
+import { ExchangeRateService } from '../../../common/exchange-rate/exchange-rate.service';
 import { ProductsService } from '../products.service';
 
 describe('ProductsService', () => {
@@ -25,7 +32,8 @@ describe('ProductsService', () => {
     description: null,
     productType: ProductType.OIL,
     supplierSubaccountId: '11111111-1111-4111-8111-111111111111',
-    defaultPrice: new Prisma.Decimal(399.9),
+    defaultPrice: new Prisma.Decimal(99.9),
+    priceCurrency: ProductPriceCurrency.USD,
     weightKg: null,
     heightCm: null,
     widthCm: null,
@@ -53,7 +61,18 @@ describe('ProductsService', () => {
         findFirst: jest.fn(),
       },
     };
-    service = new ProductsService(prisma as PrismaService);
+    service = new ProductsService(
+      prisma as PrismaService,
+      {
+        tryGetUsdBrlQuote: jest.fn().mockResolvedValue({
+          pair: 'USD-BRL',
+          rate: new Prisma.Decimal('5.30'),
+          quotedAt: new Date('2026-10-02T03:00:00Z'),
+          source: 'AWESOME_API',
+        }),
+        getUsdBrlQuote: jest.fn(),
+      } as unknown as ExchangeRateService,
+    );
   });
 
   it('lista catálogo com elegibilidade derivada pelo fornecedor atual', async () => {
@@ -101,9 +120,36 @@ describe('ProductsService', () => {
         sku: 'CBD-01',
         productType: ProductType.OIL,
         supplierSubaccountId: '11111111-1111-4111-8111-111111111111',
+        priceCurrency: ProductPriceCurrency.USD,
       }),
     });
     expect(result.eligible).toBe(true);
+  });
+
+  it('converte o preço USD para BRL na resposta sem alterar o valor-base salvo', async () => {
+    prisma.product.findMany.mockResolvedValue([product()]);
+    prisma.product.count.mockResolvedValue(1);
+
+    const result = await service.findAll({});
+
+    expect(result.data[0].defaultPrice.toString()).toBe('99.9');
+    expect(result.data[0].priceCurrency).toBe(ProductPriceCurrency.USD);
+    expect(result.data[0].priceBrl).toBe('529.47');
+    expect(result.data[0].exchangeRate).toBe('5.3');
+  });
+
+  it('mantém produto internacional legado em BRL como pendente até o preço ser informado em USD', async () => {
+    prisma.product.findMany.mockResolvedValue([
+      product({ priceCurrency: ProductPriceCurrency.BRL }),
+    ]);
+    prisma.product.count.mockResolvedValue(1);
+
+    const result = await service.findAll({});
+
+    expect(result.data[0].eligible).toBe(false);
+    expect(result.data[0].eligibilityIssues).toContain(
+      'Preço do produto importado precisa ser informado em USD',
+    );
   });
 
   it.each([
