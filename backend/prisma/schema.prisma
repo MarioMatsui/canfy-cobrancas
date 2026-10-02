@@ -74,6 +74,14 @@ enum FulfillmentType {
   INTERNATIONAL
 }
 
+enum ProductType {
+  OIL
+  GUMMY
+  CAPSULE
+  CREAM
+  NASAL_SPRAY
+}
+
 enum PaymentProvider {
   ASAAS
 }
@@ -214,6 +222,8 @@ model Product {
   description          String?
   supplierSubaccountId String?         @map("supplier_subaccount_id")
   defaultPrice         Decimal         @map("default_price") @db.Decimal(12, 2)
+  /// Tipo comercial do catálogo. Nullable para preservar produtos legados até serem revisados.
+  productType          ProductType?    @map("product_type")
   /// Peso em kg (API Melhor Envio). Nulo = usa default_package_weight_kg de settings.
   weightKg             Decimal?        @map("weight_kg") @db.Decimal(8, 3)
   /// Dimensoes em cm. Nulas = usa a caixa padrao de settings.
@@ -231,6 +241,7 @@ model Product {
   chargeItems ChargeItem[]
 
   @@index([supplierSubaccountId])
+  @@index([productType])
   @@index([active])
   @@map("products")
 }
