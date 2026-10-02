@@ -28,6 +28,9 @@ type Product = {
   sku: string | null;
   productType: ProductType | null;
   defaultPrice: number | string;
+  priceCurrency: 'BRL' | 'USD';
+  priceBrl: string | null;
+  exchangeRate: string | null;
   supplierSubaccountId: string | null;
   supplier: {
     id: string;
@@ -444,7 +447,7 @@ export default function ChargesPage() {
     updateItem(index, {
       productId: product.id,
       productName: product.name,
-      unitPrice: String(product.defaultPrice),
+      unitPrice: product.priceBrl == null ? '' : String(product.priceBrl),
       supplierSubaccountId: product.supplierSubaccountId || '',
       productType: product.productType || '',
     });
@@ -606,7 +609,7 @@ export default function ChargesPage() {
         productId: item.productId || undefined,
         productName: item.productId ? undefined : item.productName.trim(),
         quantity: item.quantity,
-        unitPrice: Number(item.unitPrice),
+        unitPrice: item.productId ? undefined : Number(item.unitPrice),
         productType:
           orderKind === 'PRODUCT' && !item.productId ? item.productType : undefined,
         supplierSubaccountId:
