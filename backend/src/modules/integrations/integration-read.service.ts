@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, SubaccountType } from '@prisma/client';
+import { Prisma, ProductType, SubaccountType } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
   IntegrationDoctorDto,
@@ -225,7 +225,7 @@ export class IntegrationReadService {
     sku: string | null;
     description: string | null;
     defaultPrice: Prisma.Decimal;
-    productType: 'OIL' | 'GUMMY' | 'CAPSULE' | 'CREAM' | 'NASAL_SPRAY';
+    productType: ProductType | null;
     active: boolean;
     supplier: {
       id: string;
