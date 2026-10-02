@@ -47,6 +47,7 @@ export class IntegrationReadService {
           sku: true,
           description: true,
           defaultPrice: true,
+          productType: true,
           active: true,
           supplier: {
             select: {
@@ -78,6 +79,7 @@ export class IntegrationReadService {
         sku: true,
         description: true,
         defaultPrice: true,
+          productType: true,
         active: true,
         supplier: {
           select: {
@@ -197,12 +199,11 @@ export class IntegrationReadService {
   private productWhere(search?: string): Prisma.ProductWhereInput {
     return {
       active: true,
+      productType: { not: null },
+      supplierSubaccountId: { not: null },
       AND: [
         {
-          OR: [
-            { supplierSubaccountId: null },
-            { supplier: { is: SUPPLIER_ELIGIBILITY } },
-          ],
+          supplier: { is: SUPPLIER_ELIGIBILITY },
         },
         ...(search
           ? [
@@ -224,6 +225,7 @@ export class IntegrationReadService {
     sku: string | null;
     description: string | null;
     defaultPrice: Prisma.Decimal;
+    productType: 'OIL' | 'GUMMY' | 'CAPSULE' | 'CREAM' | 'NASAL_SPRAY';
     active: boolean;
     supplier: {
       id: string;
@@ -237,6 +239,7 @@ export class IntegrationReadService {
       sku: row.sku,
       description: row.description,
       defaultPrice: row.defaultPrice.toString(),
+      productType: row.productType,
       active: row.active,
       supplier: row.supplier?.fulfillmentType
         ? {
