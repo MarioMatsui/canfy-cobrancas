@@ -1,6 +1,16 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { FulfillmentType, Prisma, ProductType, SubaccountType } from '@prisma/client';
+import {
+  FulfillmentType,
+  Prisma,
+  ProductPriceCurrency,
+  ProductType,
+  SubaccountType,
+} from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import {
+  ExchangeRateService,
+  UsdBrlQuote,
+} from '../../common/exchange-rate/exchange-rate.service';
 import {
   CreateProductDto,
   ListProductsDto,
@@ -18,14 +28,33 @@ const ELIGIBLE_SUPPLIER: Prisma.SubaccountWhereInput = {
 
 @Injectable()
 export class ProductsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly exchangeRates: ExchangeRateService,
+  ) {}
 
   private eligibleWhere(): Prisma.ProductWhereInput {
     return {
       productType: { not: null },
       supplierSubaccountId: { not: null },
       supplier: { is: ELIGIBLE_SUPPLIER },
+      OR: [
+        {
+          priceCurrency: ProductPriceCurrency.BRL,
+          supplier: { is: { fulfillmentType: FulfillmentType.NATIONAL } },
+        },
+        {
+          priceCurrency: ProductPriceCurrency.USD,
+          supplier: { is: { fulfillmentType: FulfillmentType.INTERNATIONAL } },
+        },
+      ],
     };
+  }
+
+  private currencyForFulfillment(fulfillmentType: FulfillmentType) {
+    return fulfillmentType === FulfillmentType.INTERNATIONAL
+      ? ProductPriceCurrency.USD
+      : ProductPriceCurrency.BRL;
   }
 
   private listWhere(query: ListProductsDto): Prisma.ProductWhereInput {
@@ -80,6 +109,7 @@ export class ProductsService {
 
   private eligibility(product: {
     productType: ProductType | null;
+    priceCurrency: ProductPriceCurrency;
     supplierSubaccountId: string | null;
     supplier: {
       type: SubaccountType;
@@ -98,12 +128,25 @@ export class ProductsService {
       if (product.supplier.deletedAt) issues.push('Fornecedor excluído');
       if (!product.supplier.active) issues.push('Fornecedor inativo');
       if (!product.supplier.walletId) issues.push('Fornecedor sem walletId');
-      if (!product.supplier.fulfillmentType) issues.push('Fornecedor sem modalidade logística');
+      if (!product.supplier.fulfillmentType) {
+        issues.push('Fornecedor sem modalidade logística');
+      } else {
+        const expectedCurrency = this.currencyForFulfillment(product.supplier.fulfillmentType);
+        if (product.priceCurrency !== expectedCurrency) {
+          issues.push(
+            expectedCurrency === ProductPriceCurrency.USD
+              ? 'Preço do produto importado precisa ser informado em USD'
+              : 'Preço do produto nacional precisa ser informado em BRL',
+          );
+        }
+      }
     }
     return { eligible: issues.length === 0, eligibilityIssues: issues };
   }
 
   private decorate<T extends {
+    defaultPrice: Prisma.Decimal;
+    priceCurrency: ProductPriceCurrency;
     productType: ProductType | null;
     supplierSubaccountId: string | null;
     supplier: {
@@ -113,8 +156,45 @@ export class ProductsService {
       walletId: string | null;
       fulfillmentType: FulfillmentType | null;
     } | null;
-  }>(product: T) {
-    return { ...product, ...this.eligibility(product) };
+  }>(product: T, quote: UsdBrlQuote | null = null) {
+    const priceBrl =
+      product.priceCurrency === ProductPriceCurrency.BRL
+        ? product.defaultPrice.toDecimalPlaces(2).toFixed(2)
+        : quote
+          ? product.defaultPrice.mul(quote.rate).toDecimalPlaces(2).toFixed(2)
+          : null;
+
+    return {
+      ...product,
+      ...this.eligibility(product),
+      priceBrl,
+      exchangeRate:
+        product.priceCurrency === ProductPriceCurrency.USD && quote
+          ? quote.rate.toString()
+          : null,
+      exchangeRateQuotedAt:
+        product.priceCurrency === ProductPriceCurrency.USD && quote
+          ? quote.quotedAt
+          : null,
+    };
+  }
+
+  private async quoteForProducts(
+    products: Array<{ priceCurrency: ProductPriceCurrency }>,
+  ): Promise<UsdBrlQuote | null> {
+    return products.some((product) => product.priceCurrency === ProductPriceCurrency.USD)
+      ? this.exchangeRates.tryGetUsdBrlQuote()
+      : null;
+  }
+
+  async getUsdBrlQuote() {
+    const quote = await this.exchangeRates.getUsdBrlQuote();
+    return {
+      pair: quote.pair,
+      rate: quote.rate.toString(),
+      quotedAt: quote.quotedAt,
+      source: quote.source,
+    };
   }
 
   async findAll(query: ListProductsDto) {
@@ -133,8 +213,10 @@ export class ProductsService {
       this.prisma.product.count({ where }),
     ]);
 
+    const quote = await this.quoteForProducts(data);
+
     return {
-      data: data.map((product) => this.decorate(product)),
+      data: data.map((product) => this.decorate(product, quote)),
       total,
       page,
       limit,
@@ -148,7 +230,8 @@ export class ProductsService {
       include: { supplier: { select: this.supplierSelect() } },
     });
     if (!product) throw new NotFoundException('Produto não encontrado');
-    return this.decorate(product);
+    const quote = await this.quoteForProducts([product]);
+    return this.decorate(product, quote);
   }
 
   private async requireEligibleSupplier(id: string) {
@@ -189,10 +272,11 @@ export class ProductsService {
   async create(dto: CreateProductDto) {
     const sku = dto.sku?.trim() || null;
     const description = dto.description?.trim() || null;
-    await Promise.all([
+    const [supplier] = await Promise.all([
       this.requireEligibleSupplier(dto.supplierSubaccountId),
       this.assertSkuAvailable(sku),
     ]);
+    const priceCurrency = this.currencyForFulfillment(supplier.fulfillmentType!);
 
     try {
       const created = await this.prisma.product.create({
@@ -203,6 +287,7 @@ export class ProductsService {
           productType: dto.productType as ProductType,
           supplierSubaccountId: dto.supplierSubaccountId,
           defaultPrice: new Prisma.Decimal(dto.defaultPrice),
+          priceCurrency,
           weightKg: dto.weightKg == null ? null : new Prisma.Decimal(dto.weightKg),
           heightCm: dto.heightCm == null ? null : new Prisma.Decimal(dto.heightCm),
           widthCm: dto.widthCm == null ? null : new Prisma.Decimal(dto.widthCm),
@@ -233,10 +318,18 @@ export class ProductsService {
     }
 
     const sku = dto.sku === undefined ? current.sku : dto.sku?.trim() || null;
-    await Promise.all([
+    const [supplier] = await Promise.all([
       this.requireEligibleSupplier(supplierSubaccountId),
       this.assertSkuAvailable(sku, id),
     ]);
+    const priceCurrency = this.currencyForFulfillment(supplier.fulfillmentType!);
+    if (current.priceCurrency !== priceCurrency && dto.defaultPrice === undefined) {
+      throw new BadRequestException(
+        priceCurrency === ProductPriceCurrency.USD
+          ? 'Informe o preço em USD ao vincular o produto a um fornecedor importado.'
+          : 'Informe o preço em BRL ao vincular o produto a um fornecedor nacional.',
+      );
+    }
 
     try {
       await this.prisma.product.update({
@@ -249,6 +342,7 @@ export class ProductsService {
             : {}),
           productType,
           supplierSubaccountId,
+          priceCurrency,
           ...(dto.defaultPrice !== undefined
             ? { defaultPrice: new Prisma.Decimal(dto.defaultPrice) }
             : {}),

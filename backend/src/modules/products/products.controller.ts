@@ -37,6 +37,12 @@ export class ProductsController {
     return this.productsService.findAll(query);
   }
 
+  @Get('exchange-rate/usd-brl')
+  @ApiOperation({ summary: 'Obter cotação USD/BRL atual usada nos produtos importados' })
+  exchangeRate() {
+    return this.productsService.getUsdBrlQuote();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Buscar produto por ID' })
   findOne(@Param('id') id: string) {

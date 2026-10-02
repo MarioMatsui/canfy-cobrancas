@@ -6,6 +6,7 @@ import {
   OrderStatus,
   PaymentStatus,
   Prisma,
+  ProductPriceCurrency,
   QuoteSource,
   ShipmentType,
   SplitCalculationType,
@@ -14,6 +15,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { AsaasService } from '../../asaas/asaas.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { ExchangeRateService } from '../../common/exchange-rate/exchange-rate.service';
 import {
   ChargeSplitRuleDto,
   CreateChargeDto,
@@ -41,6 +43,9 @@ type Item = {
   quantity: number;
   unitPrice: Prisma.Decimal;
   lineTotal: Prisma.Decimal;
+  sourceUnitPrice: Prisma.Decimal;
+  sourceCurrency: ProductPriceCurrency;
+  exchangeRate: Prisma.Decimal | null;
   supplierSubaccountId: string | null;
   fulfillmentType: FulfillmentType;
 };
@@ -80,6 +85,7 @@ export class ChargesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly asaas: AsaasService,
+    private readonly exchangeRates: ExchangeRateService,
   ) {}
 
   async create(
@@ -222,6 +228,9 @@ export class ChargesService {
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           lineTotal: item.lineTotal,
+          sourceUnitPrice: item.sourceUnitPrice,
+          sourceCurrency: item.sourceCurrency,
+          exchangeRate: item.exchangeRate,
           supplierSubaccountId: item.supplierSubaccountId,
           fulfillmentType: item.fulfillmentType,
         })),
@@ -502,34 +511,30 @@ export class ChargesService {
 
   private async resolveItems(input: CreateChargeItemDto[], orderKind: OrderKind): Promise<Item[]> {
     const productIds = [
-      ...new Set(
-        input.map((item) => item.productId).filter((id): id is string => Boolean(id)),
-      ),
+      ...new Set(input.map((item) => item.productId).filter((id): id is string => Boolean(id))),
     ];
     const products = productIds.length
-      ? await this.prisma.product.findMany({
-          where: { id: { in: productIds }, active: true },
-        })
+      ? await this.prisma.product.findMany({ where: { id: { in: productIds }, active: true } })
       : [];
     if (products.length !== productIds.length) {
       throw new BadRequestException('Um ou mais produtos do catálogo não existem ou estão inativos');
     }
     const productsById = new Map(products.map((product) => [product.id, product]));
 
+    const usdQuote = products.some((product) => product.priceCurrency === ProductPriceCurrency.USD)
+      ? await this.exchangeRates.getUsdBrlQuote()
+      : null;
+
     const supplierIds =
       orderKind === OrderKind.PRODUCT
-        ? [
-            ...new Set(
-              input
-                .map((entry) => {
-                  const product = entry.productId
-                    ? productsById.get(entry.productId)
-                    : undefined;
-                  return product?.supplierSubaccountId ?? entry.supplierSubaccountId ?? null;
-                })
-                .filter((id): id is string => Boolean(id)),
-            ),
-          ]
+        ? [...new Set(
+            input
+              .map((entry) => {
+                const product = entry.productId ? productsById.get(entry.productId) : undefined;
+                return product?.supplierSubaccountId ?? entry.supplierSubaccountId ?? null;
+              })
+              .filter((id): id is string => Boolean(id)),
+          )]
         : [];
 
     const suppliers = supplierIds.length
@@ -557,16 +562,13 @@ export class ChargesService {
         );
       }
 
-      const unitPrice = this.money(entry.unitPrice ?? product?.defaultPrice ?? 0);
-      if (unitPrice.lte(0)) {
-        throw new BadRequestException(
-          'Item ' + (index + 1) + ': o valor unitário deve ser maior que zero',
-        );
-      }
-
       let supplierSubaccountId: string | null = null;
       let fulfillmentType: FulfillmentType = FulfillmentType.NATIONAL;
       let productType: ProductTypeDto | null = null;
+      let sourceCurrency = ProductPriceCurrency.BRL;
+      let sourceUnitPrice = this.money(entry.unitPrice ?? 0);
+      let exchangeRate: Prisma.Decimal | null = null;
+      let unitPrice = sourceUnitPrice;
 
       if (orderKind === OrderKind.PRODUCT) {
         if (product) {
@@ -580,7 +582,6 @@ export class ChargesService {
               'Item ' + (index + 1) + ' (' + name + '): o produto do catálogo não possui fornecedor configurado',
             );
           }
-
           if (entry.productType && entry.productType !== product.productType) {
             throw new BadRequestException(
               'Item ' + (index + 1) + ' (' + name + '): o tipo enviado diverge do catálogo',
@@ -594,7 +595,6 @@ export class ChargesService {
               'Item ' + (index + 1) + ' (' + name + '): o fornecedor enviado diverge do catálogo',
             );
           }
-
           productType = product.productType as ProductTypeDto;
           supplierSubaccountId = product.supplierSubaccountId;
         } else {
@@ -629,9 +629,7 @@ export class ChargesService {
           );
         }
         if (!supplier.active) {
-          throw new BadRequestException(
-            'O fornecedor "' + supplier.name + '" está inativo',
-          );
+          throw new BadRequestException('O fornecedor "' + supplier.name + '" está inativo');
         }
         if (!supplier.walletId) {
           throw new BadRequestException(
@@ -647,9 +645,51 @@ export class ChargesService {
           );
         }
 
-        // Fonte de verdade para NOVAS cobranças. Product.fulfillmentType e qualquer
-        // fulfillmentType recebido no payload são deliberadamente ignorados.
         fulfillmentType = supplier.fulfillmentType;
+
+        if (product) {
+          const expectedCurrency =
+            fulfillmentType === FulfillmentType.INTERNATIONAL
+              ? ProductPriceCurrency.USD
+              : ProductPriceCurrency.BRL;
+
+          if (product.priceCurrency !== expectedCurrency) {
+            throw new BadRequestException(
+              'Item ' +
+                (index + 1) +
+                ' (' +
+                name +
+                '): a moeda do preço do catálogo não corresponde à modalidade do fornecedor. ' +
+                'Edite o produto antes de criar a cobrança.',
+            );
+          }
+
+          sourceCurrency = product.priceCurrency;
+          sourceUnitPrice = this.money(product.defaultPrice);
+          if (sourceCurrency === ProductPriceCurrency.USD) {
+            if (!usdQuote) {
+              throw new BadRequestException(
+                'Não foi possível obter a cotação USD/BRL para o produto "' + name + '".',
+              );
+            }
+            exchangeRate = usdQuote.rate;
+            unitPrice = this.money(sourceUnitPrice.mul(exchangeRate));
+          } else {
+            unitPrice = sourceUnitPrice;
+          }
+        }
+      }
+
+      if (!product) {
+        sourceCurrency = ProductPriceCurrency.BRL;
+        sourceUnitPrice = this.money(entry.unitPrice ?? 0);
+        unitPrice = sourceUnitPrice;
+      }
+
+      if (unitPrice.lte(0)) {
+        throw new BadRequestException(
+          'Item ' + (index + 1) + ': o valor unitário deve ser maior que zero',
+        );
       }
 
       return {
@@ -661,8 +701,10 @@ export class ChargesService {
         quantity: entry.quantity,
         unitPrice,
         lineTotal: this.money(unitPrice.mul(entry.quantity)),
+        sourceUnitPrice,
+        sourceCurrency,
+        exchangeRate,
         supplierSubaccountId,
-        // Snapshot histórico: alterações futuras no catálogo/fornecedor não mudam esta venda.
         fulfillmentType,
       };
     });

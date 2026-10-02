@@ -1,6 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { FulfillmentType } from '@prisma/client';
+import { FulfillmentType, ProductPriceCurrency } from '@prisma/client';
 import {
   ArrayMinSize,
   IsArray,
@@ -89,10 +89,26 @@ export class IntegrationProductDto {
 
   @ApiProperty({
     type: String,
-    example: '399.90',
-    description: 'Preço padrão em formato decimal string para preservar precisão monetária.',
+    example: '99.90',
+    description: 'Preço-base na moeda de origem indicada por priceCurrency.',
   })
   defaultPrice!: string;
+
+  @ApiProperty({ enum: ProductPriceCurrency })
+  priceCurrency!: ProductPriceCurrency;
+
+  @ApiProperty({
+    type: String,
+    example: '529.47',
+    description: 'Preço efetivo em BRL. Para importados, usa a cotação USD/BRL atual.',
+  })
+  priceBrl!: string;
+
+  @ApiProperty({ type: String, nullable: true, example: '5.3000' })
+  exchangeRate!: string | null;
+
+  @ApiProperty({ nullable: true })
+  exchangeRateQuotedAt!: Date | null;
 
   @ApiProperty({ enum: ProductTypeDto })
   productType!: ProductTypeDto;

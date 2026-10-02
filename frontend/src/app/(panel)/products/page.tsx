@@ -23,6 +23,7 @@ import { useAuth } from '@/contexts/auth';
 type ProductType = 'OIL' | 'GUMMY' | 'CAPSULE' | 'CREAM' | 'NASAL_SPRAY';
 type FulfillmentType = 'NATIONAL' | 'INTERNATIONAL';
 type ProductStatus = 'ACTIVE' | 'INACTIVE' | 'PENDING';
+type ProductPriceCurrency = 'BRL' | 'USD';
 
 type Supplier = {
   id: string;
@@ -42,6 +43,10 @@ type Product = {
   productType: ProductType | null;
   supplierSubaccountId: string | null;
   defaultPrice: number | string;
+  priceCurrency: ProductPriceCurrency;
+  priceBrl: string | null;
+  exchangeRate: string | null;
+  exchangeRateQuotedAt: string | null;
   weightKg: number | string | null;
   heightCm: number | string | null;
   widthCm: number | string | null;
@@ -61,6 +66,12 @@ type PageResponse = {
 };
 
 type SupplierResponse = { data: Supplier[] };
+type ExchangeRateResponse = {
+  pair: 'USD-BRL';
+  rate: string;
+  quotedAt: string;
+  source: 'AWESOME_API';
+};
 type ApiErrorBody = { message?: string | string[] };
 
 type FormState = {
@@ -101,6 +112,9 @@ const productTypeLabel: Record<ProductType, string> = {
 
 const money = (value: unknown) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value || 0));
+
+const usd = (value: unknown) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
 
 const apiErrorMessage = (error: unknown, fallback: string) => {
   const raw = (error as AxiosError<ApiErrorBody>).response?.data?.message;
@@ -178,6 +192,21 @@ export default function ProductsPage() {
 
   const selectedSupplier = suppliers.find((supplier) => supplier.id === form.supplierSubaccountId);
 
+  const exchangeRateQuery = useQuery<ExchangeRateResponse>({
+    queryKey: ['usd-brl-exchange-rate'],
+    queryFn: () => api.get('/products/exchange-rate/usd-brl').then((response) => response.data),
+    enabled: showForm && selectedSupplier?.fulfillmentType === 'INTERNATIONAL',
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  const convertedFormPrice =
+    selectedSupplier?.fulfillmentType === 'INTERNATIONAL' &&
+    Number(form.defaultPrice) > 0 &&
+    exchangeRateQuery.data?.rate
+      ? Number(form.defaultPrice) * Number(exchangeRateQuery.data.rate)
+      : null;
+
   const closeForm = () => {
     setShowForm(false);
     setEditing(null);
@@ -213,7 +242,11 @@ export default function ProductsPage() {
       description: product.description || '',
       productType: product.productType || '',
       supplierSubaccountId: product.supplierSubaccountId || '',
-      defaultPrice: String(product.defaultPrice ?? ''),
+      defaultPrice:
+        product.supplier?.fulfillmentType === 'INTERNATIONAL' &&
+        product.priceCurrency !== 'USD'
+          ? ''
+          : String(product.defaultPrice ?? ''),
       weightKg: product.weightKg == null ? '' : String(product.weightKg),
       heightCm: product.heightCm == null ? '' : String(product.heightCm),
       widthCm: product.widthCm == null ? '' : String(product.widthCm),
@@ -475,7 +508,18 @@ export default function ProductsPage() {
                             ? '🌎 Internacional'
                             : '—'}
                       </td>
-                      <td className="px-4 py-4 font-medium text-gray-900">{money(product.defaultPrice)}</td>
+                      <td className="px-4 py-4">
+                        {product.priceCurrency === 'USD' ? (
+                          <div>
+                            <div className="font-medium text-gray-900">{usd(product.defaultPrice)}</div>
+                            <div className="mt-0.5 text-xs text-gray-500">
+                              {product.priceBrl ? '≈ ' + money(product.priceBrl) : 'Cotação indisponível'}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="font-medium text-gray-900">{money(product.defaultPrice)}</div>
+                        )}
+                      </td>
                       <td className="px-4 py-4">
                         <span
                           title={pending ? product.eligibilityIssues.join(' · ') : undefined}
@@ -622,9 +666,200 @@ export default function ProductsPage() {
               <section className="border-t pt-6">
                 <h3 className="mb-3 font-semibold text-gray-900">2. Comercial</h3>
                 <div className="grid gap-4 md:grid-cols-2">
-                  <Field label="Preço padrão *" error={fieldErrors.defaultPrice}>
+                  <Field
+                    label={
+                      selectedSupplier?.fulfillmentType === 'INTERNATIONAL'
+                        ? 'Preço do fornecedor (USD) *'
+                        : 'Preço padrão (BRL) *'
+                    }
+                    error={fieldErrors.defaultPrice}
+                  >
                     <div className="flex rounded-lg border focus-within:ring-2 focus-within:ring-blue-100">
-                      <span className="border-r bg-gray-50 px-3 py-2 text-sm text-gray-500">R$</span>
+                      <span className="border-r bg-gray-50 px-3 py-2 text-sm text-gray-500">
+                        {selectedSupplier?.fulfillmentType === 'INTERNATIONAL' ? 'US
+                      <option value="">Selecione um fornecedor...</option>
+                      {suppliers.map((supplier) => (
+                        <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <div className="md:col-span-2 rounded-lg border bg-gray-50 px-4 py-3">
+                    <div className="text-xs font-medium uppercase tracking-wide text-gray-500">Modalidade logística</div>
+                    <div className="mt-1 text-sm font-medium text-gray-900">
+                      {selectedSupplier?.fulfillmentType === 'NATIONAL'
+                        ? '🇧🇷 Nacional'
+                        : selectedSupplier?.fulfillmentType === 'INTERNATIONAL'
+                          ? '🌎 Internacional'
+                          : 'Selecione um fornecedor'}
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">A modalidade é definida no cadastro do fornecedor.</div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="border-t pt-6">
+                <h3 className="mb-3 font-semibold text-gray-900">3. Logística</h3>
+                <div className="grid gap-4 md:grid-cols-4">
+                  <Field label="Peso (kg)" error={fieldErrors.weightKg}>
+                    <input type="number" min="0.001" step="0.001" value={form.weightKg} onChange={(event) => setForm((current) => ({ ...current, weightKg: event.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                  </Field>
+                  <Field label="Altura (cm)" error={fieldErrors.heightCm}>
+                    <input type="number" min="0.01" step="0.01" value={form.heightCm} onChange={(event) => setForm((current) => ({ ...current, heightCm: event.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                  </Field>
+                  <Field label="Largura (cm)" error={fieldErrors.widthCm}>
+                    <input type="number" min="0.01" step="0.01" value={form.widthCm} onChange={(event) => setForm((current) => ({ ...current, widthCm: event.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                  </Field>
+                  <Field label="Comprimento (cm)" error={fieldErrors.lengthCm}>
+                    <input type="number" min="0.01" step="0.01" value={form.lengthCm} onChange={(event) => setForm((current) => ({ ...current, lengthCm: event.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                  </Field>
+                </div>
+                <p className="mt-2 text-xs text-gray-500">Quando não informados, o sistema utiliza as configurações padrão de embalagem já existentes.</p>
+              </section>
+
+              <section className="border-t pt-6">
+                <h3 className="mb-3 font-semibold text-gray-900">4. Status</h3>
+                <label className="flex items-start gap-3 rounded-lg border p-4">
+                  <input
+                    type="checkbox"
+                    checked={form.active}
+                    onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))}
+                    className="mt-1 h-4 w-4"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-gray-900">Produto ativo</span>
+                    <span className="block text-xs text-gray-500">Produtos inativos não ficam disponíveis para novas cobranças ou integrações.</span>
+                  </span>
+                </label>
+              </section>
+            </div>
+
+            <div className="sticky bottom-0 flex justify-end gap-3 border-t bg-white px-6 py-4">
+              <button onClick={closeForm} className="rounded-lg border px-4 py-2 text-sm">Cancelar</button>
+              <button
+                disabled={saveMutation.isPending}
+                onClick={() => saveMutation.mutate()}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+              >
+                {saveMutation.isPending ? 'Salvando...' : editing ? 'Salvar alterações' : 'Salvar produto'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  error,
+  children,
+}: {
+  label: string;
+  error?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-sm font-medium text-gray-700">{label}</span>
+      {children}
+      {error && <span className="mt-1 block text-xs text-red-600">{error}</span>}
+    </label>
+  );
+}
+ : 'R
+                      <option value="">Selecione um fornecedor...</option>
+                      {suppliers.map((supplier) => (
+                        <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <div className="md:col-span-2 rounded-lg border bg-gray-50 px-4 py-3">
+                    <div className="text-xs font-medium uppercase tracking-wide text-gray-500">Modalidade logística</div>
+                    <div className="mt-1 text-sm font-medium text-gray-900">
+                      {selectedSupplier?.fulfillmentType === 'NATIONAL'
+                        ? '🇧🇷 Nacional'
+                        : selectedSupplier?.fulfillmentType === 'INTERNATIONAL'
+                          ? '🌎 Internacional'
+                          : 'Selecione um fornecedor'}
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">A modalidade é definida no cadastro do fornecedor.</div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="border-t pt-6">
+                <h3 className="mb-3 font-semibold text-gray-900">3. Logística</h3>
+                <div className="grid gap-4 md:grid-cols-4">
+                  <Field label="Peso (kg)" error={fieldErrors.weightKg}>
+                    <input type="number" min="0.001" step="0.001" value={form.weightKg} onChange={(event) => setForm((current) => ({ ...current, weightKg: event.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                  </Field>
+                  <Field label="Altura (cm)" error={fieldErrors.heightCm}>
+                    <input type="number" min="0.01" step="0.01" value={form.heightCm} onChange={(event) => setForm((current) => ({ ...current, heightCm: event.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                  </Field>
+                  <Field label="Largura (cm)" error={fieldErrors.widthCm}>
+                    <input type="number" min="0.01" step="0.01" value={form.widthCm} onChange={(event) => setForm((current) => ({ ...current, widthCm: event.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                  </Field>
+                  <Field label="Comprimento (cm)" error={fieldErrors.lengthCm}>
+                    <input type="number" min="0.01" step="0.01" value={form.lengthCm} onChange={(event) => setForm((current) => ({ ...current, lengthCm: event.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                  </Field>
+                </div>
+                <p className="mt-2 text-xs text-gray-500">Quando não informados, o sistema utiliza as configurações padrão de embalagem já existentes.</p>
+              </section>
+
+              <section className="border-t pt-6">
+                <h3 className="mb-3 font-semibold text-gray-900">4. Status</h3>
+                <label className="flex items-start gap-3 rounded-lg border p-4">
+                  <input
+                    type="checkbox"
+                    checked={form.active}
+                    onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))}
+                    className="mt-1 h-4 w-4"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-gray-900">Produto ativo</span>
+                    <span className="block text-xs text-gray-500">Produtos inativos não ficam disponíveis para novas cobranças ou integrações.</span>
+                  </span>
+                </label>
+              </section>
+            </div>
+
+            <div className="sticky bottom-0 flex justify-end gap-3 border-t bg-white px-6 py-4">
+              <button onClick={closeForm} className="rounded-lg border px-4 py-2 text-sm">Cancelar</button>
+              <button
+                disabled={saveMutation.isPending}
+                onClick={() => saveMutation.mutate()}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+              >
+                {saveMutation.isPending ? 'Salvando...' : editing ? 'Salvar alterações' : 'Salvar produto'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  error,
+  children,
+}: {
+  label: string;
+  error?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-sm font-medium text-gray-700">{label}</span>
+      {children}
+      {error && <span className="mt-1 block text-xs text-red-600">{error}</span>}
+    </label>
+  );
+}
+}
+                      </span>
                       <input
                         type="number"
                         min="0.01"
@@ -634,11 +869,43 @@ export default function ProductsPage() {
                         className="min-w-0 flex-1 rounded-r-lg px-3 py-2 text-sm outline-none"
                       />
                     </div>
+                    {selectedSupplier?.fulfillmentType === 'INTERNATIONAL' && (
+                      <div className="mt-2 text-xs text-gray-500">
+                        {exchangeRateQuery.isLoading
+                          ? 'Consultando cotação USD/BRL...'
+                          : exchangeRateQuery.isError
+                            ? 'Cotação indisponível no momento. O produto pode ser salvo em USD, mas cobranças importadas exigirão uma cotação válida.'
+                            : convertedFormPrice != null
+                              ? `Cotação de venda: R$ ${Number(exchangeRateQuery.data?.rate || 0).toFixed(4)} por US$ 1 · conversão atual ≈ ${money(convertedFormPrice)}`
+                              : `Cotação de venda atual: R$ ${Number(exchangeRateQuery.data?.rate || 0).toFixed(4)} por US$ 1`}
+                      </div>
+                    )}
+                    {editing?.supplier?.fulfillmentType === 'INTERNATIONAL' &&
+                      editing.priceCurrency !== 'USD' && (
+                        <div className="mt-2 text-xs font-medium text-amber-700">
+                          Este produto é legado e ainda está com preço em BRL. Informe o valor correto em USD para regularizá-lo.
+                        </div>
+                      )}
                   </Field>
                   <Field label="Fornecedor *" error={fieldErrors.supplierSubaccountId}>
                     <select
                       value={form.supplierSubaccountId}
-                      onChange={(event) => setForm((current) => ({ ...current, supplierSubaccountId: event.target.value }))}
+                      onChange={(event) => {
+                        const nextSupplier = suppliers.find((supplier) => supplier.id === event.target.value);
+                        const currentSupplier = suppliers.find(
+                          (supplier) => supplier.id === form.supplierSubaccountId,
+                        );
+                        setForm((current) => ({
+                          ...current,
+                          supplierSubaccountId: event.target.value,
+                          defaultPrice:
+                            currentSupplier?.fulfillmentType &&
+                            nextSupplier?.fulfillmentType &&
+                            currentSupplier.fulfillmentType !== nextSupplier.fulfillmentType
+                              ? ''
+                              : current.defaultPrice,
+                        }));
+                      }}
                       className="w-full rounded-lg border px-3 py-2 text-sm"
                     >
                       <option value="">Selecione um fornecedor...</option>

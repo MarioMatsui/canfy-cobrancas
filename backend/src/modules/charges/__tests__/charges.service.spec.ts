@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { PaymentStatus } from '@prisma/client';
 import { AsaasService } from '../../../asaas/asaas.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
+import { ExchangeRateService } from '../../../common/exchange-rate/exchange-rate.service';
 import { ChargesService } from '../charges.service';
 
 describe('ChargesService cancel', () => {
@@ -61,6 +62,7 @@ describe('ChargesService cancel', () => {
         ChargesService,
         { provide: PrismaService, useValue: prisma },
         { provide: AsaasService, useValue: asaas },
+        { provide: ExchangeRateService, useValue: { getUsdBrlQuote: jest.fn() } },
       ],
     }).compile();
 
