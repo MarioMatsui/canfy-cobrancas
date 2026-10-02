@@ -147,15 +147,10 @@ describe('IntegrationWriteService', () => {
   });
 
   it('resolve corrida de concorrência pela constraint única e retorna a vencedora', async () => {
-    prisma.charge.findFirst
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        id: charge.id,
-        integrationRequestHash: undefined,
-      });
+    prisma.charge.findFirst.mockResolvedValueOnce(null);
 
     charges.create.mockImplementation(async (_dto: unknown, _userId: unknown, context: any) => {
-      prisma.charge.findFirst.mockResolvedValueOnce({
+      prisma.charge.findFirst.mockResolvedValue({
         id: charge.id,
         integrationRequestHash: context.requestHash,
       });
