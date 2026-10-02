@@ -82,6 +82,11 @@ enum ProductType {
   NASAL_SPRAY
 }
 
+enum ProductPriceCurrency {
+  BRL
+  USD
+}
+
 enum PaymentProvider {
   ASAAS
 }
@@ -221,9 +226,12 @@ model Product {
   sku                  String?         @unique
   description          String?
   supplierSubaccountId String?         @map("supplier_subaccount_id")
-  defaultPrice         Decimal         @map("default_price") @db.Decimal(12, 2)
+  /// Preço-base na moeda do fornecedor: BRL para nacional e USD para importado.
+  defaultPrice         Decimal              @map("default_price") @db.Decimal(12, 2)
+  /// Moeda explícita evita reinterpretar silenciosamente produtos legados.
+  priceCurrency        ProductPriceCurrency @default(BRL) @map("price_currency")
   /// Tipo comercial do catálogo. Nullable para preservar produtos legados até serem revisados.
-  productType          ProductType?    @map("product_type")
+  productType          ProductType?         @map("product_type")
   /// Peso em kg (API Melhor Envio). Nulo = usa default_package_weight_kg de settings.
   weightKg             Decimal?        @map("weight_kg") @db.Decimal(8, 3)
   /// Dimensoes em cm. Nulas = usa a caixa padrao de settings.
@@ -370,8 +378,13 @@ model ChargeItem {
   /// Snapshot do tipo comercial escolhido na cobranca. NULL = legado/consulta.
   productType          String?         @map("product_type")
   quantity             Int             @default(1)
+  /// Preço efetivo em BRL, congelado no momento da cobrança.
   unitPrice            Decimal         @map("unit_price") @db.Decimal(12, 2)
   lineTotal            Decimal         @map("line_total") @db.Decimal(12, 2)
+  /// Auditoria cambial: valor/moeda de origem e cotação USD->BRL usada quando aplicável.
+  sourceUnitPrice      Decimal?        @map("source_unit_price") @db.Decimal(12, 2)
+  sourceCurrency       ProductPriceCurrency? @map("source_currency")
+  exchangeRate         Decimal?        @map("exchange_rate") @db.Decimal(12, 6)
   supplierSubaccountId String?         @map("supplier_subaccount_id")
   fulfillmentType      FulfillmentType @default(NATIONAL) @map("fulfillment_type")
   createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
