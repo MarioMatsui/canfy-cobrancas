@@ -1,5 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
+import { Prisma, ProductPriceCurrency } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { ExchangeRateService } from '../../common/exchange-rate/exchange-rate.service';
 import { IntegrationReadService } from './integration-read.service';
 
 describe('IntegrationReadService', () => {
@@ -20,7 +22,17 @@ describe('IntegrationReadService', () => {
       },
     };
 
-    service = new IntegrationReadService(prisma as PrismaService);
+    service = new IntegrationReadService(
+      prisma as PrismaService,
+      {
+        getUsdBrlQuote: jest.fn().mockResolvedValue({
+          pair: 'USD-BRL',
+          rate: new Prisma.Decimal('5.30'),
+          quotedAt: new Date('2026-10-02T03:00:00Z'),
+          source: 'AWESOME_API',
+        }),
+      } as unknown as ExchangeRateService,
+    );
   });
 
   it('lista somente o contrato público de produtos com paginação', async () => {
@@ -30,7 +42,8 @@ describe('IntegrationReadService', () => {
         name: 'CBD 3000',
         sku: 'CBD-3000',
         description: 'Óleo',
-        defaultPrice: { toString: () => '399.90' },
+        defaultPrice: new Prisma.Decimal('99.90'),
+        priceCurrency: ProductPriceCurrency.USD,
         productType: 'OIL',
         active: true,
         supplier: {
@@ -51,7 +64,11 @@ describe('IntegrationReadService', () => {
           name: 'CBD 3000',
           sku: 'CBD-3000',
           description: 'Óleo',
-          defaultPrice: '399.90',
+          defaultPrice: '99.9',
+          priceCurrency: ProductPriceCurrency.USD,
+          priceBrl: '529.47',
+          exchangeRate: '5.3',
+          exchangeRateQuotedAt: new Date('2026-10-02T03:00:00Z'),
           productType: 'OIL',
           active: true,
           supplier: {
