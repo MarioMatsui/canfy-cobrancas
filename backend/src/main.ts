@@ -76,6 +76,15 @@ async function bootstrap() {
       .setDescription('API para gestão de cobranças e splits de pagamento Asaas')
       .setVersion('1.0')
       .addBearerAuth()
+      .addApiKey(
+        {
+          type: 'apiKey',
+          in: 'header',
+          name: 'X-Canfy-Integration-Key',
+          description: 'API Key machine-to-machine criada em Configurações > Integrações.',
+        },
+        'canfy-integration-key',
+      )
       .build();
 
     const document = SwaggerModule.createDocument(app, config);
