@@ -1,15 +1,22 @@
 import {
+  Body,
   Controller,
   Get,
+  Headers,
   Param,
   ParseUUIDPipe,
+  Post,
   Query,
+  Request,
   UseGuards,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiForbiddenResponse,
+  ApiHeader,
   ApiNotFoundResponse,
+  ApiConflictResponse,
+  ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
   ApiSecurity,
@@ -18,6 +25,8 @@ import {
 } from '@nestjs/swagger';
 import { IntegrationApiKeyGuard } from './integration-api-key.guard';
 import {
+  IntegrationChargeCreateResponseDto,
+  IntegrationCreateChargeDto,
   IntegrationDoctorDto,
   IntegrationDoctorListResponseDto,
   IntegrationListQueryDto,
@@ -27,15 +36,45 @@ import {
   IntegrationSupplierListResponseDto,
 } from './integration-api.dto';
 import { IntegrationReadService } from './integration-read.service';
+import { IntegrationWriteService } from './integration-write.service';
 import { RequireIntegrationScopes } from './integration-scopes.decorator';
 import { IntegrationScopesGuard } from './integration-scopes.guard';
+import { AuthenticatedIntegration } from './integrations.service';
 
 @ApiTags('Integration API v1')
 @ApiSecurity('canfy-integration-key')
 @UseGuards(IntegrationApiKeyGuard, IntegrationScopesGuard)
 @Controller('integrations/v1')
 export class IntegrationApiController {
-  constructor(private readonly readService: IntegrationReadService) {}
+  constructor(
+    private readonly readService: IntegrationReadService,
+    private readonly writeService: IntegrationWriteService,
+  ) {}
+
+  @Post('charges')
+  @RequireIntegrationScopes('charges:create')
+  @ApiOperation({
+    summary: 'Criar cobrança pela API de integrações',
+    description:
+      'Requer charges:create e o header Idempotency-Key. Cria a Charge pelo mesmo domínio usado pelo painel, sem criar Payment no Asaas.',
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description: 'Chave opaca única por operação e por integração. Reutilize somente em retries da mesma operação.',
+  })
+  @ApiCreatedResponse({ type: IntegrationChargeCreateResponseDto })
+  @ApiBadRequestResponse({ description: 'Payload, referência de domínio ou Idempotency-Key inválidos.' })
+  @ApiUnauthorizedResponse({ description: 'Credencial de integração inválida.' })
+  @ApiForbiddenResponse({ description: 'Permissão charges:create ausente.' })
+  @ApiConflictResponse({ description: 'Idempotency-Key reutilizada com payload incompatível.' })
+  createCharge(
+    @Body() dto: IntegrationCreateChargeDto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Request() req: { integration: AuthenticatedIntegration },
+  ) {
+    return this.writeService.createCharge(dto, req.integration, idempotencyKey);
+  }
 
   @Get('products')
   @RequireIntegrationScopes('products:read')

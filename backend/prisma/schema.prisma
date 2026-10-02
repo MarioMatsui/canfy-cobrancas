@@ -251,7 +251,13 @@ model Charge {
   customerCpfCnpj String?  @map("customer_cpf_cnpj")
 
   // ---- autoria ----
-  createdByUserId String? @map("created_by_user_id")
+  createdByUserId        String? @map("created_by_user_id")
+  createdByIntegrationId String? @map("created_by_integration_id")
+
+  // ---- idempotencia da API de integracoes ----
+  // Preenchidos somente em cobrancas criadas por integracao.
+  integrationIdempotencyKey String? @map("integration_idempotency_key")
+  integrationRequestHash    String? @map("integration_request_hash")
 
   // ---- tipo do pedido no fluxo novo ----
   // NULL = cobranca historica/legada sem classificacao confiavel.
@@ -309,9 +315,10 @@ model Charge {
   netValue      Decimal? @map("net_value") @db.Decimal(12, 2)
   // =========================================================
 
-  customer  Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  createdBy User?       @relation("ChargeCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  doctor    Subaccount? @relation("ChargeDoctor", fields: [doctorSubaccountId], references: [id], onDelete: SetNull)
+  customer             Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  createdBy            User?              @relation("ChargeCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdByIntegration IntegrationApiKey? @relation("ChargeCreatedByIntegration", fields: [createdByIntegrationId], references: [id], onDelete: SetNull)
+  doctor               Subaccount?        @relation("ChargeDoctor", fields: [doctorSubaccountId], references: [id], onDelete: SetNull)
 
   items           ChargeItem[]
   payments        Payment[]
@@ -329,7 +336,9 @@ model Charge {
   @@index([customerId])
   @@index([expiresAt])
   @@index([createdByUserId])
+  @@index([createdByIntegrationId])
   @@index([doctorSubaccountId])
+  @@unique([createdByIntegrationId, integrationIdempotencyKey], map: "charges_integration_idempotency_key")
   @@map("charges")
 }
 
@@ -615,7 +624,8 @@ model IntegrationApiKey {
   createdByUserId String?                 @map("created_by_user_id")
   revokedAt       DateTime?               @map("revoked_at") @db.Timestamptz(6)
 
-  createdBy User? @relation("IntegrationApiKeyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdBy      User?    @relation("IntegrationApiKeyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdCharges Charge[] @relation("ChargeCreatedByIntegration")
 
   @@index([status])
   @@index([createdByUserId])

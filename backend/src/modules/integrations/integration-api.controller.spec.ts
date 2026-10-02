@@ -3,6 +3,7 @@ import { IntegrationApiController } from './integration-api.controller';
 
 describe('IntegrationApiController scopes', () => {
   it.each([
+    ['createCharge', ['charges:create']],
     ['listProducts', ['products:read']],
     ['getProduct', ['products:read']],
     ['listSuppliers', ['subaccounts:read']],
