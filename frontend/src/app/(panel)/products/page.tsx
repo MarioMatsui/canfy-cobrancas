@@ -676,7 +676,65 @@ export default function ProductsPage() {
                   >
                     <div className="flex rounded-lg border focus-within:ring-2 focus-within:ring-blue-100">
                       <span className="border-r bg-gray-50 px-3 py-2 text-sm text-gray-500">
-                        {selectedSupplier?.fulfillmentType === 'INTERNATIONAL' ? 'US
+                        {selectedSupplier?.fulfillmentType === 'INTERNATIONAL' ? 'US$' : 'R$'}
+                      </span>
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={form.defaultPrice}
+                        onChange={(event) =>
+                          setForm((current) => ({ ...current, defaultPrice: event.target.value }))
+                        }
+                        className="min-w-0 flex-1 rounded-r-lg px-3 py-2 text-sm outline-none"
+                      />
+                    </div>
+                    {selectedSupplier?.fulfillmentType === 'INTERNATIONAL' && (
+                      <div className="mt-2 text-xs text-gray-500">
+                        {exchangeRateQuery.isLoading
+                          ? 'Consultando cotação USD/BRL...'
+                          : exchangeRateQuery.isError
+                            ? 'Cotação indisponível no momento. O produto pode ser salvo em USD, mas cobranças importadas exigirão uma cotação válida.'
+                            : convertedFormPrice != null
+                              ? 'Cotação de venda: R$ ' +
+                                Number(exchangeRateQuery.data?.rate || 0).toFixed(4) +
+                                ' por US$ 1 · conversão atual ≈ ' +
+                                money(convertedFormPrice)
+                              : 'Cotação de venda atual: R$ ' +
+                                Number(exchangeRateQuery.data?.rate || 0).toFixed(4) +
+                                ' por US$ 1'}
+                      </div>
+                    )}
+                    {editing?.supplier?.fulfillmentType === 'INTERNATIONAL' &&
+                      editing.priceCurrency !== 'USD' && (
+                        <div className="mt-2 text-xs font-medium text-amber-700">
+                          Este produto é legado e ainda está com preço em BRL. Informe o valor correto em USD para regularizá-lo.
+                        </div>
+                      )}
+                  </Field>
+                  <Field label="Fornecedor *" error={fieldErrors.supplierSubaccountId}>
+                    <select
+                      value={form.supplierSubaccountId}
+                      onChange={(event) => {
+                        const nextSupplier = suppliers.find(
+                          (supplier) => supplier.id === event.target.value,
+                        );
+                        const currentSupplier = suppliers.find(
+                          (supplier) => supplier.id === form.supplierSubaccountId,
+                        );
+                        setForm((current) => ({
+                          ...current,
+                          supplierSubaccountId: event.target.value,
+                          defaultPrice:
+                            currentSupplier?.fulfillmentType &&
+                            nextSupplier?.fulfillmentType &&
+                            currentSupplier.fulfillmentType !== nextSupplier.fulfillmentType
+                              ? ''
+                              : current.defaultPrice,
+                        }));
+                      }}
+                      className="w-full rounded-lg border px-3 py-2 text-sm"
+                    >
                       <option value="">Selecione um fornecedor...</option>
                       {suppliers.map((supplier) => (
                         <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
