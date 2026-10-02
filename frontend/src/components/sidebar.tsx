@@ -11,6 +11,7 @@ import {
   Settings,
   LogOut,
   UserCog,
+  Package,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth';
 import { NavLink } from '@/components/nav-link';
@@ -18,6 +19,7 @@ import { NavLink } from '@/components/nav-link';
 const allMenuItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'ATTENDANT'] },
   { href: '/subaccounts', label: 'Subcontas', icon: Users, roles: ['ADMIN'] },
+  { href: '/products', label: 'Produtos', icon: Package, roles: ['ADMIN'] },
   { href: '/charges', label: 'Cobranças', icon: Receipt, roles: ['ADMIN', 'ATTENDANT'] },
   { href: '/splits', label: 'Splits', icon: GitBranch, roles: ['ADMIN', 'ATTENDANT'] },
   { href: '/webhooks', label: 'Webhooks', icon: Webhook, roles: ['ADMIN'] },
