@@ -32,9 +32,7 @@ export class IntegrationWriteService {
     const internalDto: CreateChargeDto = {
       ...dto,
       items: dto.items.map((item) => ({ ...item })),
-      // A API externa deliberadamente não expõe overrides de split.
-      // ChargesService aplica as regras/defaults financeiros existentes.
-      splits: undefined,
+      splits: dto.splits?.map((split) => ({ ...split })),
     };
 
     try {
