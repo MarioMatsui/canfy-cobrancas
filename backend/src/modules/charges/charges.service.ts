@@ -67,6 +67,12 @@ type ProviderPaymentList = {
   data?: ProviderPaymentState[];
 };
 
+export type IntegrationChargeCreateContext = {
+  integrationId: string;
+  idempotencyKey: string;
+  requestHash: string;
+};
+
 @Injectable()
 export class ChargesService {
   private readonly logger = new Logger(ChargesService.name);
@@ -76,7 +82,11 @@ export class ChargesService {
     private readonly asaas: AsaasService,
   ) {}
 
-  async create(dto: CreateChargeDto, createdByUserId: string) {
+  async create(
+    dto: CreateChargeDto,
+    createdByUserId: string | null,
+    integrationContext?: IntegrationChargeCreateContext,
+  ) {
     const rules = await this.loadRules();
     const orderKind = dto.orderKind as OrderKind;
     const cpfCnpj = this.normalizeCpfCnpj(dto.customerCpfCnpj);
@@ -166,6 +176,9 @@ export class ChargesService {
           customerEmail: dto.customerEmail?.trim() || null,
           customerCpfCnpj: cpfCnpj,
           createdByUserId,
+          createdByIntegrationId: integrationContext?.integrationId ?? null,
+          integrationIdempotencyKey: integrationContext?.idempotencyKey ?? null,
+          integrationRequestHash: integrationContext?.requestHash ?? null,
           orderKind,
           subtotal,
           discountType: discount.type,
@@ -263,6 +276,8 @@ export class ChargesService {
       ' | total R$ ' + totalAmount.toFixed(2) +
       ' | repasses (com frete) R$ ' + distributed.toFixed(2) +
       ' | principal R$ ' + mainAccountValue.toFixed(2) +
+      ' | origem ' +
+      (integrationContext ? 'integration:' + integrationContext.integrationId : 'user:' + createdByUserId) +
       ' | regras de repasse por cobrança | sem pagamento Asaas',
     );
 
