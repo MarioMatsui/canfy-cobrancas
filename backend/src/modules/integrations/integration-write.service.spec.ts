@@ -23,7 +23,6 @@ describe('IntegrationWriteService', () => {
     items: [
       {
         productId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-        productType: 'OIL',
         quantity: 1,
       },
     ],
