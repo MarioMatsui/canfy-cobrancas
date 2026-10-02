@@ -13,6 +13,7 @@ import {
 import {
   ApiBadRequestResponse,
   ApiForbiddenResponse,
+  ApiHeader,
   ApiNotFoundResponse,
   ApiConflictResponse,
   ApiCreatedResponse,
@@ -56,6 +57,11 @@ export class IntegrationApiController {
     summary: 'Criar cobrança pela API de integrações',
     description:
       'Requer charges:create e o header Idempotency-Key. Cria a Charge pelo mesmo domínio usado pelo painel, sem criar Payment no Asaas.',
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description: 'Chave opaca única por operação e por integração. Reutilize somente em retries da mesma operação.',
   })
   @ApiCreatedResponse({ type: IntegrationChargeCreateResponseDto })
   @ApiBadRequestResponse({ description: 'Payload, referência de domínio ou Idempotency-Key inválidos.' })
