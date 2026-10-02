@@ -565,7 +565,7 @@ export class ChargesService {
       let supplierSubaccountId: string | null = null;
       let fulfillmentType: FulfillmentType = FulfillmentType.NATIONAL;
       let productType: ProductTypeDto | null = null;
-      let sourceCurrency = ProductPriceCurrency.BRL;
+      let sourceCurrency: ProductPriceCurrency = ProductPriceCurrency.BRL;
       let sourceUnitPrice = this.money(entry.unitPrice ?? 0);
       let exchangeRate: Prisma.Decimal | null = null;
       let unitPrice = sourceUnitPrice;
