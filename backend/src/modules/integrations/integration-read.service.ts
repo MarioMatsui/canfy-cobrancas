@@ -1,6 +1,16 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, ProductType, SubaccountType } from '@prisma/client';
+import {
+  FulfillmentType,
+  Prisma,
+  ProductPriceCurrency,
+  ProductType,
+  SubaccountType,
+} from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import {
+  ExchangeRateService,
+  UsdBrlQuote,
+} from '../../common/exchange-rate/exchange-rate.service';
 import {
   IntegrationDoctorDto,
   IntegrationDoctorListResponseDto,
@@ -29,7 +39,10 @@ const DOCTOR_ELIGIBILITY: Prisma.SubaccountWhereInput = {
 
 @Injectable()
 export class IntegrationReadService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly exchangeRates: ExchangeRateService,
+  ) {}
 
   async listProducts(query: IntegrationListQueryDto): Promise<IntegrationProductListResponseDto> {
     const { page, limit, skip } = this.page(query);
@@ -47,6 +60,7 @@ export class IntegrationReadService {
           sku: true,
           description: true,
           defaultPrice: true,
+          priceCurrency: true,
           productType: true,
           active: true,
           supplier: {
@@ -61,8 +75,12 @@ export class IntegrationReadService {
       this.prisma.product.count({ where }),
     ]);
 
+    const quote = rows.some((row) => row.priceCurrency === ProductPriceCurrency.USD)
+      ? await this.exchangeRates.getUsdBrlQuote()
+      : null;
+
     return {
-      data: rows.map((row) => this.product(row)),
+      data: rows.map((row) => this.product(row, quote)),
       pagination: this.pagination(page, limit, total),
     };
   }
@@ -79,7 +97,8 @@ export class IntegrationReadService {
         sku: true,
         description: true,
         defaultPrice: true,
-          productType: true,
+        priceCurrency: true,
+        productType: true,
         active: true,
         supplier: {
           select: {
@@ -92,7 +111,11 @@ export class IntegrationReadService {
     });
 
     if (!row) throw new NotFoundException('Produto não encontrado');
-    return this.product(row);
+    const quote =
+      row.priceCurrency === ProductPriceCurrency.USD
+        ? await this.exchangeRates.getUsdBrlQuote()
+        : null;
+    return this.product(row, quote);
   }
 
   async listSuppliers(query: IntegrationListQueryDto): Promise<IntegrationSupplierListResponseDto> {
@@ -205,6 +228,18 @@ export class IntegrationReadService {
         {
           supplier: { is: SUPPLIER_ELIGIBILITY },
         },
+        {
+          OR: [
+            {
+              priceCurrency: ProductPriceCurrency.BRL,
+              supplier: { is: { fulfillmentType: FulfillmentType.NATIONAL } },
+            },
+            {
+              priceCurrency: ProductPriceCurrency.USD,
+              supplier: { is: { fulfillmentType: FulfillmentType.INTERNATIONAL } },
+            },
+          ],
+        },
         ...(search
           ? [
               {
@@ -225,6 +260,7 @@ export class IntegrationReadService {
     sku: string | null;
     description: string | null;
     defaultPrice: Prisma.Decimal;
+    priceCurrency: ProductPriceCurrency;
     productType: ProductType | null;
     active: boolean;
     supplier: {
@@ -232,13 +268,24 @@ export class IntegrationReadService {
       name: string;
       fulfillmentType: 'NATIONAL' | 'INTERNATIONAL' | null;
     } | null;
-  }): IntegrationProductDto {
+  }, quote: UsdBrlQuote | null): IntegrationProductDto {
+    const priceBrl =
+      row.priceCurrency === ProductPriceCurrency.BRL
+        ? row.defaultPrice.toDecimalPlaces(2).toFixed(2)
+        : row.defaultPrice.mul(quote!.rate).toDecimalPlaces(2).toFixed(2);
+
     return {
       id: row.id,
       name: row.name,
       sku: row.sku,
       description: row.description,
       defaultPrice: row.defaultPrice.toString(),
+      priceCurrency: row.priceCurrency,
+      priceBrl,
+      exchangeRate:
+        row.priceCurrency === ProductPriceCurrency.USD ? quote!.rate.toString() : null,
+      exchangeRateQuotedAt:
+        row.priceCurrency === ProductPriceCurrency.USD ? quote!.quotedAt : null,
       productType: row.productType as IntegrationProductDto['productType'],
       active: row.active,
       supplier: row.supplier?.fulfillmentType
