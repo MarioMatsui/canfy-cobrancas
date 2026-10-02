@@ -1,7 +1,13 @@
 import { BadRequestException } from '@nestjs/common';
-import { FulfillmentType, OrderKind, Prisma } from '@prisma/client';
+import {
+  FulfillmentType,
+  OrderKind,
+  Prisma,
+  ProductPriceCurrency,
+} from '@prisma/client';
 import { AsaasService } from '../../../asaas/asaas.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
+import { ExchangeRateService } from '../../../common/exchange-rate/exchange-rate.service';
 import { ChargesService } from '../charges.service';
 
 describe('ChargesService supplier fulfillment', () => {
@@ -21,6 +27,14 @@ describe('ChargesService supplier fulfillment', () => {
     service = new ChargesService(
       prisma as PrismaService,
       {} as AsaasService,
+      {
+        getUsdBrlQuote: jest.fn().mockResolvedValue({
+          pair: 'USD-BRL',
+          rate: new Prisma.Decimal('5.30'),
+          quotedAt: new Date('2026-10-02T03:00:00Z'),
+          source: 'AWESOME_API',
+        }),
+      } as unknown as ExchangeRateService,
     );
   });
 
@@ -67,6 +81,7 @@ describe('ChargesService supplier fulfillment', () => {
         defaultPrice: new Prisma.Decimal(120),
         productType: 'OIL',
         supplierSubaccountId: 'supplier-1',
+        priceCurrency: ProductPriceCurrency.BRL,
         fulfillmentType: FulfillmentType.INTERNATIONAL,
       },
     ]);
@@ -82,6 +97,33 @@ describe('ChargesService supplier fulfillment', () => {
 
     expect(items[0].supplierSubaccountId).toBe('supplier-1');
     expect(items[0].fulfillmentType).toBe(FulfillmentType.NATIONAL);
+    expect(items[0].sourceCurrency).toBe(ProductPriceCurrency.BRL);
+  });
+
+  it('converte produto internacional de USD para BRL e congela a auditoria cambial', async () => {
+    prisma.product.findMany.mockResolvedValue([
+      {
+        id: 'product-usd',
+        name: 'Produto importado',
+        sku: 'USD-1',
+        defaultPrice: new Prisma.Decimal(100),
+        priceCurrency: ProductPriceCurrency.USD,
+        productType: 'OIL',
+        supplierSubaccountId: 'supplier-1',
+        fulfillmentType: FulfillmentType.NATIONAL,
+      },
+    ]);
+    prisma.subaccount.findMany.mockResolvedValue([
+      supplier({ fulfillmentType: FulfillmentType.INTERNATIONAL }),
+    ]);
+
+    const items = await resolve([{ productId: 'product-usd', quantity: 2 }]);
+
+    expect(items[0].unitPrice.toFixed(2)).toBe('530.00');
+    expect(items[0].lineTotal.toFixed(2)).toBe('1060.00');
+    expect(items[0].sourceUnitPrice.toFixed(2)).toBe('100.00');
+    expect(items[0].sourceCurrency).toBe(ProductPriceCurrency.USD);
+    expect(items[0].exchangeRate.toString()).toBe('5.3');
   });
 
   it('produto de catálogo resolve productType pelo catálogo e rejeita sobrescrita divergente', async () => {
@@ -93,6 +135,7 @@ describe('ChargesService supplier fulfillment', () => {
         defaultPrice: new Prisma.Decimal(120),
         productType: 'GUMMY',
         supplierSubaccountId: 'supplier-1',
+        priceCurrency: ProductPriceCurrency.BRL,
         fulfillmentType: FulfillmentType.INTERNATIONAL,
       },
     ]);
@@ -115,6 +158,7 @@ describe('ChargesService supplier fulfillment', () => {
         defaultPrice: new Prisma.Decimal(120),
         productType: 'OIL',
         supplierSubaccountId: 'supplier-1',
+        priceCurrency: ProductPriceCurrency.BRL,
         fulfillmentType: FulfillmentType.INTERNATIONAL,
       },
     ]);
