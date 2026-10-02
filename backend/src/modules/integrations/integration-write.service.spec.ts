@@ -112,6 +112,43 @@ describe('IntegrationWriteService', () => {
     });
   });
 
+  it('encaminha overrides de split validados para o domínio de cobranças', async () => {
+    prisma.charge.findFirst.mockResolvedValue(null);
+    charges.create.mockResolvedValue(charge);
+
+    const splitDto = {
+      ...dto,
+      doctorSubaccountId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      splits: [
+        {
+          subaccountId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          calculationType: 'PERCENTAGE',
+          value: 70,
+        },
+        {
+          subaccountId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+          calculationType: 'FIXED',
+          value: 25,
+        },
+      ],
+    };
+
+    await service.createCharge(splitDto, integration as any, 'split-key');
+
+    expect(charges.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        doctorSubaccountId: splitDto.doctorSubaccountId,
+        splits: splitDto.splits,
+      }),
+      null,
+      expect.objectContaining({
+        integrationId: integration.id,
+        idempotencyKey: 'split-key',
+        requestHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }),
+    );
+  });
+
   it('repete a resposta sem criar outra Charge quando chave e payload são iguais', async () => {
     charges.create.mockResolvedValue(charge);
 
