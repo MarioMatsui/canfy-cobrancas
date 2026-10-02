@@ -19,6 +19,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import {
+  ChargeSplitRuleDto,
   DiscountTypeDto,
   OrderKindDto,
   ProductTypeDto,
@@ -255,6 +256,17 @@ export class IntegrationCreateChargeDto {
   @ValidateNested({ each: true })
   @Type(() => IntegrationCreateChargeItemDto)
   items!: IntegrationCreateChargeItemDto[];
+
+  @ApiPropertyOptional({
+    type: [ChargeSplitRuleDto],
+    description:
+      'Overrides de repasse desta cobrança. Somente destinatários esperados pelo domínio (fornecedores dos itens e/ou médico selecionado) são aceitos.',
+  })
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => ChargeSplitRuleDto)
+  splits?: ChargeSplitRuleDto[];
 
   @ApiPropertyOptional({ enum: DiscountTypeDto, default: DiscountTypeDto.NONE })
   @IsEnum(DiscountTypeDto)
