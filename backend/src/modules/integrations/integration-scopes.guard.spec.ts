@@ -5,7 +5,7 @@ import { IntegrationScopesGuard } from './integration-scopes.guard';
 describe('IntegrationScopesGuard', () => {
   it('permite quando todos os scopes exigidos estão presentes', () => {
     const reflector = {
-      getAllAndOverride: jest.fn(() => ['charges:create']),
+      getAllAndOverride: jest.fn(() => ['charges:read']),
     } as unknown as Reflector;
     const guard = new IntegrationScopesGuard(reflector);
     const context = {
@@ -13,7 +13,7 @@ describe('IntegrationScopesGuard', () => {
       getClass: () => class Test {},
       switchToHttp: () => ({
         getRequest: () => ({
-          integration: { id: '1', name: 'MsgDesk', scopes: ['charges:create'] },
+          integration: { id: '1', name: 'MsgDesk', scopes: ['charges:read'] },
         }),
       }),
     } as unknown as ExecutionContext;
