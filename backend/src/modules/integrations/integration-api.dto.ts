@@ -351,7 +351,7 @@ export class IntegrationChargeListItemDto {
   @ApiProperty({ type: IntegrationSalePaymentDto })
   payment!: IntegrationSalePaymentDto;
 
-  @ApiProperty({ type: IntegrationChargeTotalsDto })
+  @ApiProperty({ type: () => IntegrationChargeTotalsDto })
   totals!: IntegrationChargeTotalsDto;
 
   @ApiProperty()
