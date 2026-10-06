@@ -321,6 +321,85 @@ describe('IntegrationReadService', () => {
     expect(result.pagination.total).toBe(1);
   });
 
+  it('aplica filtros de vendas na consulta server-side', async () => {
+    prisma.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          salesCount: 0,
+          grossRevenue: '0',
+          averageTicket: '0',
+          itemsSold: 0,
+        },
+      ]);
+
+    await service.listCharges({
+      page: 1,
+      limit: 25,
+      search: 'Maria',
+      dateFrom: '2026-10-01',
+      dateTo: '2026-10-06',
+      paymentMethod: 'PIX',
+      productType: 'OIL',
+      orderKind: 'PRODUCT',
+      sortDirection: 'asc',
+    });
+
+    const indexQuery = prisma.$queryRaw.mock.calls[0][0];
+    const summaryQuery = prisma.$queryRaw.mock.calls[1][0];
+    const indexSql = indexQuery.strings.join('?');
+    const summarySql = summaryQuery.strings.join('?');
+
+    for (const sql of [indexSql, summarySql]) {
+      expect(sql).toContain("c.order_status = 'PAID'");
+      expect(sql).toContain('pp.paid_at >=');
+      expect(sql).toContain('pp.paid_at <=');
+      expect(sql).toContain('pm.billing_type =');
+      expect(sql).toContain('ci_type.product_type =');
+      expect(sql).toContain('c.order_kind =');
+    }
+
+    expect(indexQuery.values).toEqual(
+      expect.arrayContaining([
+        '%Maria%',
+        'PIX',
+        'OIL',
+        'PRODUCT',
+      ]),
+    );
+  });
+
+  it('mantém summary do conjunto filtrado mesmo quando a página atual está vazia', async () => {
+    prisma.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          salesCount: 42,
+          grossRevenue: '18492.70',
+          averageTicket: '440.30',
+          itemsSold: 67,
+        },
+      ]);
+
+    const result = await service.listCharges({ page: 99, limit: 25 });
+
+    expect(result.data).toEqual([]);
+    expect(result.summary).toEqual({
+      salesCount: 42,
+      grossRevenue: '18492.70',
+      averageTicket: '440.30',
+      itemsSold: 67,
+    });
+    expect(result.pagination).toEqual(
+      expect.objectContaining({
+        page: 99,
+        limit: 25,
+        total: 42,
+      }),
+    );
+    expect(prisma.charge.findMany).not.toHaveBeenCalled();
+  });
+
   it('não retorna detalhe para cobrança que não esteja atualmente PAID', async () => {
     prisma.charge.findFirst.mockResolvedValue(null);
 
