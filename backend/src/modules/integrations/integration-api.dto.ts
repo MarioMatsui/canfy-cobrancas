@@ -326,6 +326,20 @@ export class IntegrationSaleSummaryDto {
   itemsSold!: number;
 }
 
+export class IntegrationSaleTotalsDto {
+  @ApiProperty({ type: String, example: '399.90' })
+  subtotal!: string;
+
+  @ApiProperty({ type: String, example: '0.00' })
+  discount!: string;
+
+  @ApiProperty({ type: String, example: '35.00' })
+  shipping!: string;
+
+  @ApiProperty({ type: String, example: '434.90' })
+  total!: string;
+}
+
 export class IntegrationChargeListItemDto {
   @ApiProperty()
   id!: string;
@@ -351,8 +365,8 @@ export class IntegrationChargeListItemDto {
   @ApiProperty({ type: IntegrationSalePaymentDto })
   payment!: IntegrationSalePaymentDto;
 
-  @ApiProperty({ type: () => IntegrationChargeTotalsDto })
-  totals!: IntegrationChargeTotalsDto;
+  @ApiProperty({ type: IntegrationSaleTotalsDto })
+  totals!: IntegrationSaleTotalsDto;
 
   @ApiProperty()
   totalQuantity!: number;
