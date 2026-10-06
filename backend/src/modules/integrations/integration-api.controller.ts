@@ -26,6 +26,8 @@ import {
 import { IntegrationApiKeyGuard } from './integration-api-key.guard';
 import {
   IntegrationChargeCreateResponseDto,
+  IntegrationChargeDetailDto,
+  IntegrationChargeListResponseDto,
   IntegrationCreateChargeDto,
   IntegrationDoctorDto,
   IntegrationDoctorListResponseDto,
@@ -34,6 +36,7 @@ import {
   IntegrationProductListResponseDto,
   IntegrationSupplierDto,
   IntegrationSupplierListResponseDto,
+  IntegrationSalesQueryDto,
 } from './integration-api.dto';
 import { IntegrationReadService } from './integration-read.service';
 import { IntegrationWriteService } from './integration-write.service';
@@ -74,6 +77,38 @@ export class IntegrationApiController {
     @Request() req: { integration: AuthenticatedIntegration },
   ) {
     return this.writeService.createCharge(dto, req.integration, idempotencyKey);
+  }
+
+
+  @Get('charges')
+  @RequireIntegrationScopes('charges:read')
+  @ApiOperation({
+    summary: 'Listar vendas pagas pela API de integrações',
+    description:
+      'Requer charges:read. Retorna uma linha por Charge atualmente PAID, com filtros server-side e resumo calculado sobre todo o resultado filtrado.',
+  })
+  @ApiOkResponse({ type: IntegrationChargeListResponseDto })
+  @ApiBadRequestResponse({ description: 'Parâmetros de consulta inválidos.' })
+  @ApiUnauthorizedResponse({ description: 'Credencial de integração inválida.' })
+  @ApiForbiddenResponse({ description: 'Permissão charges:read ausente.' })
+  listCharges(@Query() query: IntegrationSalesQueryDto) {
+    return this.readService.listCharges(query);
+  }
+
+  @Get('charges/:id')
+  @RequireIntegrationScopes('charges:read')
+  @ApiOperation({
+    summary: 'Detalhar uma venda paga pela API de integrações',
+    description:
+      'Requer charges:read. Retorna dados operacionais da Charge, tentativas de pagamento, itens e repasses sem expor credenciais.',
+  })
+  @ApiOkResponse({ type: IntegrationChargeDetailDto })
+  @ApiBadRequestResponse({ description: 'ID inválido.' })
+  @ApiUnauthorizedResponse({ description: 'Credencial de integração inválida.' })
+  @ApiForbiddenResponse({ description: 'Permissão charges:read ausente.' })
+  @ApiNotFoundResponse({ description: 'Venda paga não encontrada.' })
+  getCharge(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+    return this.readService.getCharge(id);
   }
 
   @Get('products')

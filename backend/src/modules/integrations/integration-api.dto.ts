@@ -1,6 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { FulfillmentType, ProductPriceCurrency } from '@prisma/client';
+import { FulfillmentType, OrderKind, ProductPriceCurrency, ProductType } from '@prisma/client';
 import {
   ArrayMinSize,
   IsArray,
@@ -8,6 +8,7 @@ import {
   IsEmail,
   IsEnum,
   IsInt,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -168,6 +169,293 @@ export class IntegrationDoctorListResponseDto {
 
   @ApiProperty({ type: IntegrationPaginationDto })
   pagination!: IntegrationPaginationDto;
+}
+
+
+
+const PAYMENT_METHOD_FILTERS = ['PIX', 'CREDIT_CARD', 'BOLETO', 'OTHER'] as const;
+const PRODUCT_TYPE_FILTERS = [
+  ProductType.OIL,
+  ProductType.GUMMY,
+  ProductType.CAPSULE,
+  ProductType.CREAM,
+  ProductType.NASAL_SPRAY,
+  'UNCLASSIFIED',
+] as const;
+
+export class IntegrationSalesQueryDto extends IntegrationListQueryDto {
+  @ApiPropertyOptional({
+    description: 'Data/hora inicial do pagamento. Datas sem horário são interpretadas no fuso America/Sao_Paulo.',
+    example: '2026-10-01',
+  })
+  @IsDateString()
+  @IsOptional()
+  dateFrom?: string;
+
+  @ApiPropertyOptional({
+    description: 'Data/hora final do pagamento. Datas sem horário incluem o dia inteiro em America/Sao_Paulo.',
+    example: '2026-10-31',
+  })
+  @IsDateString()
+  @IsOptional()
+  dateTo?: string;
+
+  @ApiPropertyOptional({ enum: PAYMENT_METHOD_FILTERS })
+  @IsIn(PAYMENT_METHOD_FILTERS)
+  @IsOptional()
+  paymentMethod?: (typeof PAYMENT_METHOD_FILTERS)[number];
+
+  @ApiPropertyOptional({ enum: PRODUCT_TYPE_FILTERS })
+  @IsIn(PRODUCT_TYPE_FILTERS)
+  @IsOptional()
+  productType?: (typeof PRODUCT_TYPE_FILTERS)[number];
+
+  @ApiPropertyOptional({ enum: OrderKind })
+  @IsEnum(OrderKind)
+  @IsOptional()
+  orderKind?: OrderKind;
+
+  @ApiPropertyOptional({ enum: ['asc', 'desc'], default: 'desc' })
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toLowerCase() : value,
+  )
+  @IsIn(['asc', 'desc'])
+  @IsOptional()
+  sortDirection?: 'asc' | 'desc';
+}
+
+export class IntegrationSaleCustomerDto {
+  @ApiProperty({ nullable: true })
+  id!: string | null;
+
+  @ApiProperty()
+  name!: string;
+
+  @ApiProperty({ nullable: true })
+  email!: string | null;
+
+  @ApiProperty({ nullable: true })
+  cpfCnpj!: string | null;
+
+  @ApiProperty({ nullable: true })
+  phone!: string | null;
+}
+
+export class IntegrationSaleSupplierDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty()
+  name!: string;
+}
+
+export class IntegrationSaleItemDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty()
+  name!: string;
+
+  @ApiProperty({ nullable: true })
+  sku!: string | null;
+
+  @ApiProperty({ nullable: true })
+  productType!: string | null;
+
+  @ApiProperty()
+  quantity!: number;
+
+  @ApiProperty({ type: String })
+  unitPrice!: string;
+
+  @ApiProperty({ type: String })
+  lineTotal!: string;
+
+  @ApiProperty({ enum: FulfillmentType, nullable: true })
+  fulfillmentType!: FulfillmentType | null;
+
+  @ApiProperty({ type: IntegrationSaleSupplierDto, nullable: true })
+  supplier!: IntegrationSaleSupplierDto | null;
+}
+
+export class IntegrationSalePaymentDto {
+  @ApiProperty({ nullable: true })
+  id!: string | null;
+
+  @ApiProperty({ nullable: true })
+  provider!: string | null;
+
+  @ApiProperty({ nullable: true })
+  billingType!: string | null;
+
+  @ApiProperty({ nullable: true })
+  status!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  amount!: string | null;
+
+  @ApiProperty({ nullable: true })
+  installments!: number | null;
+
+  @ApiProperty({ nullable: true })
+  paidAt!: Date | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  netValue!: string | null;
+}
+
+export class IntegrationSaleOriginDto {
+  @ApiProperty()
+  type!: string;
+
+  @ApiProperty({ nullable: true, required: false })
+  name?: string | null;
+}
+
+export class IntegrationSaleSummaryDto {
+  @ApiProperty()
+  salesCount!: number;
+
+  @ApiProperty({ type: String })
+  grossRevenue!: string;
+
+  @ApiProperty({ type: String })
+  averageTicket!: string;
+
+  @ApiProperty()
+  itemsSold!: number;
+}
+
+export class IntegrationChargeListItemDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty({ enum: OrderKind, nullable: true })
+  orderKind!: OrderKind | null;
+
+  @ApiProperty({ example: 'PAID' })
+  orderStatus!: 'PAID';
+
+  @ApiProperty()
+  createdAt!: Date;
+
+  @ApiProperty({ nullable: true })
+  paidAt!: Date | null;
+
+  @ApiProperty({ type: IntegrationSaleCustomerDto })
+  customer!: IntegrationSaleCustomerDto;
+
+  @ApiProperty({ type: [IntegrationSaleItemDto] })
+  items!: IntegrationSaleItemDto[];
+
+  @ApiProperty({ type: IntegrationSalePaymentDto })
+  payment!: IntegrationSalePaymentDto;
+
+  @ApiProperty({ type: IntegrationChargeTotalsDto })
+  totals!: IntegrationChargeTotalsDto;
+
+  @ApiProperty()
+  totalQuantity!: number;
+
+  @ApiProperty()
+  paidPaymentsCount!: number;
+
+  @ApiProperty({ type: IntegrationSaleOriginDto })
+  origin!: IntegrationSaleOriginDto;
+}
+
+export class IntegrationChargeListResponseDto {
+  @ApiProperty({ type: [IntegrationChargeListItemDto] })
+  data!: IntegrationChargeListItemDto[];
+
+  @ApiProperty({ type: IntegrationPaginationDto })
+  pagination!: IntegrationPaginationDto;
+
+  @ApiProperty({ type: IntegrationSaleSummaryDto })
+  summary!: IntegrationSaleSummaryDto;
+}
+
+export class IntegrationChargePaymentAttemptDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty()
+  provider!: string;
+
+  @ApiProperty()
+  billingType!: string;
+
+  @ApiProperty()
+  status!: string;
+
+  @ApiProperty({ type: String })
+  amount!: string;
+
+  @ApiProperty()
+  installments!: number;
+
+  @ApiProperty({ nullable: true })
+  paidAt!: Date | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  netValue!: string | null;
+
+  @ApiProperty()
+  createdAt!: Date;
+}
+
+export class IntegrationChargeDoctorReadDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty()
+  name!: string;
+}
+
+export class IntegrationChargeSplitReadDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty()
+  recipientType!: string;
+
+  @ApiProperty()
+  calculationType!: string;
+
+  @ApiProperty({ nullable: true })
+  chargeItemId!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  percentage!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  fixedValue!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  basisAmount!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  calculatedValue!: string | null;
+
+  @ApiProperty({ type: IntegrationSaleSupplierDto })
+  recipient!: IntegrationSaleSupplierDto;
+}
+
+export class IntegrationChargeDetailDto extends IntegrationChargeListItemDto {
+  @ApiProperty({ type: [IntegrationChargePaymentAttemptDto] })
+  payments!: IntegrationChargePaymentAttemptDto[];
+
+  @ApiProperty({ type: IntegrationChargeDoctorReadDto, nullable: true })
+  doctor!: IntegrationChargeDoctorReadDto | null;
+
+  @ApiProperty({ type: [IntegrationChargeSplitReadDto] })
+  splits!: IntegrationChargeSplitReadDto[];
+
+  @ApiProperty({ nullable: true })
+  description!: string | null;
+
+  @ApiProperty({ nullable: true })
+  notes!: string | null;
 }
 
 

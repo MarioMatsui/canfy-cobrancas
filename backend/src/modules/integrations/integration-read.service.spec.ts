@@ -20,6 +20,11 @@ describe('IntegrationReadService', () => {
         findFirst: jest.fn(),
         count: jest.fn(),
       },
+      charge: {
+        findMany: jest.fn(),
+        findFirst: jest.fn(),
+      },
+      $queryRaw: jest.fn(),
     };
 
     service = new IntegrationReadService(
@@ -202,4 +207,136 @@ describe('IntegrationReadService', () => {
       service.getProduct('55555555-5555-4555-8555-555555555555'),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  it('lista uma Charge paga uma única vez mesmo com múltiplos pagamentos concluídos', async () => {
+    const chargeId = '66666666-6666-4666-8666-666666666666';
+    prisma.$queryRaw
+      .mockResolvedValueOnce([
+        {
+          id: chargeId,
+          paidAt: new Date('2026-10-06T17:32:00Z'),
+          paidPaymentsCount: 2,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          salesCount: 1,
+          grossRevenue: '549.90',
+          averageTicket: '549.90',
+          itemsSold: 2,
+        },
+      ]);
+
+    prisma.charge.findMany.mockResolvedValue([
+      {
+        id: chargeId,
+        customerId: '77777777-7777-4777-8777-777777777777',
+        customerName: 'Mario Matsui',
+        customerEmail: 'mario@example.com',
+        customerCpfCnpj: '12345678901',
+        orderKind: 'PRODUCT',
+        orderStatus: 'PAID',
+        subtotal: new Prisma.Decimal('549.90'),
+        discountAmount: new Prisma.Decimal('0'),
+        shippingAmount: new Prisma.Decimal('0'),
+        totalAmount: new Prisma.Decimal('549.90'),
+        createdAt: new Date('2026-10-06T17:00:00Z'),
+        customer: {
+          id: '77777777-7777-4777-8777-777777777777',
+          phone: '5511999999999',
+        },
+        items: [
+          {
+            id: '88888888-8888-4888-8888-888888888888',
+            productName: 'Óleo CBD 3000mg',
+            productSku: 'CBD-3000',
+            productType: 'OIL',
+            quantity: 2,
+            unitPrice: new Prisma.Decimal('274.95'),
+            lineTotal: new Prisma.Decimal('549.90'),
+            fulfillmentType: 'NATIONAL',
+            supplier: {
+              id: '99999999-9999-4999-8999-999999999999',
+              name: 'Fornecedor A',
+            },
+          },
+        ],
+        payments: [
+          {
+            id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            provider: 'ASAAS',
+            billingType: 'PIX',
+            status: 'CONFIRMED',
+            amount: new Prisma.Decimal('549.90'),
+            installments: 1,
+            paidAt: new Date('2026-10-06T17:32:00Z'),
+            netValue: new Prisma.Decimal('537.41'),
+            createdAt: new Date('2026-10-06T17:01:00Z'),
+          },
+          {
+            id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+            provider: 'ASAAS',
+            billingType: 'CREDIT_CARD',
+            status: 'RECEIVED',
+            amount: new Prisma.Decimal('549.90'),
+            installments: 3,
+            paidAt: new Date('2026-10-06T17:33:00Z'),
+            netValue: new Prisma.Decimal('530.00'),
+            createdAt: new Date('2026-10-06T17:02:00Z'),
+          },
+        ],
+        createdByIntegration: {
+          id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+          name: 'MsgDesk',
+        },
+        createdBy: null,
+      },
+    ]);
+
+    const result = await service.listCharges({ page: 1, limit: 25 });
+
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]).toEqual(
+      expect.objectContaining({
+        id: chargeId,
+        orderStatus: 'PAID',
+        paidPaymentsCount: 2,
+        paidAt: new Date('2026-10-06T17:32:00Z'),
+        totalQuantity: 2,
+      }),
+    );
+    expect(result.data[0].payment).toEqual(
+      expect.objectContaining({
+        billingType: 'PIX',
+        status: 'CONFIRMED',
+        amount: '549.90',
+      }),
+    );
+    expect(result.summary).toEqual({
+      salesCount: 1,
+      grossRevenue: '549.90',
+      averageTicket: '549.90',
+      itemsSold: 2,
+    });
+    expect(result.pagination.total).toBe(1);
+  });
+
+  it('não retorna detalhe para cobrança que não esteja atualmente PAID', async () => {
+    prisma.charge.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.getCharge('dddddddd-dddd-4ddd-8ddd-dddddddddddd'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(prisma.charge.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+          orderStatus: 'PAID',
+        },
+      }),
+    );
+  });
+
+
 });
