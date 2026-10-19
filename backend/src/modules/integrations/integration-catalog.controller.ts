@@ -21,7 +21,7 @@ export class IntegrationCatalogController {
   async list(@Query() query: CatalogQueryDto) {
     const [result, summary] = await Promise.all([
       this.products.findAll(query),
-      this.products.catalogSummary(),
+      this.products.catalogSummary(query.eligible === true),
     ]);
     return {
       data: result.data.map(product => ({

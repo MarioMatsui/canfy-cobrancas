@@ -374,7 +374,10 @@ export default function ProductsPage() {
     onSuccess: () => {
       setDirty(false);
       toast.success(editing ? 'Produto atualizado com sucesso.' : 'Produto criado com sucesso.');
-      closeForm();
+      setShowForm(false);
+      setEditing(null);
+      setForm(emptyForm());
+      setFieldErrors({});
       invalidateCatalog();
     },
     onError: (error: unknown) => {

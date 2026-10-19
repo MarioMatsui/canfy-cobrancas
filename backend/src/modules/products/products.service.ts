@@ -243,19 +243,20 @@ export class ProductsService {
     };
   }
 
-  async catalogSummary() {
+  async catalogSummary(eligibleOnly = false) {
     const eligible = this.eligibleWhere();
+    const visible: Prisma.ProductWhereInput = eligibleOnly ? {active:true, AND:[eligible]} : {};
     const [total, available, national, international, pending, inactive, withoutImage, withoutCoa, suppliers, recent] = await Promise.all([
-      this.prisma.product.count(),
-      this.prisma.product.count({where:{active:true,AND:[eligible]}}),
-      this.prisma.product.count({where:{supplier:{is:{fulfillmentType:FulfillmentType.NATIONAL}}}}),
-      this.prisma.product.count({where:{supplier:{is:{fulfillmentType:FulfillmentType.INTERNATIONAL}}}}),
-      this.prisma.product.count({where:{active:true,NOT:eligible}}),
-      this.prisma.product.count({where:{active:false}}),
-      this.prisma.product.count({where:{imageUrl:null}}),
-      this.prisma.product.count({where:{coaUrl:null}}),
-      this.prisma.product.groupBy({by:['supplierSubaccountId'],where:{supplierSubaccountId:{not:null}}}),
-      this.prisma.product.count({where:{createdAt:{gte:new Date(Date.now()-30*86400000)}}}),
+      this.prisma.product.count({where:visible}),
+      this.prisma.product.count({where:{AND:[visible,{active:true},eligible]}}),
+      this.prisma.product.count({where:{AND:[visible,{supplier:{is:{fulfillmentType:FulfillmentType.NATIONAL}}}]}}),
+      this.prisma.product.count({where:{AND:[visible,{supplier:{is:{fulfillmentType:FulfillmentType.INTERNATIONAL}}}]}}),
+      eligibleOnly ? Promise.resolve(0) : this.prisma.product.count({where:{active:true,NOT:eligible}}),
+      eligibleOnly ? Promise.resolve(0) : this.prisma.product.count({where:{active:false}}),
+      this.prisma.product.count({where:{AND:[visible,{imageUrl:null}]}}),
+      this.prisma.product.count({where:{AND:[visible,{coaUrl:null}]}}),
+      this.prisma.product.groupBy({by:['supplierSubaccountId'],where:{AND:[visible,{supplierSubaccountId:{not:null}}]}}),
+      this.prisma.product.count({where:{AND:[visible,{createdAt:{gte:new Date(Date.now()-30*86400000)}}]}}),
     ]);
     return {total,available,national,international,pending,inactive,withoutImage,withoutCoa,suppliers:suppliers.length,recent};
   }
