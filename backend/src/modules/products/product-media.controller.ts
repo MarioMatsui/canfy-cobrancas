@@ -3,6 +3,7 @@ import {
   Param, Post, Request, Res, UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { randomBytes } from 'crypto';
 import { mkdir, readFile, writeFile } from 'fs/promises';
@@ -58,6 +59,8 @@ export class ProductMediaController {
     return { url: base.toString().replace(/\/$/, '') + '/' + filename };
   }
 
+  // Image-heavy catalog grids need more allowance than the API default (30/min).
+  @Throttle({ default: { limit: 240, ttl: 60000 } })
   @Get('file/:filename')
   async read(@Param('filename') filename: string, @Res() res: Response) {
     if (!FILE_RE.test(filename)) throw new NotFoundException();
