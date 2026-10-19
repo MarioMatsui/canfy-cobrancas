@@ -1,5 +1,6 @@
 export const INTEGRATION_SCOPES = [
   'products:read',
+  'catalog:read',
   'subaccounts:read',
   'doctors:read',
   'charges:create',

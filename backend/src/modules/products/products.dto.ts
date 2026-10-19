@@ -42,6 +42,12 @@ const optionalTrimmed = ({ value }: { value: unknown }) => {
 };
 
 export class ListProductsDto {
+  @IsOptional() @IsString() @MaxLength(120) brand?: string;
+  @IsOptional() @Transform(({value}) => value === true || value === 'true') @IsBoolean() hasImage?: boolean;
+  @IsOptional() @Transform(({value}) => value === true || value === 'true') @IsBoolean() hasCoa?: boolean;
+  @IsOptional() @IsEnum(['name','price','createdAt','updatedAt']) sortBy?: 'name'|'price'|'createdAt'|'updatedAt';
+  @IsOptional() @IsEnum(['asc','desc']) sortDirection?: 'asc'|'desc';
+
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()
   @Type(() => Number)

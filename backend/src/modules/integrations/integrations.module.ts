@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ChargesModule } from '../charges/charges.module';
+import { ProductsModule } from '../products/products.module';
+import { IntegrationCatalogController } from './integration-catalog.controller';
 import { ExchangeRateModule } from '../../common/exchange-rate/exchange-rate.module';
 import { IntegrationApiController } from './integration-api.controller';
 import { IntegrationApiKeyGuard } from './integration-api-key.guard';
@@ -10,8 +12,8 @@ import { IntegrationsController } from './integrations.controller';
 import { IntegrationsService } from './integrations.service';
 
 @Module({
-  imports: [ChargesModule, ExchangeRateModule],
-  controllers: [IntegrationsController, IntegrationApiController],
+  imports: [ChargesModule, ExchangeRateModule, ProductsModule],
+  controllers: [IntegrationsController, IntegrationApiController, IntegrationCatalogController],
   providers: [
     IntegrationsService,
     IntegrationReadService,

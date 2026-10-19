@@ -60,6 +60,9 @@ export class ProductsService {
   private listWhere(query: ListProductsDto): Prisma.ProductWhereInput {
     const filters: Prisma.ProductWhereInput[] = [];
     if (query.active !== undefined) filters.push({ active: query.active });
+    if (query.brand) filters.push({ brand: { equals: query.brand, mode: 'insensitive' } });
+    if (query.hasImage !== undefined) filters.push({ imageUrl: query.hasImage ? { not: null } : null });
+    if (query.hasCoa !== undefined) filters.push({ coaUrl: query.hasCoa ? { not: null } : null });
     if (query.productType) filters.push({ productType: query.productType as ProductType });
     if (query.supplierSubaccountId) {
       filters.push({ supplierSubaccountId: query.supplierSubaccountId });
@@ -167,8 +170,8 @@ export class ProductsService {
     return {
       ...product,
       ...this.eligibility(product),
-      marketRate: product.priceCurrency === ProductPriceCurrency.USD && quote ? quote.marketRate.toString() : null,
-      exchangeRateMarkup: product.priceCurrency === ProductPriceCurrency.USD && quote ? quote.markup.toString() : null,
+      marketRate: product.priceCurrency === ProductPriceCurrency.USD && quote ? (quote.marketRate ?? quote.rate).toString() : null,
+      exchangeRateMarkup: product.priceCurrency === ProductPriceCurrency.USD && quote ? (quote.markup ?? new Prisma.Decimal('0.03')).toString() : null,
       appliedRate: product.priceCurrency === ProductPriceCurrency.USD && quote ? quote.rate.toString() : null,
       priceBrl,
       exchangeRate:
@@ -208,26 +211,53 @@ export class ProductsService {
     const skip = (page - 1) * limit;
     const where = this.listWhere(query);
 
+    const direction = query.sortDirection === 'desc' ? 'desc' : 'asc';
+    const priceSort = query.sortBy === 'price';
     const [data, total] = await Promise.all([
       this.prisma.product.findMany({
         where,
-        skip,
-        take: limit,
-        orderBy: { name: 'asc' },
+        ...(priceSort ? {} : { skip, take: limit }),
+        orderBy: priceSort ? { name: 'asc' } : { [query.sortBy || 'name']: direction },
         include: { supplier: { select: this.supplierSelect() } },
       }),
       this.prisma.product.count({ where }),
     ]);
-
     const quote = await this.quoteForProducts(data);
+    // Cross-currency price comparison is performed before pagination.
+    const sorted = priceSort ? [...data].sort((a,b) => {
+      const price = (p: typeof a): Prisma.Decimal | null => p.priceCurrency === ProductPriceCurrency.BRL
+        ? p.defaultPrice : quote ? p.defaultPrice.mul(quote.rate) : null;
+      const x = price(a), y = price(b);
+      if (!x || !y) return !x && !y ? a.id.localeCompare(b.id) : x ? -1 : 1;
+      const comparison = x.comparedTo(y);
+      return comparison === 0 ? a.id.localeCompare(b.id) : direction === 'desc' ? -comparison : comparison;
+    }) : data;
+    const pageRows = priceSort ? sorted.slice(skip, skip+limit) : sorted;
 
     return {
-      data: data.map((product) => this.decorate(product, quote)),
+      data: pageRows.map((product) => this.decorate(product, quote)),
       total,
       page,
       limit,
       totalPages: Math.ceil(total / limit),
     };
+  }
+
+  async catalogSummary() {
+    const eligible = this.eligibleWhere();
+    const [total, available, national, international, pending, inactive, withoutImage, withoutCoa, suppliers, recent] = await Promise.all([
+      this.prisma.product.count(),
+      this.prisma.product.count({where:{active:true,AND:[eligible]}}),
+      this.prisma.product.count({where:{supplier:{is:{fulfillmentType:FulfillmentType.NATIONAL}}}}),
+      this.prisma.product.count({where:{supplier:{is:{fulfillmentType:FulfillmentType.INTERNATIONAL}}}}),
+      this.prisma.product.count({where:{active:true,NOT:eligible}}),
+      this.prisma.product.count({where:{active:false}}),
+      this.prisma.product.count({where:{imageUrl:null}}),
+      this.prisma.product.count({where:{coaUrl:null}}),
+      this.prisma.product.groupBy({by:['supplierSubaccountId'],where:{supplierSubaccountId:{not:null}}}),
+      this.prisma.product.count({where:{createdAt:{gte:new Date(Date.now()-30*86400000)}}}),
+    ]);
+    return {total,available,national,international,pending,inactive,withoutImage,withoutCoa,suppliers:suppliers.length,recent};
   }
 
   async findOne(id: string) {
