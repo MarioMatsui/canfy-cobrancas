@@ -72,6 +72,10 @@ jobs:
         working-directory: backend
         run: npm run build
 
+      - name: Verify production backend entrypoint
+        working-directory: backend
+        run: test -f dist/src/main.js
+
       - name: Backend tests
         working-directory: backend
         run: npm test -- --runInBand
