@@ -29,6 +29,13 @@ export class IntegrationsController {
     return this.integrationsService.create(dto, req.user.id);
   }
 
+  @Post(':id/enable-catalog')
+  @Header('Cache-Control', 'no-store')
+  @ApiOperation({ summary: 'Conceder catalog:read a uma integração existente sem rotacionar a chave (admin)' })
+  enableCatalog(@Param('id') id: string) {
+    return this.integrationsService.enableCatalogRead(id);
+  }
+
   @Post(':id/revoke')
   @ApiOperation({ summary: 'Revogar integração/API Key (admin)' })
   revoke(@Param('id') id: string) {
