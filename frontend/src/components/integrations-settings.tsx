@@ -34,6 +34,7 @@ type SecretResponse = Integration & { secretKey: string };
 
 const SCOPE_OPTIONS = [
   { value: 'products:read', label: 'Consultar produtos' },
+  { value: 'catalog:read', label: 'Consultar catálogo completo (inclui inativos e pendentes)' },
   { value: 'subaccounts:read', label: 'Consultar fornecedores' },
   { value: 'doctors:read', label: 'Consultar médicos' },
   { value: 'charges:create', label: 'Criar cobranças' },
