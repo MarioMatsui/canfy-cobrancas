@@ -9,6 +9,7 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  BookOpen,
   ShieldCheck,
   X,
 } from 'lucide-react';
@@ -34,6 +35,7 @@ type SecretResponse = Integration & { secretKey: string };
 
 const SCOPE_OPTIONS = [
   { value: 'products:read', label: 'Consultar produtos' },
+  { value: 'catalog:read', label: 'Consultar catálogo completo (inclui inativos e pendentes)' },
   { value: 'subaccounts:read', label: 'Consultar fornecedores' },
   { value: 'doctors:read', label: 'Consultar médicos' },
   { value: 'charges:create', label: 'Criar cobranças' },
@@ -117,7 +119,18 @@ export function IntegrationsSettings() {
     onError: () => toast.error('Não foi possível rotacionar a chave'),
   });
 
-  const isSubmitting = createMutation.isPending || revokeMutation.isPending || rotateMutation.isPending;
+  const enableCatalogMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await api.post(`/integrations/${id}/enable-catalog`);
+    },
+    onSuccess: async () => {
+      toast.success('Catálogo habilitado na chave existente, sem alterar as outras permissões');
+      await refresh();
+    },
+    onError: () => toast.error('Não foi possível habilitar o catálogo para essa chave'),
+  });
+
+  const isSubmitting = createMutation.isPending || revokeMutation.isPending || rotateMutation.isPending || enableCatalogMutation.isPending;
   const canCreate = useMemo(() => name.trim().length >= 2 && scopes.length > 0, [name, scopes]);
 
   const toggleScope = (scope: string) => {
@@ -234,6 +247,19 @@ export function IntegrationsSettings() {
 
               {integration.status === 'ACTIVE' && (
                 <div className="flex shrink-0 flex-wrap gap-2">
+                  {!integration.scopes.includes('catalog:read') && (
+                    <button
+                      type="button"
+                      title="Adiciona catalog:read sem trocar a chave ou remover as permissões atuais"
+                      disabled={isSubmitting}
+                      onClick={() => enableCatalogMutation.mutate(integration.id)}
+                      className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <BookOpen size={15} />
+                      {enableCatalogMutation.isPending && enableCatalogMutation.variables === integration.id
+                        ? 'Habilitando...' : 'Habilitar catálogo'}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setConfirm({ type: 'rotate', integration })}

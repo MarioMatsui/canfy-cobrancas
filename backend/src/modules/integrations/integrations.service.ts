@@ -65,6 +65,44 @@ export class IntegrationsService {
     };
   }
 
+  /**
+   * Habilita a leitura do catálogo completo na chave existente.
+   * Não rotaciona o segredo nem remove outras permissões.
+   */
+  async enableCatalogRead(id: string) {
+    const current = await this.prisma.integrationApiKey.findUnique({ where: { id } });
+    if (!current) throw new NotFoundException('Integração não encontrada');
+    if (current.status === 'REVOKED' || current.revokedAt) {
+      throw new BadRequestException('Integrações revogadas não podem receber permissões');
+    }
+
+    if (current.scopes.includes('catalog:read')) {
+      return this.toPublicView(current);
+    }
+
+    // Adição atômica: não perde permissões existentes e evita duplicação em requisições paralelas.
+    await this.prisma.integrationApiKey.updateMany({
+      where: {
+        id,
+        status: 'ACTIVE',
+        revokedAt: null,
+        NOT: { scopes: { has: 'catalog:read' } },
+      },
+      data: { scopes: { push: 'catalog:read' } },
+    });
+
+    const updated = await this.prisma.integrationApiKey.findUnique({ where: { id } });
+    if (!updated) throw new NotFoundException('Integração não encontrada');
+    if (updated.status === 'REVOKED' || updated.revokedAt) {
+      throw new BadRequestException('Integração revogada durante a atualização');
+    }
+    if (!updated.scopes.includes('catalog:read')) {
+      throw new BadRequestException('Não foi possível habilitar o catálogo');
+    }
+
+    return this.toPublicView(updated);
+  }
+
   async revoke(id: string) {
     const integration = await this.prisma.integrationApiKey.findUnique({ where: { id } });
     if (!integration) throw new NotFoundException('Integração não encontrada');
