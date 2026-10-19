@@ -8,7 +8,11 @@ import { Prisma } from '@prisma/client';
 
 export type UsdBrlQuote = {
   pair: 'USD-BRL';
+  /** Effective rate applied to all new charges, including the markup. */
   rate: Prisma.Decimal;
+  /** Unmodified AwesomeAPI ask value. */
+  marketRate: Prisma.Decimal;
+  markup: Prisma.Decimal;
   quotedAt: Date;
   source: 'AWESOME_API';
 };
@@ -57,7 +61,8 @@ export class ExchangeRateService {
           ? new Date(timestamp * 1000)
           : new Date();
 
-      return { pair: 'USD-BRL', rate, quotedAt, source: 'AWESOME_API' };
+      const markup = new Prisma.Decimal('0.03');
+      return { pair: 'USD-BRL', rate: rate.add(markup), marketRate: rate, markup, quotedAt, source: 'AWESOME_API' };
     } catch (error) {
       this.logger.error(
         'Falha ao obter cotação USD/BRL da AwesomeAPI: ' +

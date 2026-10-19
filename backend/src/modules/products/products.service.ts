@@ -167,6 +167,9 @@ export class ProductsService {
     return {
       ...product,
       ...this.eligibility(product),
+      marketRate: product.priceCurrency === ProductPriceCurrency.USD && quote ? quote.marketRate.toString() : null,
+      exchangeRateMarkup: product.priceCurrency === ProductPriceCurrency.USD && quote ? quote.markup.toString() : null,
+      appliedRate: product.priceCurrency === ProductPriceCurrency.USD && quote ? quote.rate.toString() : null,
       priceBrl,
       exchangeRate:
         product.priceCurrency === ProductPriceCurrency.USD && quote
@@ -192,6 +195,9 @@ export class ProductsService {
     return {
       pair: quote.pair,
       rate: quote.rate.toString(),
+      marketRate: quote.marketRate.toString(),
+      exchangeRateMarkup: quote.markup.toString(),
+      appliedRate: quote.rate.toString(),
       quotedAt: quote.quotedAt,
       source: quote.source,
     };
@@ -284,6 +290,12 @@ export class ProductsService {
           name: dto.name.trim(),
           sku,
           description,
+          brand: dto.brand?.trim() || null,
+          imageUrl: dto.imageUrl || null,
+          coaUrl: dto.coaUrl || null,
+          coaBatch: dto.coaBatch?.trim() || null,
+          coaAnalyzedAt: dto.coaAnalyzedAt ? new Date(dto.coaAnalyzedAt) : null,
+          coaValidUntil: dto.coaValidUntil ? new Date(dto.coaValidUntil) : null,
           productType: dto.productType as ProductType,
           supplierSubaccountId: dto.supplierSubaccountId,
           defaultPrice: new Prisma.Decimal(dto.defaultPrice),
@@ -342,7 +354,13 @@ export class ProductsService {
             : {}),
           productType,
           supplierSubaccountId,
-          priceCurrency,
+          ...(dto.brand !== undefined ? { brand: dto.brand?.trim() || null } : {}),
+          ...(dto.imageUrl !== undefined ? { imageUrl: dto.imageUrl || null } : {}),
+          ...(dto.coaUrl !== undefined ? { coaUrl: dto.coaUrl || null } : {}),
+          ...(dto.coaBatch !== undefined ? { coaBatch: dto.coaBatch?.trim() || null } : {}),
+          ...(dto.coaAnalyzedAt !== undefined ? { coaAnalyzedAt: dto.coaAnalyzedAt ? new Date(dto.coaAnalyzedAt) : null } : {}),
+          ...(dto.coaValidUntil !== undefined ? { coaValidUntil: dto.coaValidUntil ? new Date(dto.coaValidUntil) : null } : {}),
+          priceCurrency:
           ...(dto.defaultPrice !== undefined
             ? { defaultPrice: new Prisma.Decimal(dto.defaultPrice) }
             : {}),
