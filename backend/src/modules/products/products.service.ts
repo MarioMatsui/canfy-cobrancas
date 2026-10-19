@@ -79,6 +79,9 @@ export class ProductsService {
         OR: [
           { name: { contains: query.search, mode: 'insensitive' } },
           { sku: { contains: query.search, mode: 'insensitive' } },
+          { brand: { contains: query.search, mode: 'insensitive' } },
+          { description: { contains: query.search, mode: 'insensitive' } },
+          { supplier: { is: { name: { contains: query.search, mode: 'insensitive' } } } },
         ],
       });
     }
@@ -217,7 +220,7 @@ export class ProductsService {
       this.prisma.product.findMany({
         where,
         ...(priceSort ? {} : { skip, take: limit }),
-        orderBy: priceSort ? { name: 'asc' } : { [query.sortBy || 'name']: direction },
+        orderBy: (priceSort ? { name: 'asc' } : { [query.sortBy || 'name']: direction }) as Prisma.ProductOrderByWithRelationInput,
         include: { supplier: { select: this.supplierSelect() } },
       }),
       this.prisma.product.count({ where }),
@@ -259,6 +262,25 @@ export class ProductsService {
       this.prisma.product.count({where:{AND:[visible,{createdAt:{gte:new Date(Date.now()-30*86400000)}}]}}),
     ]);
     return {total,available,national,international,pending,inactive,withoutImage,withoutCoa,suppliers:suppliers.length,recent};
+  }
+
+  async catalogFacets(eligibleOnly = false) {
+    const where: Prisma.ProductWhereInput = eligibleOnly ? {active:true,AND:[this.eligibleWhere()]} : {};
+    const [brands, suppliers] = await Promise.all([
+      this.prisma.product.findMany({
+        where:{AND:[where,{brand:{not:null}}]},distinct:['brand'],select:{brand:true},
+      }),
+      this.prisma.product.findMany({
+        where:{AND:[where,{supplierSubaccountId:{not:null}}]},
+        distinct:['supplierSubaccountId'],
+        select:{supplier:{select:{id:true,name:true}}},
+      }),
+    ]);
+    return {
+      brands:brands.map(p=>p.brand).filter((v):v is string=>Boolean(v)).sort((a,b)=>a.localeCompare(b,'pt-BR')),
+      suppliers:suppliers.flatMap(p=>p.supplier ? [{id:p.supplier.id,name:p.supplier.name}] : [])
+        .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR')),
+    };
   }
 
   async findOne(id: string) {

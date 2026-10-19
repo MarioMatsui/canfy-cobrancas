@@ -19,9 +19,10 @@ export class IntegrationCatalogController {
   @Get('products')
   @ApiOperation({ summary: 'Catálogo administrativo paginado, incluindo inativos e pendentes' })
   async list(@Query() query: CatalogQueryDto) {
-    const [result, summary] = await Promise.all([
+    const [result, summary, facets] = await Promise.all([
       this.products.findAll(query),
       this.products.catalogSummary(query.eligible === true),
+      this.products.catalogFacets(query.eligible === true),
     ]);
     return {
       data: result.data.map(product => ({
@@ -43,6 +44,7 @@ export class IntegrationCatalogController {
       })),
       pagination: { page: result.page, limit: result.limit, total: result.total, totalPages: result.totalPages },
       summary,
+      facets,
     };
   }
 
