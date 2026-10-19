@@ -413,7 +413,7 @@ export class ProductsService {
           ...(dto.coaBatch !== undefined ? { coaBatch: dto.coaBatch?.trim() || null } : {}),
           ...(dto.coaAnalyzedAt !== undefined ? { coaAnalyzedAt: dto.coaAnalyzedAt ? new Date(dto.coaAnalyzedAt) : null } : {}),
           ...(dto.coaValidUntil !== undefined ? { coaValidUntil: dto.coaValidUntil ? new Date(dto.coaValidUntil) : null } : {}),
-          priceCurrency:
+          priceCurrency,
           ...(dto.defaultPrice !== undefined
             ? { defaultPrice: new Prisma.Decimal(dto.defaultPrice) }
             : {}),
