@@ -74,7 +74,9 @@ jobs:
 
       - name: Verify production backend entrypoint
         working-directory: backend
-        run: test -f dist/src/main.js
+        run: |
+          node --check scripts/start-prod.cjs
+          node -e "const fs = require('fs'); const { resolveEntrypoint } = require('./scripts/start-prod.cjs'); const file = resolveEntrypoint(); if (!fs.existsSync(file)) process.exit(1); console.log('Production entrypoint:', file)"
 
       - name: Backend tests
         working-directory: backend
