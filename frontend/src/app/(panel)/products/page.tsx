@@ -40,6 +40,12 @@ type Product = {
   name: string;
   sku: string | null;
   description: string | null;
+  brand: string | null;
+  imageUrl: string | null;
+  coaUrl: string | null;
+  coaBatch: string | null;
+  coaAnalyzedAt: string | null;
+  coaValidUntil: string | null;
   productType: ProductType | null;
   supplierSubaccountId: string | null;
   defaultPrice: number | string;
@@ -71,6 +77,9 @@ type ExchangeRateResponse = {
   rate: string;
   quotedAt: string;
   source: 'AWESOME_API';
+  marketRate: string;
+  exchangeRateMarkup: string;
+  appliedRate: string;
 };
 type ApiErrorBody = { message?: string | string[] };
 
@@ -78,6 +87,12 @@ type FormState = {
   name: string;
   sku: string;
   description: string;
+  brand: string;
+  imageUrl: string;
+  coaUrl: string;
+  coaBatch: string;
+  coaAnalyzedAt: string;
+  coaValidUntil: string;
   productType: ProductType | '';
   supplierSubaccountId: string;
   defaultPrice: string;
@@ -92,6 +107,12 @@ const emptyForm = (): FormState => ({
   name: '',
   sku: '',
   description: '',
+  brand: '',
+  imageUrl: '',
+  coaUrl: '',
+  coaBatch: '',
+  coaAnalyzedAt: '',
+  coaValidUntil: '',
   productType: '',
   supplierSubaccountId: '',
   defaultPrice: '',
@@ -136,6 +157,9 @@ export default function ProductsPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [uploading, setUploading] = useState<'image' | 'coa' | null>(null);
+  const [uploadError, setUploadError] = useState('');
+  const [dirty, setDirty] = useState(false);
   const [openActions, setOpenActions] = useState<string | null>(null);
 
   useEffect(() => {
@@ -208,6 +232,8 @@ export default function ProductsPage() {
       : null;
 
   const closeForm = () => {
+    if (dirty && !window.confirm('Descartar alterações não salvas?')) return;
+    setDirty(false);
     setShowForm(false);
     setEditing(null);
     setForm(emptyForm());
@@ -218,6 +244,8 @@ export default function ProductsPage() {
     if (!showForm) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      if (dirty && !window.confirm('Descartar alterações não salvas?')) return;
+      setDirty(false);
       setShowForm(false);
       setEditing(null);
       setForm(emptyForm());
@@ -225,12 +253,13 @@ export default function ProductsPage() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showForm]);
+  }, [showForm, dirty]);
 
   const openCreate = () => {
     setEditing(null);
     setForm(emptyForm());
     setFieldErrors({});
+    setDirty(false);
     setShowForm(true);
   };
 
@@ -240,6 +269,12 @@ export default function ProductsPage() {
       name: product.name,
       sku: product.sku || '',
       description: product.description || '',
+      brand: product.brand || '',
+      imageUrl: product.imageUrl || '',
+      coaUrl: product.coaUrl || '',
+      coaBatch: product.coaBatch || '',
+      coaAnalyzedAt: product.coaAnalyzedAt?.slice(0,10) || '',
+      coaValidUntil: product.coaValidUntil?.slice(0,10) || '',
       productType: product.productType || '',
       supplierSubaccountId: product.supplierSubaccountId || '',
       defaultPrice:
@@ -254,14 +289,43 @@ export default function ProductsPage() {
       active: product.active,
     });
     setFieldErrors({});
+    setDirty(false);
     setOpenActions(null);
     setShowForm(true);
+  };
+
+  const uploadMedia = async (file: File | undefined, kind: 'image' | 'coa') => {
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) { setUploadError('Tamanho máximo: 8 MB.'); return; }
+    const allowed = kind === 'coa' ? ['application/pdf'] : ['image/jpeg','image/png','image/webp'];
+    if (!allowed.includes(file.type)) { setUploadError('Tipo de arquivo não permitido.'); return; }
+    setUploadError('');
+    setUploading(kind);
+    try {
+      const body = new FormData();
+      body.append('kind', kind);
+      body.append('file', file);
+      const result = await api.post<{url:string}>('/products/media/upload', body, {
+        headers: { 'Content-Type': undefined },
+      });
+      setForm(current => ({...current, [kind === 'image' ? 'imageUrl' : 'coaUrl']:result.data.url}));
+      setDirty(true);
+      toast.success(kind === 'image' ? 'Imagem enviada.' : 'COA enviado.');
+    } catch (error) {
+      setUploadError(apiErrorMessage(error,'Não foi possível enviar o arquivo.'));
+    } finally { setUploading(null); }
   };
 
   const payload = () => ({
     name: form.name.trim(),
     sku: form.sku.trim() || null,
     description: form.description.trim() || null,
+    brand: form.brand.trim() || null,
+    imageUrl: form.imageUrl.trim() || null,
+    coaUrl: form.coaUrl.trim() || null,
+    coaBatch: form.coaBatch.trim() || null,
+    coaAnalyzedAt: form.coaAnalyzedAt || null,
+    coaValidUntil: form.coaValidUntil || null,
     productType: form.productType,
     supplierSubaccountId: form.supplierSubaccountId,
     defaultPrice: Number(form.defaultPrice),
@@ -275,6 +339,11 @@ export default function ProductsPage() {
   const validate = () => {
     const errors: Record<string, string> = {};
     if (!form.name.trim()) errors.name = 'Informe o nome do produto.';
+    if (form.brand.length > 120) errors.brand = 'Máximo de 120 caracteres.';
+    for (const key of ['imageUrl','coaUrl'] as const) {
+      if (form[key] && !/^https?:\/\//.test(form[key])) errors[key] = 'Informe um endereço HTTP(S) válido.';
+    }
+    if (form.coaBatch.length > 120) errors.coaBatch = 'Máximo de 120 caracteres.';
     if (!form.productType) errors.productType = 'Selecione o tipo.';
     if (!form.supplierSubaccountId) errors.supplierSubaccountId = 'Selecione um fornecedor.';
     if (!Number.isFinite(Number(form.defaultPrice)) || Number(form.defaultPrice) <= 0) {
@@ -303,8 +372,12 @@ export default function ProductsPage() {
         : api.post('/products', body);
     },
     onSuccess: () => {
+      setDirty(false);
       toast.success(editing ? 'Produto atualizado com sucesso.' : 'Produto criado com sucesso.');
-      closeForm();
+      setShowForm(false);
+      setEditing(null);
+      setForm(emptyForm());
+      setFieldErrors({});
       invalidateCatalog();
     },
     onError: (error: unknown) => {
@@ -481,7 +554,15 @@ export default function ProductsPage() {
                   return (
                     <tr key={product.id} className="align-top hover:bg-gray-50/70">
                       <td className="px-5 py-4">
-                        <div className="font-medium text-gray-900">{product.name}</div>
+                        <div className="flex items-center gap-3">
+                          {product.imageUrl ? (
+                            <img src={product.imageUrl} alt="" className="h-12 w-12 shrink-0 rounded-lg border object-contain bg-white" />
+                          ) : <div className="h-12 w-12 shrink-0 rounded-lg border bg-gray-50 flex items-center justify-center text-gray-400"><Package size={18}/></div>}
+                          <div>
+                            <div className="font-medium text-gray-900">{product.name}</div>
+                            {product.brand && <div className="text-xs text-gray-500">{product.brand}</div>}
+                          </div>
+                        </div>
                         {product.description && (
                           <div className="mt-1 max-w-xs truncate text-xs text-gray-500">{product.description}</div>
                         )}
@@ -620,7 +701,7 @@ export default function ProductsPage() {
               </button>
             </div>
 
-            <div className="space-y-7 p-6">
+            <div className="space-y-7 p-6" onChangeCapture={() => setDirty(true)}>
               <section>
                 <h3 className="mb-3 font-semibold text-gray-900">1. Informações básicas</h3>
                 <div className="grid gap-4 md:grid-cols-2">
@@ -637,6 +718,11 @@ export default function ProductsPage() {
                       onChange={(event) => setForm((current) => ({ ...current, sku: event.target.value }))}
                       className="w-full rounded-lg border px-3 py-2 text-sm"
                     />
+                  </Field>
+                  <Field label="Marca" error={fieldErrors.brand}>
+                    <input value={form.brand} maxLength={120}
+                      onChange={event => setForm(current => ({...current,brand:event.target.value}))}
+                      className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="Marca comercial do produto" />
                   </Field>
                   <Field label="Tipo *" error={fieldErrors.productType}>
                     <select
@@ -663,8 +749,49 @@ export default function ProductsPage() {
                 </div>
               </section>
 
+              <section className="border-t pt-6 space-y-4">
+                <h3 className="font-semibold text-gray-900">2. Apresentação e certificado</h3>
+                <div className="grid gap-5 md:grid-cols-2">
+                  <div className="space-y-3">
+                    <div className="text-sm font-medium">Imagem principal</div>
+                    <div className="flex h-40 items-center justify-center rounded-xl border bg-gray-50 overflow-hidden">
+                      {form.imageUrl ? <img src={form.imageUrl} alt="Prévia do produto" className="h-full w-full object-contain" />
+                      : <div className="flex flex-col items-center gap-2 text-gray-400"><Package size={32}/><span className="text-xs">Sem imagem cadastrada</span></div>}
+                    </div>
+                    <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-gray-50">
+                      {uploading === 'image' ? 'Enviando...' : 'Enviar ou substituir imagem'}
+                      <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only"
+                        disabled={!!uploading} onChange={e=>{void uploadMedia(e.target.files?.[0],'image');e.currentTarget.value='';}} />
+                    </label>
+                    {form.imageUrl && <button type="button" onClick={()=>{setForm(c=>({...c,imageUrl:''}));setDirty(true)}} className="text-xs text-red-600">Remover imagem</button>}
+                  </div>
+                  <div className="space-y-3">
+                    <Field label="Link do COA" error={fieldErrors.coaUrl}>
+                      <input type="url" value={form.coaUrl} onChange={e=>setForm(c=>({...c,coaUrl:e.target.value}))} className="w-full rounded-lg border px-3 py-2 text-sm" placeholder="https://.../certificado.pdf" />
+                    </Field>
+                    <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-gray-50">
+                      {uploading === 'coa' ? 'Enviando...' : 'Ou enviar PDF do COA'}
+                      <input type="file" accept="application/pdf" className="sr-only" disabled={!!uploading} onChange={e=>{void uploadMedia(e.target.files?.[0],'coa');e.currentTarget.value='';}} />
+                    </label>
+                    {form.coaUrl && <a href={form.coaUrl} target="_blank" rel="noopener noreferrer" className="block text-sm text-blue-600 hover:underline">Abrir certificado</a>}
+                    <Field label="Lote correspondente">
+                      <input maxLength={120} value={form.coaBatch} onChange={e=>setForm(c=>({...c,coaBatch:e.target.value}))} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                    </Field>
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label="Data da análise">
+                        <input type="date" value={form.coaAnalyzedAt} onChange={e=>setForm(c=>({...c,coaAnalyzedAt:e.target.value}))} className="w-full rounded-lg border px-2 py-2 text-sm"/>
+                      </Field>
+                      <Field label="Validade do COA">
+                        <input type="date" value={form.coaValidUntil} onChange={e=>setForm(c=>({...c,coaValidUntil:e.target.value}))} className="w-full rounded-lg border px-2 py-2 text-sm"/>
+                      </Field>
+                    </div>
+                    <p className="text-xs text-gray-500">Associe o certificado ao lote correto. Arquivos enviados são documentos comerciais públicos; não envie dados de pacientes.</p>
+                  </div>
+                </div>
+                {uploadError && <div role="alert" className="text-sm text-red-600">{uploadError}</div>}
+              </section>
               <section className="border-t pt-6">
-                <h3 className="mb-3 font-semibold text-gray-900">2. Comercial</h3>
+                <h3 className="mb-3 font-semibold text-gray-900">3. Comercial</h3>
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field
                     label={
@@ -694,11 +821,11 @@ export default function ProductsPage() {
                           : exchangeRateQuery.isError
                             ? 'Cotação indisponível no momento. O produto pode ser salvo em USD, mas cobranças importadas exigirão uma cotação válida.'
                             : convertedFormPrice != null
-                              ? 'Cotação de venda: R\u0024 ' +
+                              ? 'Cotação aplicada (mercado + R$ 0,03): R\u0024 ' +
                                 Number(exchangeRateQuery.data?.rate || 0).toFixed(4) +
                                 ' por US\u0024 1 · conversão atual ≈ ' +
                                 money(convertedFormPrice)
-                              : 'Cotação de venda atual: R\u0024 ' +
+                              : 'Cotação aplicada atual (mercado + R$ 0,03): R\u0024 ' +
                                 Number(exchangeRateQuery.data?.rate || 0).toFixed(4) +
                                 ' por US\u0024 1'}
                       </div>
@@ -754,7 +881,7 @@ export default function ProductsPage() {
               </section>
 
               <section className="border-t pt-6">
-                <h3 className="mb-3 font-semibold text-gray-900">3. Logística</h3>
+                <h3 className="mb-3 font-semibold text-gray-900">4. Logística</h3>
                 <div className="grid gap-4 md:grid-cols-4">
                   <Field label="Peso (kg)" error={fieldErrors.weightKg}>
                     <input type="number" min="0.001" step="0.001" value={form.weightKg} onChange={(event) => setForm((current) => ({ ...current, weightKg: event.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm" />
@@ -773,7 +900,7 @@ export default function ProductsPage() {
               </section>
 
               <section className="border-t pt-6">
-                <h3 className="mb-3 font-semibold text-gray-900">4. Status</h3>
+                <h3 className="mb-3 font-semibold text-gray-900">5. Status</h3>
                 <label className="flex items-start gap-3 rounded-lg border p-4">
                   <input
                     type="checkbox"
@@ -792,7 +919,7 @@ export default function ProductsPage() {
             <div className="sticky bottom-0 flex justify-end gap-3 border-t bg-white px-6 py-4">
               <button onClick={closeForm} className="rounded-lg border px-4 py-2 text-sm">Cancelar</button>
               <button
-                disabled={saveMutation.isPending}
+                disabled={saveMutation.isPending || !!uploading}
                 onClick={() => saveMutation.mutate()}
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
               >

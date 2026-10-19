@@ -5,6 +5,8 @@ import {
   IsEnum,
   IsInt,
   IsNumber,
+  IsUrl,
+  IsDateString,
   IsOptional,
   IsString,
   IsUUID,
@@ -40,6 +42,12 @@ const optionalTrimmed = ({ value }: { value: unknown }) => {
 };
 
 export class ListProductsDto {
+  @IsOptional() @IsString() @MaxLength(120) brand?: string;
+  @IsOptional() @Transform(({value}) => value === true || value === 'true') @IsBoolean() hasImage?: boolean;
+  @IsOptional() @Transform(({value}) => value === true || value === 'true') @IsBoolean() hasCoa?: boolean;
+  @IsOptional() @IsEnum(['name','price','createdAt','updatedAt']) sortBy?: 'name'|'price'|'createdAt'|'updatedAt';
+  @IsOptional() @IsEnum(['asc','desc']) sortDirection?: 'asc'|'desc';
+
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()
   @Type(() => Number)
@@ -101,6 +109,40 @@ export class ListProductsDto {
 }
 
 export class CreateProductDto {
+
+  @ApiPropertyOptional({ description: 'Marca comercial, distinta da subconta fornecedora' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  brand?: string | null;
+
+  @ApiPropertyOptional({ description: 'Imagem principal em URL HTTP(S)' })
+  @IsOptional()
+  @IsUrl({ require_protocol: true, protocols: ['http','https'] })
+  @MaxLength(2048)
+  imageUrl?: string | null;
+
+  @ApiPropertyOptional({ description: 'URL para o certificado de análise do lote' })
+  @IsOptional()
+  @IsUrl({ require_protocol: true, protocols: ['http','https'] })
+  @MaxLength(2048)
+  coaUrl?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  coaBatch?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsDateString()
+  coaAnalyzedAt?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsDateString()
+  coaValidUntil?: string | null;
   @ApiProperty({ example: 'Óleo CBD 3000mg' })
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
@@ -171,6 +213,40 @@ export class CreateProductDto {
 }
 
 export class UpdateProductDto {
+
+  @ApiPropertyOptional({ description: 'Marca comercial, distinta da subconta fornecedora' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  brand?: string | null;
+
+  @ApiPropertyOptional({ description: 'Imagem principal em URL HTTP(S)' })
+  @IsOptional()
+  @IsUrl({ require_protocol: true, protocols: ['http','https'] })
+  @MaxLength(2048)
+  imageUrl?: string | null;
+
+  @ApiPropertyOptional({ description: 'URL para o certificado de análise do lote' })
+  @IsOptional()
+  @IsUrl({ require_protocol: true, protocols: ['http','https'] })
+  @MaxLength(2048)
+  coaUrl?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  coaBatch?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsDateString()
+  coaAnalyzedAt?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsDateString()
+  coaValidUntil?: string | null;
   @ApiPropertyOptional()
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))

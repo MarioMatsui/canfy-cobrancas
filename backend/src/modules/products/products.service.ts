@@ -60,6 +60,9 @@ export class ProductsService {
   private listWhere(query: ListProductsDto): Prisma.ProductWhereInput {
     const filters: Prisma.ProductWhereInput[] = [];
     if (query.active !== undefined) filters.push({ active: query.active });
+    if (query.brand) filters.push({ brand: { equals: query.brand, mode: 'insensitive' } });
+    if (query.hasImage !== undefined) filters.push({ imageUrl: query.hasImage ? { not: null } : null });
+    if (query.hasCoa !== undefined) filters.push({ coaUrl: query.hasCoa ? { not: null } : null });
     if (query.productType) filters.push({ productType: query.productType as ProductType });
     if (query.supplierSubaccountId) {
       filters.push({ supplierSubaccountId: query.supplierSubaccountId });
@@ -76,6 +79,9 @@ export class ProductsService {
         OR: [
           { name: { contains: query.search, mode: 'insensitive' } },
           { sku: { contains: query.search, mode: 'insensitive' } },
+          { brand: { contains: query.search, mode: 'insensitive' } },
+          { description: { contains: query.search, mode: 'insensitive' } },
+          { supplier: { is: { name: { contains: query.search, mode: 'insensitive' } } } },
         ],
       });
     }
@@ -167,6 +173,9 @@ export class ProductsService {
     return {
       ...product,
       ...this.eligibility(product),
+      marketRate: product.priceCurrency === ProductPriceCurrency.USD && quote ? (quote.marketRate ?? quote.rate).toString() : null,
+      exchangeRateMarkup: product.priceCurrency === ProductPriceCurrency.USD && quote ? (quote.markup ?? new Prisma.Decimal('0.03')).toString() : null,
+      appliedRate: product.priceCurrency === ProductPriceCurrency.USD && quote ? quote.rate.toString() : null,
       priceBrl,
       exchangeRate:
         product.priceCurrency === ProductPriceCurrency.USD && quote
@@ -192,6 +201,9 @@ export class ProductsService {
     return {
       pair: quote.pair,
       rate: quote.rate.toString(),
+      marketRate: quote.marketRate.toString(),
+      exchangeRateMarkup: quote.markup.toString(),
+      appliedRate: quote.rate.toString(),
       quotedAt: quote.quotedAt,
       source: quote.source,
     };
@@ -202,25 +214,72 @@ export class ProductsService {
     const skip = (page - 1) * limit;
     const where = this.listWhere(query);
 
+    const direction = query.sortDirection === 'desc' ? 'desc' : 'asc';
+    const priceSort = query.sortBy === 'price';
     const [data, total] = await Promise.all([
       this.prisma.product.findMany({
         where,
-        skip,
-        take: limit,
-        orderBy: { name: 'asc' },
+        ...(priceSort ? {} : { skip, take: limit }),
+        orderBy: (priceSort ? { name: 'asc' } : { [query.sortBy || 'name']: direction }) as Prisma.ProductOrderByWithRelationInput,
         include: { supplier: { select: this.supplierSelect() } },
       }),
       this.prisma.product.count({ where }),
     ]);
-
     const quote = await this.quoteForProducts(data);
+    // Cross-currency price comparison is performed before pagination.
+    const sorted = priceSort ? [...data].sort((a,b) => {
+      const price = (p: typeof a): Prisma.Decimal | null => p.priceCurrency === ProductPriceCurrency.BRL
+        ? p.defaultPrice : quote ? p.defaultPrice.mul(quote.rate) : null;
+      const x = price(a), y = price(b);
+      if (!x || !y) return !x && !y ? a.id.localeCompare(b.id) : x ? -1 : 1;
+      const comparison = x.comparedTo(y);
+      return comparison === 0 ? a.id.localeCompare(b.id) : direction === 'desc' ? -comparison : comparison;
+    }) : data;
+    const pageRows = priceSort ? sorted.slice(skip, skip+limit) : sorted;
 
     return {
-      data: data.map((product) => this.decorate(product, quote)),
+      data: pageRows.map((product) => this.decorate(product, quote)),
       total,
       page,
       limit,
       totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async catalogSummary(eligibleOnly = false) {
+    const eligible = this.eligibleWhere();
+    const visible: Prisma.ProductWhereInput = eligibleOnly ? {active:true, AND:[eligible]} : {};
+    const [total, available, national, international, pending, inactive, withoutImage, withoutCoa, suppliers, recent] = await Promise.all([
+      this.prisma.product.count({where:visible}),
+      this.prisma.product.count({where:{AND:[visible,{active:true},eligible]}}),
+      this.prisma.product.count({where:{AND:[visible,{supplier:{is:{fulfillmentType:FulfillmentType.NATIONAL}}}]}}),
+      this.prisma.product.count({where:{AND:[visible,{supplier:{is:{fulfillmentType:FulfillmentType.INTERNATIONAL}}}]}}),
+      eligibleOnly ? Promise.resolve(0) : this.prisma.product.count({where:{active:true,NOT:eligible}}),
+      eligibleOnly ? Promise.resolve(0) : this.prisma.product.count({where:{active:false}}),
+      this.prisma.product.count({where:{AND:[visible,{imageUrl:null}]}}),
+      this.prisma.product.count({where:{AND:[visible,{coaUrl:null}]}}),
+      this.prisma.product.groupBy({by:['supplierSubaccountId'],where:{AND:[visible,{supplierSubaccountId:{not:null}}]}}),
+      this.prisma.product.count({where:{AND:[visible,{createdAt:{gte:new Date(Date.now()-30*86400000)}}]}}),
+    ]);
+    return {total,available,national,international,pending,inactive,withoutImage,withoutCoa,suppliers:suppliers.length,recent};
+  }
+
+  async catalogFacets(eligibleOnly = false) {
+    const where: Prisma.ProductWhereInput = eligibleOnly ? {active:true,AND:[this.eligibleWhere()]} : {};
+    const [brands, suppliers] = await Promise.all([
+      this.prisma.product.findMany({
+        where:{AND:[where,{brand:{not:null}}]},distinct:['brand'],select:{brand:true},
+      }),
+      this.prisma.product.findMany({
+        where:{AND:[where,{supplierSubaccountId:{not:null}}]},
+        distinct:['supplierSubaccountId'],
+        select:{supplier:{select:{id:true,name:true}}},
+      }),
+    ]);
+    return {
+      brands:brands.map(p=>p.brand).filter((v):v is string=>Boolean(v)).sort((a,b)=>a.localeCompare(b,'pt-BR')),
+      suppliers:suppliers.flatMap(p=>p.supplier ? [{id:p.supplier.id,name:p.supplier.name}] : [])
+        .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR')),
     };
   }
 
@@ -284,6 +343,12 @@ export class ProductsService {
           name: dto.name.trim(),
           sku,
           description,
+          brand: dto.brand?.trim() || null,
+          imageUrl: dto.imageUrl || null,
+          coaUrl: dto.coaUrl || null,
+          coaBatch: dto.coaBatch?.trim() || null,
+          coaAnalyzedAt: dto.coaAnalyzedAt ? new Date(dto.coaAnalyzedAt) : null,
+          coaValidUntil: dto.coaValidUntil ? new Date(dto.coaValidUntil) : null,
           productType: dto.productType as ProductType,
           supplierSubaccountId: dto.supplierSubaccountId,
           defaultPrice: new Prisma.Decimal(dto.defaultPrice),
@@ -342,6 +407,12 @@ export class ProductsService {
             : {}),
           productType,
           supplierSubaccountId,
+          ...(dto.brand !== undefined ? { brand: dto.brand?.trim() || null } : {}),
+          ...(dto.imageUrl !== undefined ? { imageUrl: dto.imageUrl || null } : {}),
+          ...(dto.coaUrl !== undefined ? { coaUrl: dto.coaUrl || null } : {}),
+          ...(dto.coaBatch !== undefined ? { coaBatch: dto.coaBatch?.trim() || null } : {}),
+          ...(dto.coaAnalyzedAt !== undefined ? { coaAnalyzedAt: dto.coaAnalyzedAt ? new Date(dto.coaAnalyzedAt) : null } : {}),
+          ...(dto.coaValidUntil !== undefined ? { coaValidUntil: dto.coaValidUntil ? new Date(dto.coaValidUntil) : null } : {}),
           priceCurrency,
           ...(dto.defaultPrice !== undefined
             ? { defaultPrice: new Prisma.Decimal(dto.defaultPrice) }

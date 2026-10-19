@@ -225,6 +225,12 @@ model Product {
   name                 String
   sku                  String?         @unique
   description          String?
+  brand                String?         @db.VarChar(120)
+  imageUrl             String?         @map("image_url") @db.VarChar(2048)
+  coaUrl               String?         @map("coa_url") @db.VarChar(2048)
+  coaBatch             String?         @map("coa_batch") @db.VarChar(120)
+  coaAnalyzedAt        DateTime?       @map("coa_analyzed_at") @db.Date
+  coaValidUntil        DateTime?       @map("coa_valid_until") @db.Date
   supplierSubaccountId String?         @map("supplier_subaccount_id")
   /// Preço-base na moeda do fornecedor: BRL para nacional e USD para importado.
   defaultPrice         Decimal              @map("default_price") @db.Decimal(12, 2)
@@ -251,6 +257,7 @@ model Product {
   @@index([supplierSubaccountId])
   @@index([productType])
   @@index([active])
+  @@index([brand])
   @@map("products")
 }
 

@@ -49,8 +49,12 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       PORT: 3001
+      PRODUCT_MEDIA_DIR: /var/lib/canfy/product-media
+      PRODUCT_MEDIA_PUBLIC_BASE_URL: ${PRODUCT_MEDIA_PUBLIC_BASE_URL:-https://cobranca.canfy.com.br/api/products/media/file}
       FRONTEND_URL: ${FRONTEND_URL:?}
       CHECKOUT_FRONTEND_URL: ${CHECKOUT_FRONTEND_URL:-https://pagar.canfy.com.br}
+    volumes:
+      - product_media:/var/lib/canfy/product-media
     depends_on:
       postgres:
         condition: service_healthy
@@ -111,6 +115,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  product_media:
 
 networks:
   internal:
