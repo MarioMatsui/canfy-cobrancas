@@ -695,6 +695,7 @@ export class PublicCheckoutService {
       where: { id: payment.id },
       data: {
         providerPaymentId: remote.id,
+        providerInstallmentId: remote.installment ?? null,
         invoiceUrl: remote.invoiceUrl ?? null,
         bankSlipUrl: remote.bankSlipUrl ?? null,
         status,
@@ -704,6 +705,7 @@ export class PublicCheckoutService {
     return {
       ...payment,
       providerPaymentId: remote.id,
+      providerInstallmentId: remote.installment ?? null,
       invoiceUrl: remote.invoiceUrl ?? null,
       status,
     };
@@ -1108,6 +1110,7 @@ export class PublicCheckoutService {
         {
           method: 'PIX',
           status: 'PENDING',
+          installments: 1,
           amount: this.decimalToNumber(charge.totalAmount ?? charge.value),
           ...(charge.pixQrCode ? { pixQrCode: charge.pixQrCode } : {}),
           ...(charge.pixCopiaECola ? { pixCopyPaste: charge.pixCopiaECola } : {}),
@@ -1123,6 +1126,7 @@ export class PublicCheckoutService {
         {
           method: 'CARD',
           status: 'PENDING',
+          installments: 1,
           amount: this.decimalToNumber(charge.totalAmount ?? charge.value),
           invoiceUrl: charge.invoiceUrl,
         },
