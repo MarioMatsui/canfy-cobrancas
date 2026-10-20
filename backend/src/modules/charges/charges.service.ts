@@ -14,6 +14,7 @@ import {
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { AsaasService } from '../../asaas/asaas.service';
+import { cancelUnpaidInstallmentGroup } from '../public-checkout/installment-reconciliation';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ExchangeRateService } from '../../common/exchange-rate/exchange-rate.service';
 import {
@@ -382,6 +383,8 @@ export class ChargesService {
               select: {
                 id: true,
                 providerPaymentId: true,
+                providerInstallmentId: true,
+                installments: true,
                 status: true,
               },
               orderBy: { createdAt: 'desc' },
@@ -455,9 +458,21 @@ export class ChargesService {
               );
             }
 
-            await this.asaas.delete<void>(
-              '/payments/' + encodeURIComponent(providerPaymentId),
-            );
+            if (payment.providerInstallmentId) {
+              try {
+                await cancelUnpaidInstallmentGroup(
+                  this.asaas, payment.providerInstallmentId, payment.installments,
+                );
+              } catch {
+                throw new BadRequestException(
+                  'Não foi possível cancelar todas as parcelas no Asaas. Confirme o status do parcelamento antes de tentar novamente.',
+                );
+              }
+            } else {
+              await this.asaas.delete<void>(
+                '/payments/' + encodeURIComponent(providerPaymentId),
+              );
+            }
           }
 
           await tx.payment.update({
