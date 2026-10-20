@@ -716,7 +716,9 @@ export default function ProductsPage() {
               </button>
             </div>
 
-            <div className="space-y-7 p-6" onChangeCapture={() => setDirty(true)}>
+            <div className="space-y-7 p-6" onChangeCapture={event => {
+              if ((event.target as HTMLInputElement).dataset.phytocannabinoidSearch !== 'true') setDirty(true);
+            }}>
               <section>
                 <h3 className="mb-3 font-semibold text-gray-900">1. Informações básicas</h3>
                 <div className="grid gap-4 md:grid-cols-2">
