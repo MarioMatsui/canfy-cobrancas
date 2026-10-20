@@ -61,9 +61,9 @@ export class WebhooksProcessor {
             ],
             providerInstallmentId: { not: null },
           },
-          select: { id: true, chargeId: true },
+          select: { id: true, chargeId: true, providerInstallmentId: true },
         });
-        if (grouped) {
+        if (grouped?.providerInstallmentId) {
           await this.attachLogToPayment(webhookLogId, grouped.id);
           const result = await reconcileInstallmentGroup(this.prisma, this.asaas, grouped.id);
           if (result === 'PAID') {
