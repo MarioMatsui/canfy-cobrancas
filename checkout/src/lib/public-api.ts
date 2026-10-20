@@ -94,7 +94,8 @@ function isActivePayment(value: unknown): value is PublicActivePayment {
   }
   if (!isFiniteNumber(value.amount)) return false;
   if (value.installments !== undefined &&
-      (!Number.isInteger(value.installments) || value.installments < 1 || value.installments > 12)) return false;
+      (typeof value.installments !== 'number' || !Number.isInteger(value.installments) ||
+        value.installments < 1 || value.installments > 12)) return false;
   if (!isOptionalString(value.invoiceUrl)) return false;
   if (!isOptionalString(value.pixQrCode)) return false;
   if (!isOptionalString(value.pixCopyPaste)) return false;
