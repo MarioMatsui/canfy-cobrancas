@@ -271,7 +271,7 @@ export class PublicCheckoutService {
           );
 
           if (sameMethod) {
-            if (sameMethod.installments !== installments) {
+            if ((sameMethod.installments ?? 1) !== installments) {
               throw new ConflictException(
                 'Já existe uma fatura de cartão para este pedido com outro parcelamento. ' +
                 'Ela precisa ser cancelada antes de criar uma nova.',
@@ -912,6 +912,8 @@ export class PublicCheckoutService {
       select: {
         id: true,
         providerPaymentId: true,
+        providerInstallmentId: true,
+        installments: true,
       },
     });
 
@@ -955,9 +957,15 @@ export class PublicCheckoutService {
           continue;
         }
 
-        await this.asaas.delete<void>(
-          '/payments/' + encodeURIComponent(alternative.providerPaymentId),
-        );
+        if (alternative.providerInstallmentId) {
+          await cancelUnpaidInstallmentGroup(
+            this.asaas, alternative.providerInstallmentId, alternative.installments,
+          );
+        } else {
+          await this.asaas.delete<void>(
+            '/payments/' + encodeURIComponent(alternative.providerPaymentId),
+          );
+        }
         await tx.payment.update({
           where: { id: alternative.id },
           data: { status: PaymentStatus.CANCELLED },
@@ -1150,7 +1158,7 @@ export class PublicCheckoutService {
     return {
       method,
       status,
-      installments: payment.installments,
+      installments: payment.installments ?? 1,
       amount: this.decimalToNumber(payment.amount),
       ...(payment.invoiceUrl ? { invoiceUrl: payment.invoiceUrl } : {}),
       ...(payment.pixQrCode ? { pixQrCode: payment.pixQrCode } : {}),
