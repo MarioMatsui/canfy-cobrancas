@@ -23,6 +23,7 @@ export type PublicChargeShipment = {
 };
 
 export type PublicActivePayment = {
+  installments?: number;
   method: PaymentMethod;
   status: PublicPaymentStatus;
   amount: number;
