@@ -27,7 +27,7 @@ export class IntegrationCatalogController {
     return {
       data: result.data.map(product => ({
         id: product.id, name: product.name, sku: product.sku,
-        description: product.description, brand: product.brand,
+        description: product.description, brand: product.brand, phytocannabinoids: product.phytocannabinoids,
         imageUrl: product.imageUrl, coaUrl: product.coaUrl, coaBatch: product.coaBatch,
         coaAnalyzedAt: product.coaAnalyzedAt, coaValidUntil: product.coaValidUntil,
         createdAt: product.createdAt, updatedAt: product.updatedAt,
@@ -52,7 +52,7 @@ export class IntegrationCatalogController {
   async detail(@Param('id', new ParseUUIDPipe({version:'4'})) id: string) {
     const product = await this.products.findOne(id);
     return {
-      id:product.id, name:product.name,sku:product.sku,description:product.description,brand:product.brand,
+      id:product.id, name:product.name,sku:product.sku,description:product.description,brand:product.brand,phytocannabinoids:product.phytocannabinoids,
       imageUrl:product.imageUrl,coaUrl:product.coaUrl,coaBatch:product.coaBatch,
       coaAnalyzedAt:product.coaAnalyzedAt,coaValidUntil:product.coaValidUntil,
       createdAt:product.createdAt,updatedAt:product.updatedAt,
