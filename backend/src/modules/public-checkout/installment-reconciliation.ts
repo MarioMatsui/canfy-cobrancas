@@ -124,34 +124,51 @@ export async function reconcileInstallmentGroup(
         },
       });
 
-      // These aggregate values are for the whole order, never multiplied by N.
+      // Uma subconta pode receber mais de um ChargeSplit (vários produtos).
+      // Consolide antes de gravar o resultado da VENDA inteira.
+      const totalsByRecipient = new Map<string, {
+        walletId: string;
+        locked: Prisma.Decimal;
+        percentage: Prisma.Decimal | null;
+        rows: number;
+      }>();
       for (const split of payment.charge.splits) {
         const walletId = split.subaccount.walletId;
         if (!walletId) continue;
+        const current = totalsByRecipient.get(split.subaccountId);
+        const splitValue = new Prisma.Decimal(split.calculatedValue ?? split.fixedValue ?? 0);
+        totalsByRecipient.set(split.subaccountId, {
+          walletId,
+          locked: (current?.locked ?? new Prisma.Decimal(0)).add(splitValue),
+          percentage: current ? null : split.percentage,
+          rows: (current?.rows ?? 0) + 1,
+        });
+      }
+      for (const [recipientId, details] of totalsByRecipient) {
         const providerSplits = members
-          .map((member) => member.split?.find((row) => row.walletId === walletId))
+          .map((member) => member.split?.find((row) => row.walletId === details.walletId))
           .filter((row): row is NonNullable<typeof row> => row != null);
         const fullyObserved = providerSplits.length === members.length &&
           providerSplits.every((row) => typeof row.totalValue === 'number');
         const aggregate = fullyObserved
           ? providerSplits.reduce((sum, row) => sum + (row.totalValue ?? 0), 0)
-          : Number(split.calculatedValue ?? split.fixedValue ?? 0);
+          : Number(details.locked);
         const fullySettled = fullyObserved && providerSplits.every(
           (row) => row.status === 'DONE' || row.status === 'COMPLETED',
         );
         await tx.splitResult.upsert({
           where: {
             paymentId_receiverSubaccountId: {
-              paymentId: payment.id, receiverSubaccountId: split.subaccountId,
+              paymentId: payment.id, receiverSubaccountId: recipientId,
             },
           },
           create: {
             chargeId: payment.chargeId,
             paymentId: payment.id,
-            receiverSubaccountId: split.subaccountId,
+            receiverSubaccountId: recipientId,
             value: new Prisma.Decimal(aggregate).toDecimalPlaces(2),
-            fixedValue: split.calculatedValue ?? split.fixedValue,
-            percentage: split.percentage,
+            fixedValue: details.locked.toDecimalPlaces(2),
+            percentage: details.rows === 1 ? details.percentage : null,
             status: fullySettled ? 'COMPLETED' : 'PENDING',
           },
           update: {
