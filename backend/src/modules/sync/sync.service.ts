@@ -407,7 +407,7 @@ export class SyncService {
   }
 
   private async cancelProviderPaymentBestEffort(
-    payment: Pick<NewPaymentRecord, 'id' | 'providerPaymentId'>,
+    payment: Pick<NewPaymentRecord, 'id' | 'providerPaymentId' | 'providerInstallmentId' | 'installments'>,
   ): Promise<void> {
     if (!payment.providerPaymentId) {
       await this.prisma.payment.update({
