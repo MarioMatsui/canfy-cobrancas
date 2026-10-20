@@ -4,6 +4,8 @@ import { PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
   cancelUnpaidInstallmentGroup,
+  getInstallmentMembers,
+  memberPaid,
   reconcileInstallmentGroup,
 } from '../public-checkout/installment-reconciliation';
 import {
@@ -370,6 +372,26 @@ export class SyncService {
           where: { id: alternative.id },
           data: { status: PaymentStatus.CANCELLED },
         });
+        continue;
+      }
+
+      if (alternative.providerInstallmentId) {
+        try {
+          const members = await getInstallmentMembers(
+            this.asaas, alternative.providerInstallmentId, alternative.installments,
+          );
+          if (members.some((member) => memberPaid(member.status))) {
+            this.logger.error(
+              'Segundo meio de pagamento parcelado parcialmente pago. Revisão manual necessária.',
+            );
+          } else {
+            await this.cancelProviderPaymentBestEffort(alternative);
+          }
+        } catch {
+          this.logger.warn(
+            'Não foi possível encerrar parcelamento alternativo. Reavaliar no próximo sync.',
+          );
+        }
         continue;
       }
 
