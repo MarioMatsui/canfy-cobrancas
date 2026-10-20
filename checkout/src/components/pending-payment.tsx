@@ -61,6 +61,12 @@ export function PendingPayment({
             O pagamento é concluído na página segura da Asaas. Esta aba da Canfy pode permanecer aberta enquanto aguardamos a confirmação.
           </p>
 
+          <p className="mt-2 text-sm font-medium text-slate-700">
+            {payment.installments && payment.installments > 1
+              ? `Parcelamento escolhido: ${payment.installments}x no cartão.`
+              : 'Pagamento à vista no cartão.'}
+          </p>
+
           {invoiceUrl ? (
             <a href={invoiceUrl} target="_blank" rel="noopener noreferrer"
               className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-canfy-500 px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-canfy-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canfy-500 focus-visible:ring-offset-2 sm:w-auto">
