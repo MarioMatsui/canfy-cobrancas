@@ -1,6 +1,10 @@
 import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
+  IsArray,
+  ValidateIf,
+  ValidateNested,
   IsBoolean,
   IsEnum,
   IsInt,
@@ -41,7 +45,32 @@ const optionalTrimmed = ({ value }: { value: unknown }) => {
   return trimmed.length ? trimmed : undefined;
 };
 
+export class PhytocannabinoidInputDto {
+  @IsOptional()
+  @IsUUID('4')
+  id?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(80)
+  name?: string;
+}
+
 export class ListProductsDto {
+  @ApiPropertyOptional({ description: 'UUIDs separados por vírgula ou query params repetidos' })
+  @IsOptional()
+  @Transform(({value}) => typeof value === 'string' ? value.split(',').map(v => v.trim()).filter(Boolean) : value)
+  @IsArray()
+  @ArrayMaxSize(30)
+  @IsUUID('4', { each: true })
+  phytocannabinoidIds?: string[];
+
+  @ApiPropertyOptional({ enum: ['any', 'all'], default: 'any' })
+  @IsOptional()
+  @IsEnum(['any', 'all'])
+  phytocannabinoidMode?: 'any' | 'all';
+
   @IsOptional() @IsString() @MaxLength(120) brand?: string;
   @IsOptional() @Transform(({value}) => value === true || value === 'true') @IsBoolean() hasImage?: boolean;
   @IsOptional() @Transform(({value}) => value === true || value === 'true') @IsBoolean() hasCoa?: boolean;
@@ -109,6 +138,14 @@ export class ListProductsDto {
 }
 
 export class CreateProductDto {
+  @ApiPropertyOptional({ type: [PhytocannabinoidInputDto], description: 'Para cada item informe somente id OU name. O array substitui a seleção no PATCH.' })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsArray()
+  @ArrayMaxSize(30)
+  @ValidateNested({ each: true })
+  @Type(() => PhytocannabinoidInputDto)
+  phytocannabinoids?: PhytocannabinoidInputDto[];
+
 
   @ApiPropertyOptional({ description: 'Marca comercial, distinta da subconta fornecedora' })
   @IsOptional()
@@ -213,6 +250,14 @@ export class CreateProductDto {
 }
 
 export class UpdateProductDto {
+  @ApiPropertyOptional({ type: [PhytocannabinoidInputDto], description: 'Para cada item informe somente id OU name. O array substitui a seleção no PATCH.' })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsArray()
+  @ArrayMaxSize(30)
+  @ValidateNested({ each: true })
+  @Type(() => PhytocannabinoidInputDto)
+  phytocannabinoids?: PhytocannabinoidInputDto[];
+
 
   @ApiPropertyOptional({ description: 'Marca comercial, distinta da subconta fornecedora' })
   @IsOptional()
