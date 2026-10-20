@@ -601,11 +601,11 @@ export class IntegrationCreateChargeDto {
   @IsOptional()
   doctorSubaccountId?: string;
 
-  @ApiPropertyOptional({ minimum: 1, maximum: 24, default: 1 })
+  @ApiPropertyOptional({ minimum: 1, maximum: 12, default: 1 })
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(24)
+  @Max(12)
   @IsOptional()
   maxInstallments?: number;
 
