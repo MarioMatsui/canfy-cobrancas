@@ -64,6 +64,11 @@ describe('ProductsService', () => {
         findMany: jest.fn(),
         createMany: jest.fn(),
       },
+      productPhytocannabinoid: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
       $transaction: jest.fn((fn: (tx: any) => Promise<any>) => fn(prisma)),
     };
     service = new ProductsService(
@@ -344,19 +349,19 @@ describe('ProductsService', () => {
     expect(prisma.product.update.mock.calls[0][0].data).not.toHaveProperty('phytocannabinoids');
   });
 
-  it('PATCH com lista vazia remove apenas associações', async () => {
+  it('PATCH com lista vazia remove as associações existentes', async () => {
+    const id = '33333333-3333-4333-8333-333333333331';
     prisma.product.findUnique.mockResolvedValue(product());
-    prisma.subaccount.findFirst.mockResolvedValue(supplier());
     prisma.product.update.mockResolvedValue(product());
+    prisma.productPhytocannabinoid.findMany.mockResolvedValue([{ phytocannabinoidId: id }]);
 
     await service.update(product().id, { phytocannabinoids: [] });
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(prisma.product.update).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        phytocannabinoids: { deleteMany: {}, create: [] },
-      }),
-    }));
+    expect(prisma.productPhytocannabinoid.deleteMany).toHaveBeenCalledWith({
+      where: { productId: product().id, phytocannabinoidId: { in: [id] } },
+    });
+    expect(prisma.productPhytocannabinoid.createMany).not.toHaveBeenCalled();
   });
 
   it('rejeita UUID inexistente e tags repetidas sem persistir o produto', async () => {
@@ -411,7 +416,33 @@ describe('ProductsService', () => {
     expect(prisma.subaccount.findFirst).not.toHaveBeenCalled();
     expect(prisma.product.update).toHaveBeenCalledWith({
       where: { id: legacy.id },
-      data: { phytocannabinoids: { deleteMany: {}, create: [] } },
+      data: { updatedAt: expect.any(Date) },
+    });
+    expect(prisma.productPhytocannabinoid.findMany).toHaveBeenCalledWith({
+      where: { productId: legacy.id },
+      select: { phytocannabinoidId: true },
+    });
+  });
+
+  it('na edição mantém associações iguais e sincroniza somente a diferença', async () => {
+    const cbd = '33333333-3333-4333-8333-333333333331';
+    const cbg = '33333333-3333-4333-8333-333333333332';
+    const thc = '33333333-3333-4333-8333-333333333333';
+    prisma.product.findUnique.mockResolvedValue(product());
+    prisma.product.update.mockResolvedValue(product());
+    prisma.phytocannabinoid.findMany.mockResolvedValue([{id:cbd},{id:thc}]);
+    prisma.productPhytocannabinoid.findMany.mockResolvedValue([
+      {phytocannabinoidId:cbd}, {phytocannabinoidId:cbg},
+    ]);
+
+    await service.update(product().id, { phytocannabinoids: [{id:cbd},{id:thc}] });
+
+    expect(prisma.productPhytocannabinoid.deleteMany).toHaveBeenCalledWith({
+      where: { productId: product().id, phytocannabinoidId: { in: [cbg] } },
+    });
+    expect(prisma.productPhytocannabinoid.createMany).toHaveBeenCalledWith({
+      data: [{ productId: product().id, phytocannabinoidId: thc }],
+      skipDuplicates: true,
     });
   });
 
