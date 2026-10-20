@@ -47,6 +47,8 @@ export async function getInstallmentMembers(
     members.length !== expectedCount ||
     members.some((item) => !item.id || !item.status || !Number.isFinite(item.value)) ||
     new Set(members.map((item) => item.id)).size !== expectedCount ||
+    members.some((member) => member.installment != null &&
+      member.installment !== installmentId) ||
     members.some((member) =>
       member.installmentNumber != null &&
       (!Number.isInteger(member.installmentNumber) ||
@@ -83,6 +85,10 @@ export async function reconcileInstallmentGroup(
   const members = await getInstallmentMembers(
     asaas, payment.providerInstallmentId, payment.installments,
   );
+  if (!payment.providerPaymentId ||
+      !members.some((member) => member.id === payment.providerPaymentId)) {
+    throw new Error('ASAAS_INSTALLMENT_FIRST_PAYMENT_MISMATCH');
+  }
   // Fail closed if the provider sent an incomplete or economically different group.
   const cents = (value: number) => Math.round(value * 100);
   if (members.reduce((sum, item) => sum + cents(item.value!), 0) !== cents(Number(payment.amount))) {
