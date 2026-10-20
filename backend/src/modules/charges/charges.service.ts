@@ -496,7 +496,7 @@ export class ChargesService {
           data: { orderStatus: 'CANCELLED', status: 'CANCELLED', isActive: false },
         });
       },
-      { maxWait: 5_000, timeout: 30_000 },
+      { maxWait: 5_000, timeout: 95_000 },
     );
   }
 
