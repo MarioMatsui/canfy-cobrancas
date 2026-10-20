@@ -30,7 +30,11 @@ import {
   PublicShipmentType,
 } from './dto/public-charge.response.dto';
 import { StartPublicPaymentDto } from './dto/start-public-payment.dto';
-import { cancelUnpaidInstallmentGroup } from './installment-reconciliation';
+import {
+  cancelUnpaidInstallmentGroup,
+  getInstallmentMembers,
+  memberPaid,
+} from './installment-reconciliation';
 
 const PUBLIC_TOKEN_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -927,6 +931,24 @@ export class PublicCheckoutService {
       }
 
       try {
+        if (alternative.providerInstallmentId) {
+          const members = await getInstallmentMembers(
+            this.asaas, alternative.providerInstallmentId, alternative.installments,
+          );
+          if (members.some((member) => memberPaid(member.status))) {
+            this.logger.error(
+              'Método alternativo parcelado tem ao menos uma parcela confirmada. Revisão manual necessária.',
+            );
+            continue;
+          }
+          await cancelUnpaidInstallmentGroup(
+            this.asaas, alternative.providerInstallmentId, alternative.installments,
+          );
+          await tx.payment.update({
+            where: { id: alternative.id }, data: { status: PaymentStatus.CANCELLED },
+          });
+          continue;
+        }
         const remote = await this.asaas.get<AsaasPayment>(
           '/payments/' + encodeURIComponent(alternative.providerPaymentId),
         );
