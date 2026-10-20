@@ -253,12 +253,43 @@ model Product {
 
   supplier    Subaccount?  @relation(fields: [supplierSubaccountId], references: [id], onDelete: SetNull)
   chargeItems ChargeItem[]
+  phytocannabinoids ProductPhytocannabinoid[]
 
   @@index([supplierSubaccountId])
   @@index([productType])
   @@index([active])
   @@index([brand])
   @@map("products")
+}
+
+// =====================================================================
+// FITOCANABINOIDES — catálogo global reutilizável e associação N:N.
+// =====================================================================
+
+model Phytocannabinoid {
+  id             String   @id @default(uuid())
+  name           String   @db.VarChar(80)
+  normalizedName String   @unique @map("normalized_name") @db.VarChar(80)
+  fullName       String?  @map("full_name") @db.VarChar(120)
+  isDefault      Boolean  @default(false) @map("is_default")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  products ProductPhytocannabinoid[]
+
+  @@map("phytocannabinoids")
+}
+
+model ProductPhytocannabinoid {
+  productId         String @map("product_id")
+  phytocannabinoidId String @map("phytocannabinoid_id")
+
+  product          Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  phytocannabinoid Phytocannabinoid @relation(fields: [phytocannabinoidId], references: [id], onDelete: Restrict)
+
+  @@id([productId, phytocannabinoidId])
+  @@index([phytocannabinoidId])
+  @@map("product_phytocannabinoids")
 }
 
 // =====================================================================
