@@ -3,6 +3,10 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
+  cancelUnpaidInstallmentGroup,
+  reconcileInstallmentGroup,
+} from '../public-checkout/installment-reconciliation';
+import {
   AsaasApiException,
   AsaasService,
 } from '../../asaas/asaas.service';
@@ -132,6 +136,11 @@ export class SyncService {
       if (!payment.providerPaymentId) continue;
 
       try {
+        if (payment.providerInstallmentId) {
+          await reconcileInstallmentGroup(this.prisma, this.asaas, payment.id);
+          updated++;
+          continue;
+        }
         const remote = await this.asaas.get<AsaasPaymentDetail>(
           '/payments/' + encodeURIComponent(payment.providerPaymentId),
         );
@@ -409,9 +418,15 @@ export class SyncService {
     }
 
     try {
-      await this.asaas.delete<void>(
-        '/payments/' + encodeURIComponent(payment.providerPaymentId),
-      );
+      if (payment.providerInstallmentId) {
+        await cancelUnpaidInstallmentGroup(
+          this.asaas, payment.providerInstallmentId, payment.installments,
+        );
+      } else {
+        await this.asaas.delete<void>(
+          '/payments/' + encodeURIComponent(payment.providerPaymentId),
+        );
+      }
       await this.prisma.payment.update({
         where: { id: payment.id },
         data: { status: PaymentStatus.CANCELLED },
