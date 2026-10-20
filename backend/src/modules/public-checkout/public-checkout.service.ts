@@ -778,19 +778,22 @@ export class PublicCheckoutService {
     dueDate: Date,
     installments: number,
   ): Record<string, unknown> {
-    const split = charge.splits
-      .filter((row) => row.calculatedValue != null && Number(row.calculatedValue) > 0)
-      .map((row) => {
-        if (!row.subaccount.walletId) {
-          throw new Error('SPLIT_WALLET_MISSING');
-        }
-        return {
-          walletId: row.subaccount.walletId,
-          ...(installments > 1
-            ? { totalFixedValue: this.decimalToNumber(row.calculatedValue) }
-            : { fixedValue: this.decimalToNumber(row.calculatedValue) }),
-        };
-      });
+    // A mesma subconta pode receber splits de mais de um item do pedido.
+    // O provedor recebe UM único total por wallet, sem multiplicar por parcela.
+    const splitCentsByWallet = new Map<string, number>();
+    for (const row of charge.splits) {
+      if (row.calculatedValue == null || Number(row.calculatedValue) <= 0) continue;
+      const walletId = row.subaccount.walletId;
+      if (!walletId) throw new Error('SPLIT_WALLET_MISSING');
+      const cents = Math.round(this.decimalToNumber(row.calculatedValue) * 100);
+      splitCentsByWallet.set(walletId, (splitCentsByWallet.get(walletId) ?? 0) + cents);
+    }
+    const split = Array.from(splitCentsByWallet, ([walletId, cents]) => ({
+      walletId,
+      ...(installments > 1
+        ? { totalFixedValue: cents / 100 }
+        : { fixedValue: cents / 100 }),
+    }));
 
     if (charge.splits.some((row) => row.calculatedValue == null)) {
       throw new Error('LOCKED_SPLIT_VALUE_MISSING');
