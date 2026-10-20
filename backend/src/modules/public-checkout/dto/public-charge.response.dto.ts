@@ -46,6 +46,9 @@ export class PublicChargeShipmentDto {
 }
 
 export class PublicActivePaymentDto {
+  @ApiProperty({ example: 4 })
+  installments!: number;
+
   @ApiProperty({ enum: ['PIX', 'CARD'], example: 'PIX' })
   method!: PublicPaymentMethod;
 
