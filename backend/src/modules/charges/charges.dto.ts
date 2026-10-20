@@ -194,11 +194,11 @@ export class CreateChargeDto {
   @IsOptional()
   doctorSubaccountId?: string;
 
-  @ApiPropertyOptional({ example: 4, description: 'Máximo de parcelas permitido no checkout (1-24).' })
+  @ApiPropertyOptional({ example: 4, description: 'Máximo de parcelas permitido no checkout (1-12; limite conservador entre bandeiras).' })
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(24)
+  @Max(12)
   @IsOptional()
   maxInstallments?: number;
 
