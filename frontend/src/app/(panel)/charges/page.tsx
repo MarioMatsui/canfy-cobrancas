@@ -941,7 +941,7 @@ export default function ChargesPage() {
               value={maxInstallments}
               onChange={(event) => setMaxInstallments(Number(event.target.value))}
             >
-              {Array.from({ length: 24 }, (_, index) => index + 1).map((installments) => (
+              {Array.from({ length: 12 }, (_, index) => index + 1).map((installments) => (
                 <option key={installments} value={installments}>
                   até {installments}x
                 </option>
