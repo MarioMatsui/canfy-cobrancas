@@ -19,6 +19,7 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { useAuth } from '@/contexts/auth';
+import { PhytocannabinoidPicker, type Phytocannabinoid, type PhytocannabinoidTag } from './phytocannabinoids-picker';
 
 type ProductType = 'OIL' | 'GUMMY' | 'CAPSULE' | 'CREAM' | 'NASAL_SPRAY';
 type FulfillmentType = 'NATIONAL' | 'INTERNATIONAL';
@@ -61,6 +62,7 @@ type Product = {
   eligible: boolean;
   eligibilityIssues: string[];
   supplier: Supplier | null;
+  phytocannabinoids: Phytocannabinoid[];
 };
 
 type PageResponse = {
@@ -87,6 +89,7 @@ type FormState = {
   name: string;
   sku: string;
   description: string;
+  phytocannabinoids: PhytocannabinoidTag[];
   brand: string;
   imageUrl: string;
   coaUrl: string;
@@ -107,6 +110,7 @@ const emptyForm = (): FormState => ({
   name: '',
   sku: '',
   description: '',
+  phytocannabinoids: [],
   brand: '',
   imageUrl: '',
   coaUrl: '',
@@ -192,6 +196,13 @@ export default function ProductsPage() {
     enabled: isAdmin,
   });
 
+  const phytocannabinoidsQuery = useQuery<Phytocannabinoid[]>({
+    queryKey: ['product-phytocannabinoids'],
+    queryFn: () => api.get('/products/phytocannabinoids').then(response => response.data),
+    enabled: isAdmin && showForm,
+    staleTime: 60_000,
+  });
+
   const suppliersQuery = useQuery<SupplierResponse>({
     queryKey: ['product-suppliers'],
     queryFn: () =>
@@ -269,6 +280,7 @@ export default function ProductsPage() {
       name: product.name,
       sku: product.sku || '',
       description: product.description || '',
+      phytocannabinoids: (product.phytocannabinoids || []).map(tag => ({ id: tag.id, name: tag.name, fullName: tag.fullName })),
       brand: product.brand || '',
       imageUrl: product.imageUrl || '',
       coaUrl: product.coaUrl || '',
@@ -320,6 +332,7 @@ export default function ProductsPage() {
     name: form.name.trim(),
     sku: form.sku.trim() || null,
     description: form.description.trim() || null,
+    phytocannabinoids: form.phytocannabinoids.map(tag => tag.id ? { id: tag.id } : { name: tag.name }),
     brand: form.brand.trim() || null,
     imageUrl: form.imageUrl.trim() || null,
     coaUrl: form.coaUrl.trim() || null,
@@ -339,6 +352,7 @@ export default function ProductsPage() {
   const validate = () => {
     const errors: Record<string, string> = {};
     if (!form.name.trim()) errors.name = 'Informe o nome do produto.';
+    if (form.phytocannabinoids.length > 30) errors.phytocannabinoids = 'Limite de 30 fitocanabinoides.';
     if (form.brand.length > 120) errors.brand = 'Máximo de 120 caracteres.';
     for (const key of ['imageUrl','coaUrl'] as const) {
       if (form[key] && !/^https?:\/\//.test(form[key])) errors[key] = 'Informe um endereço HTTP(S) válido.';
@@ -361,6 +375,7 @@ export default function ProductsPage() {
   const invalidateCatalog = () => {
     queryClient.invalidateQueries({ queryKey: ['products'] });
     queryClient.invalidateQueries({ queryKey: ['products-active'] });
+    queryClient.invalidateQueries({ queryKey: ['product-phytocannabinoids'] });
   };
 
   const saveMutation = useMutation({
@@ -701,7 +716,9 @@ export default function ProductsPage() {
               </button>
             </div>
 
-            <div className="space-y-7 p-6" onChangeCapture={() => setDirty(true)}>
+            <div className="space-y-7 p-6" onChangeCapture={event => {
+              if ((event.target as HTMLInputElement).dataset.phytocannabinoidSearch !== 'true') setDirty(true);
+            }}>
               <section>
                 <h3 className="mb-3 font-semibold text-gray-900">1. Informações básicas</h3>
                 <div className="grid gap-4 md:grid-cols-2">
@@ -745,6 +762,21 @@ export default function ProductsPage() {
                         className="w-full rounded-lg border px-3 py-2 text-sm"
                       />
                     </Field>
+                  </div>
+                  <div className="md:col-span-2">
+                    <PhytocannabinoidPicker
+                      value={form.phytocannabinoids}
+                      onChange={tags => {
+                        setForm(current => ({ ...current, phytocannabinoids: tags }));
+                        setDirty(true);
+                      }}
+                      options={phytocannabinoidsQuery.data || []}
+                      loading={phytocannabinoidsQuery.isLoading}
+                      error={phytocannabinoidsQuery.isError}
+                      onRetry={() => { void phytocannabinoidsQuery.refetch(); }}
+                      disabled={saveMutation.isPending}
+                    />
+                    {fieldErrors.phytocannabinoids && <p className="mt-1 text-xs text-red-600">{fieldErrors.phytocannabinoids}</p>}
                   </div>
                 </div>
               </section>

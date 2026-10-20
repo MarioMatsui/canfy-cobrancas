@@ -43,6 +43,13 @@ export class ProductsController {
     return this.productsService.getUsdBrlQuote();
   }
 
+  @Get('phytocannabinoids')
+  @ApiOperation({ summary: 'Listar fitocanabinoides globais disponíveis no catálogo' })
+  listPhytocannabinoids(@Query('search') search: string | undefined, @Request() req: AuthRequest) {
+    this.assertAdmin(req);
+    return this.productsService.listPhytocannabinoids(search);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Buscar produto por ID' })
   findOne(@Param('id') id: string) {
