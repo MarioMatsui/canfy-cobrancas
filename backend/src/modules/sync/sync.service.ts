@@ -137,6 +137,27 @@ export class SyncService {
 
       try {
         if (payment.providerInstallmentId) {
+          if (payment.charge.orderStatus === 'PAID') {
+            const otherPaid = await this.prisma.payment.count({
+              where: {
+                chargeId: payment.chargeId,
+                id: { not: payment.id },
+                status: { in: [PaymentStatus.CONFIRMED, PaymentStatus.RECEIVED] },
+              },
+            });
+            if (otherPaid > 0) {
+              // Another method paid this order. Do not leave a second card
+              // installment group open or overwrite the winning payment.
+              await cancelUnpaidInstallmentGroup(
+                this.asaas, payment.providerInstallmentId, payment.installments,
+              );
+              await this.prisma.payment.update({
+                where: { id: payment.id }, data: { status: PaymentStatus.CANCELLED },
+              });
+              updated++;
+              continue;
+            }
+          }
           await reconcileInstallmentGroup(this.prisma, this.asaas, payment.id);
           updated++;
           continue;
