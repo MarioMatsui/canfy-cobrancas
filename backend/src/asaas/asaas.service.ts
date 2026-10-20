@@ -109,9 +109,10 @@ export class AsaasService {
   private async fetchWithTimeout(
     url: string,
     options: RequestInit,
+    timeoutMs = this.requestTimeoutMs,
   ): Promise<Response> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       return await fetch(url, {
@@ -139,7 +140,11 @@ export class AsaasService {
       options.body = JSON.stringify(body);
     }
 
-    const response = await this.fetchWithTimeout(url, options);
+    const response = await this.fetchWithTimeout(
+      url, options,
+      method === 'DELETE' && /^\/installments\/[^/]+\/payments$/.test(path)
+        ? Math.max(this.requestTimeoutMs, 65_000) : this.requestTimeoutMs,
+    );
 
     if (!response.ok) {
       const error = await this.parseErrorBody(response);
@@ -186,7 +191,11 @@ export class AsaasService {
       options.body = JSON.stringify(body);
     }
 
-    const response = await this.fetchWithTimeout(url, options);
+    const response = await this.fetchWithTimeout(
+      url, options,
+      method === 'DELETE' && /^\/installments\/[^/]+\/payments$/.test(path)
+        ? Math.max(this.requestTimeoutMs, 65_000) : this.requestTimeoutMs,
+    );
 
     if (!response.ok) {
       const error = await this.parseErrorBody(response);
