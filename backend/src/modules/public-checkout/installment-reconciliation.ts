@@ -30,9 +30,17 @@ export async function getInstallmentMembers(
   installmentId: string,
   expectedCount: number,
 ): Promise<AsaasInstallmentMember[]> {
-  const response = await asaas.get<MemberList>(
+  let response = await asaas.get<MemberList>(
     '/installments/' + encodeURIComponent(installmentId) + '/payments',
   );
+  // Some Asaas list endpoints paginate. The general payments endpoint
+  // explicitly supports limit=100 + the installment filter. Never infer
+  // group completeness from only the first page.
+  if (response.hasMore || (response.data ?? []).length !== expectedCount) {
+    response = await asaas.get<MemberList>(
+      '/payments?installment=' + encodeURIComponent(installmentId) + '&limit=100&offset=0',
+    );
+  }
   const members = response.data ?? [];
   if (
     response.hasMore ||
