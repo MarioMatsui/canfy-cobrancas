@@ -260,6 +260,7 @@ export function PhytocannabinoidPicker({
         <input
           ref={inputRef}
           id={id + '-input'}
+          data-phytocannabinoid-search="true"
           type="text"
           role="combobox"
           aria-autocomplete="list"
