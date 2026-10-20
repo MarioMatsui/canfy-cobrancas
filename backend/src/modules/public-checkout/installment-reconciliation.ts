@@ -38,7 +38,12 @@ export async function getInstallmentMembers(
     response.hasMore ||
     members.length !== expectedCount ||
     members.some((item) => !item.id || !item.status || !Number.isFinite(item.value)) ||
-    new Set(members.map((item) => item.id)).size !== expectedCount
+    new Set(members.map((item) => item.id)).size !== expectedCount ||
+    members.some((member) =>
+      member.installmentNumber != null &&
+      (!Number.isInteger(member.installmentNumber) ||
+        member.installmentNumber < 1 || member.installmentNumber > expectedCount)
+    )
   ) {
     throw new Error('ASAAS_INSTALLMENT_MEMBERS_INCOMPLETE');
   }
@@ -131,6 +136,9 @@ export async function reconcileInstallmentGroup(
         const aggregate = fullyObserved
           ? providerSplits.reduce((sum, row) => sum + (row.totalValue ?? 0), 0)
           : Number(split.calculatedValue ?? split.fixedValue ?? 0);
+        const fullySettled = fullyObserved && providerSplits.every(
+          (row) => row.status === 'DONE' || row.status === 'COMPLETED',
+        );
         await tx.splitResult.upsert({
           where: {
             paymentId_receiverSubaccountId: {
@@ -144,10 +152,11 @@ export async function reconcileInstallmentGroup(
             value: new Prisma.Decimal(aggregate).toDecimalPlaces(2),
             fixedValue: split.calculatedValue ?? split.fixedValue,
             percentage: split.percentage,
-            status: 'PENDING',
+            status: fullySettled ? 'COMPLETED' : 'PENDING',
           },
           update: {
             value: new Prisma.Decimal(aggregate).toDecimalPlaces(2),
+            status: fullySettled ? 'COMPLETED' : 'PENDING',
           },
         });
       }
