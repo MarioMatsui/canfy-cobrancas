@@ -191,7 +191,7 @@ export class CreateProductDto {
   @IsOptional()
   @Transform(optionalTrimmed)
   @IsString()
-  @MaxLength(100)
+  @MaxLength(200)
   sku?: string;
 
   @ApiPropertyOptional()
@@ -309,7 +309,7 @@ export class UpdateProductDto {
     return trimmed.length ? trimmed : null;
   })
   @IsString()
-  @MaxLength(100)
+  @MaxLength(200)
   sku?: string | null;
 
   @ApiPropertyOptional()
