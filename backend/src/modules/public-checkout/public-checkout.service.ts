@@ -1,4 +1,6 @@
 import {
+  BadRequestException,
+  ConflictException,
   GoneException,
   Injectable,
   Logger,
@@ -28,6 +30,11 @@ import {
   PublicShipmentType,
 } from './dto/public-charge.response.dto';
 import { StartPublicPaymentDto } from './dto/start-public-payment.dto';
+import {
+  cancelUnpaidInstallmentGroup,
+  getInstallmentMembers,
+  memberPaid,
+} from './installment-reconciliation';
 
 const PUBLIC_TOKEN_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -84,6 +91,8 @@ const PUBLIC_CHARGE_SELECT = {
   payments: {
     select: {
       providerPaymentId: true,
+      providerInstallmentId: true,
+      installments: true,
       billingType: true,
       amount: true,
       status: true,
@@ -107,6 +116,7 @@ const START_CHARGE_SELECT = {
   dueDate: true,
   description: true,
   totalAmount: true,
+  maxInstallments: true,
   customer: {
     select: {
       id: true,
@@ -133,6 +143,8 @@ const START_CHARGE_SELECT = {
     select: {
       id: true,
       providerPaymentId: true,
+      providerInstallmentId: true,
+      installments: true,
       billingType: true,
       amount: true,
       status: true,
@@ -153,6 +165,7 @@ type StartPaymentRecord = StartChargeRecord['payments'][number];
 
 type AsaasPayment = {
   id: string;
+  installment?: string | null;
   status?: string;
   value?: number;
   billingType?: string;
@@ -206,7 +219,9 @@ export class PublicCheckoutService {
   ): Promise<PublicPaymentStartResponseDto> {
     this.assertToken(token);
 
-    let providerPaymentCreatedDuringTransaction: string | undefined;
+    let providerPaymentCreatedDuringTransaction:
+      | { id: string; installmentId?: string; count: number }
+      | undefined;
     let outcome: StartOutcome;
 
     try {
@@ -244,6 +259,14 @@ export class PublicCheckoutService {
           this.assertPayableTotal(charge.totalAmount);
 
           const billingType = this.billingTypeFor(dto.method);
+          const installments = dto.method === 'CARD' ? (dto.installments ?? 1) : 1;
+          if (dto.method !== 'CARD' && dto.installments != null && dto.installments !== 1) {
+            throw new BadRequestException('Pix não permite parcelamento');
+          }
+          if (!Number.isInteger(installments) || installments < 1 ||
+              installments > Math.min(charge.maxInstallments ?? 1, 12)) {
+            throw new BadRequestException('Quantidade de parcelas não permitida para este pedido');
+          }
           const activePayments = charge.payments.filter((payment) =>
             ACTIVE_PAYMENT_STATUSES.has(payment.status),
           );
@@ -252,6 +275,12 @@ export class PublicCheckoutService {
           );
 
           if (sameMethod) {
+            if ((sameMethod.installments ?? 1) !== installments) {
+              throw new ConflictException(
+                'Já existe uma fatura de cartão para este pedido com outro parcelamento. ' +
+                'Ela precisa ser cancelada antes de criar uma nova.',
+              );
+            }
             const resumed = await this.resumePayment(tx, charge, sameMethod, dto.method);
             return resumed;
           }
@@ -290,7 +319,7 @@ export class PublicCheckoutService {
               provider: 'ASAAS',
               billingType,
               amount: charge.totalAmount,
-              installments: 1,
+              installments,
               status: 'PENDING',
               dueDate,
             },
@@ -308,18 +337,27 @@ export class PublicCheckoutService {
               asaasCustomerId,
               dto.method,
               dueDate,
+              installments,
             );
 
             const remote = await this.asaas.post<AsaasPayment>('/payments', providerPayload);
             if (!remote?.id) {
               throw new Error('PROVIDER_PAYMENT_ID_MISSING');
             }
-            providerPaymentCreatedDuringTransaction = remote.id;
+            providerPaymentCreatedDuringTransaction = {
+              id: remote.id,
+              installmentId: remote.installment ?? undefined,
+              count: installments,
+            };
+            if (installments > 1 && !remote.installment) {
+              throw new Error('PROVIDER_INSTALLMENT_ID_MISSING');
+            }
 
             await tx.payment.update({
               where: { id: paymentId },
               data: {
                 providerPaymentId: remote.id,
+                providerInstallmentId: remote.installment ?? null,
                 invoiceUrl: remote.invoiceUrl ?? null,
                 bankSlipUrl: remote.bankSlipUrl ?? null,
                 status: this.paymentStatusFromProvider(remote.status),
@@ -337,6 +375,8 @@ export class PublicCheckoutService {
             const payment: StartPaymentRecord = {
               id: paymentId,
               providerPaymentId: remote.id,
+              providerInstallmentId: remote.installment ?? null,
+              installments,
               billingType,
               amount: charge.totalAmount,
               status: this.paymentStatusFromProvider(remote.status),
@@ -387,7 +427,8 @@ export class PublicCheckoutService {
       if (providerPaymentCreatedDuringTransaction) {
         await this.compensateProviderPayment(providerPaymentCreatedDuringTransaction);
       }
-      if (error instanceof NotFoundException || error instanceof GoneException) {
+      if (error instanceof NotFoundException || error instanceof GoneException ||
+          error instanceof BadRequestException || error instanceof ConflictException) {
         throw error;
       }
       this.logger.error('Falha interna ao iniciar pagamento público.');
@@ -658,6 +699,7 @@ export class PublicCheckoutService {
       where: { id: payment.id },
       data: {
         providerPaymentId: remote.id,
+        providerInstallmentId: remote.installment ?? null,
         invoiceUrl: remote.invoiceUrl ?? null,
         bankSlipUrl: remote.bankSlipUrl ?? null,
         status,
@@ -667,6 +709,7 @@ export class PublicCheckoutService {
     return {
       ...payment,
       providerPaymentId: remote.id,
+      providerInstallmentId: remote.installment ?? null,
       invoiceUrl: remote.invoiceUrl ?? null,
       status,
     };
@@ -733,18 +776,24 @@ export class PublicCheckoutService {
     asaasCustomerId: string,
     method: PublicPaymentMethod,
     dueDate: Date,
+    installments: number,
   ): Record<string, unknown> {
-    const split = charge.splits
-      .filter((row) => row.calculatedValue != null && Number(row.calculatedValue) > 0)
-      .map((row) => {
-        if (!row.subaccount.walletId) {
-          throw new Error('SPLIT_WALLET_MISSING');
-        }
-        return {
-          walletId: row.subaccount.walletId,
-          fixedValue: this.decimalToNumber(row.calculatedValue),
-        };
-      });
+    // A mesma subconta pode receber splits de mais de um item do pedido.
+    // O provedor recebe UM único total por wallet, sem multiplicar por parcela.
+    const splitCentsByWallet = new Map<string, number>();
+    for (const row of charge.splits) {
+      if (row.calculatedValue == null || Number(row.calculatedValue) <= 0) continue;
+      const walletId = row.subaccount.walletId;
+      if (!walletId) throw new Error('SPLIT_WALLET_MISSING');
+      const cents = Math.round(this.decimalToNumber(row.calculatedValue) * 100);
+      splitCentsByWallet.set(walletId, (splitCentsByWallet.get(walletId) ?? 0) + cents);
+    }
+    const split = Array.from(splitCentsByWallet, ([walletId, cents]) => ({
+      walletId,
+      ...(installments > 1
+        ? { totalFixedValue: cents / 100 }
+        : { fixedValue: cents / 100 }),
+    }));
 
     if (charge.splits.some((row) => row.calculatedValue == null)) {
       throw new Error('LOCKED_SPLIT_VALUE_MISSING');
@@ -753,7 +802,9 @@ export class PublicCheckoutService {
     const payload: Record<string, unknown> = {
       customer: asaasCustomerId,
       billingType: this.billingTypeFor(method),
-      value: this.decimalToNumber(charge.totalAmount),
+      ...(installments > 1
+        ? { installmentCount: installments, totalValue: this.decimalToNumber(charge.totalAmount) }
+        : { value: this.decimalToNumber(charge.totalAmount) }),
       dueDate: this.formatAsaasDate(dueDate),
       externalReference: this.externalReference(paymentId),
       split,
@@ -868,6 +919,8 @@ export class PublicCheckoutService {
       select: {
         id: true,
         providerPaymentId: true,
+        providerInstallmentId: true,
+        installments: true,
       },
     });
 
@@ -881,6 +934,24 @@ export class PublicCheckoutService {
       }
 
       try {
+        if (alternative.providerInstallmentId) {
+          const members = await getInstallmentMembers(
+            this.asaas, alternative.providerInstallmentId, alternative.installments,
+          );
+          if (members.some((member) => memberPaid(member.status))) {
+            this.logger.error(
+              'Método alternativo parcelado tem ao menos uma parcela confirmada. Revisão manual necessária.',
+            );
+            continue;
+          }
+          await cancelUnpaidInstallmentGroup(
+            this.asaas, alternative.providerInstallmentId, alternative.installments,
+          );
+          await tx.payment.update({
+            where: { id: alternative.id }, data: { status: PaymentStatus.CANCELLED },
+          });
+          continue;
+        }
         const remote = await this.asaas.get<AsaasPayment>(
           '/payments/' + encodeURIComponent(alternative.providerPaymentId),
         );
@@ -911,9 +982,15 @@ export class PublicCheckoutService {
           continue;
         }
 
-        await this.asaas.delete<void>(
-          '/payments/' + encodeURIComponent(alternative.providerPaymentId),
-        );
+        if (alternative.providerInstallmentId) {
+          await cancelUnpaidInstallmentGroup(
+            this.asaas, alternative.providerInstallmentId, alternative.installments,
+          );
+        } else {
+          await this.asaas.delete<void>(
+            '/payments/' + encodeURIComponent(alternative.providerPaymentId),
+          );
+        }
         await tx.payment.update({
           where: { id: alternative.id },
           data: { status: PaymentStatus.CANCELLED },
@@ -1066,6 +1143,7 @@ export class PublicCheckoutService {
         {
           method: 'PIX',
           status: 'PENDING',
+          installments: 1,
           amount: this.decimalToNumber(charge.totalAmount ?? charge.value),
           ...(charge.pixQrCode ? { pixQrCode: charge.pixQrCode } : {}),
           ...(charge.pixCopiaECola ? { pixCopyPaste: charge.pixCopiaECola } : {}),
@@ -1081,6 +1159,7 @@ export class PublicCheckoutService {
         {
           method: 'CARD',
           status: 'PENDING',
+          installments: 1,
           amount: this.decimalToNumber(charge.totalAmount ?? charge.value),
           invoiceUrl: charge.invoiceUrl,
         },
@@ -1093,7 +1172,7 @@ export class PublicCheckoutService {
   private toPublicPayment(
     payment: Pick<
       StartPaymentRecord,
-      'billingType' | 'amount' | 'status' | 'invoiceUrl' | 'pixQrCode' | 'pixCopyPaste'
+      'billingType' | 'amount' | 'status' | 'invoiceUrl' | 'pixQrCode' | 'pixCopyPaste' | 'installments'
     >,
     pixExpirationDate?: string,
   ): PublicActivePaymentDto {
@@ -1104,6 +1183,7 @@ export class PublicCheckoutService {
     return {
       method,
       status,
+      installments: payment.installments ?? 1,
       amount: this.decimalToNumber(payment.amount),
       ...(payment.invoiceUrl ? { invoiceUrl: payment.invoiceUrl } : {}),
       ...(payment.pixQrCode ? { pixQrCode: payment.pixQrCode } : {}),
@@ -1243,13 +1323,21 @@ export class PublicCheckoutService {
     );
   }
 
-  private async compensateProviderPayment(providerPaymentId: string): Promise<void> {
+  private async compensateProviderPayment(
+    payment: { id: string; installmentId?: string; count: number },
+  ): Promise<void> {
     try {
-      await this.asaas.delete<void>(
-        '/payments/' + encodeURIComponent(providerPaymentId),
-      );
+      if (payment.count > 1) {
+        if (!payment.installmentId) {
+          this.logger.error('Parcelamento criado sem ID retornado. Não é seguro apagar apenas a primeira cobrança; reconciliação manual necessária.');
+          return;
+        }
+        await cancelUnpaidInstallmentGroup(this.asaas, payment.installmentId, payment.count);
+      } else {
+        await this.asaas.delete<void>('/payments/' + encodeURIComponent(payment.id));
+      }
     } catch {
-      this.logger.error('Falha ao compensar uma cobrança do provedor após erro local.');
+      this.logger.error('Falha ao compensar cobrança no Asaas. Conferir cobranças órfãs antes de nova tentativa.');
     }
   }
 }

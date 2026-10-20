@@ -93,6 +93,9 @@ function isActivePayment(value: unknown): value is PublicActivePayment {
     return false;
   }
   if (!isFiniteNumber(value.amount)) return false;
+  if (value.installments !== undefined &&
+      (typeof value.installments !== 'number' || !Number.isInteger(value.installments) ||
+        value.installments < 1 || value.installments > 12)) return false;
   if (!isOptionalString(value.invoiceUrl)) return false;
   if (!isOptionalString(value.pixQrCode)) return false;
   if (!isOptionalString(value.pixCopyPaste)) return false;
@@ -210,6 +213,7 @@ export async function loadPublicCharge(
 export async function startPublicPayment(
   publicToken: string,
   method: PaymentMethod,
+  installments?: number,
   signal?: AbortSignal,
 ): Promise<PublicPaymentStartResult> {
   try {
@@ -221,7 +225,10 @@ export async function startPublicPayment(
           Accept: 'application/json',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ method }),
+        body: JSON.stringify({
+          method,
+          ...(method === 'CARD' ? { installments: installments ?? 1 } : {}),
+        }),
         cache: 'no-store',
         credentials: 'same-origin',
       },

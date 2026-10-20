@@ -3,6 +3,12 @@ import { Logger } from '@nestjs/common';
 import { PaymentStatus, Prisma } from '@prisma/client';
 import { Job } from 'bull';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import {
+  cancelUnpaidInstallmentGroup,
+  getInstallmentMembers,
+  memberPaid,
+  reconcileInstallmentGroup,
+} from '../public-checkout/installment-reconciliation';
 import { AsaasApiException, AsaasService } from '../../asaas/asaas.service';
 import {
   AsaasWebhookPayload,
@@ -39,6 +45,40 @@ export class WebhooksProcessor {
     this.logger.log('Processando webhook: ' + event);
 
     try {
+      // Events may refer to any member of the group, not only the first ID.
+      // Never mark an installment sale paid from one PAYMENT_CONFIRMED.
+      if (payment && [
+        'PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED', 'PAYMENT_OVERDUE',
+        'PAYMENT_REFUNDED', 'PAYMENT_DELETED', 'PAYMENT_RESTORED',
+        'PAYMENT_CREDIT_CARD_CAPTURE_REFUSED', 'PAYMENT_REPROVED_BY_RISK_ANALYSIS',
+        'PAYMENT_SPLIT_DONE',
+      ].includes(event)) {
+        const grouped = await this.prisma.payment.findFirst({
+          where: {
+            provider: 'ASAAS',
+            OR: [
+              { providerPaymentId: payment.id },
+              ...(payment.installment ? [{ providerInstallmentId: payment.installment }] : []),
+              { installmentPayments: { some: { providerPaymentId: payment.id } } },
+            ],
+            providerInstallmentId: { not: null },
+          },
+          select: { id: true, chargeId: true, providerInstallmentId: true },
+        });
+        if (grouped?.providerInstallmentId) {
+          await this.attachLogToPayment(webhookLogId, grouped.id);
+          const result = await reconcileInstallmentGroup(this.prisma, this.asaas, grouped.id);
+          if (result === 'PAID') {
+            await this.cancelAlternativePayments(grouped.chargeId, grouped.id);
+          }
+          await this.prisma.webhookLog.update({
+            where: { id: webhookLogId },
+            data: { status: 'PROCESSED', processedAt: new Date(), errorMessage: null },
+          });
+          return;
+        }
+      }
+
       switch (event) {
         case 'PAYMENT_CONFIRMED':
         case 'PAYMENT_RECEIVED':
@@ -159,6 +199,8 @@ export class WebhooksProcessor {
       select: {
         id: true,
         providerPaymentId: true,
+        providerInstallmentId: true,
+        installments: true,
       },
     });
 
@@ -167,6 +209,25 @@ export class WebhooksProcessor {
         await this.prisma.payment.update({
           where: { id: alternative.id },
           data: { status: PaymentStatus.CANCELLED },
+        });
+        continue;
+      }
+
+      if (alternative.providerInstallmentId) {
+        const members = await getInstallmentMembers(
+          this.asaas, alternative.providerInstallmentId, alternative.installments,
+        );
+        if (members.some((member) => memberPaid(member.status))) {
+          this.logger.error(
+            'Parcelamento alternativo parcialmente/totalmente confirmado. Não cancelar nem marcar venda duplicada sem conciliação.',
+          );
+          continue;
+        }
+        await cancelUnpaidInstallmentGroup(
+          this.asaas, alternative.providerInstallmentId, alternative.installments,
+        );
+        await this.prisma.payment.update({
+          where: { id: alternative.id }, data: { status: PaymentStatus.CANCELLED },
         });
         continue;
       }
@@ -212,9 +273,15 @@ export class WebhooksProcessor {
         continue;
       }
 
-      await this.asaas.delete<void>(
-        '/payments/' + encodeURIComponent(alternative.providerPaymentId),
-      );
+      if (alternative.providerInstallmentId) {
+        await cancelUnpaidInstallmentGroup(
+          this.asaas, alternative.providerInstallmentId, alternative.installments,
+        );
+      } else {
+        await this.asaas.delete<void>(
+          '/payments/' + encodeURIComponent(alternative.providerPaymentId),
+        );
+      }
       await this.prisma.payment.update({
         where: { id: alternative.id },
         data: { status: PaymentStatus.CANCELLED },

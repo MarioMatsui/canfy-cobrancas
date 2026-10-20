@@ -10,6 +10,7 @@ export interface AsaasWebhookPayload {
   event: string;
   payment?: {
     id: string;
+    installment?: string | null;
     status: string;
     value: number;
     customer: string;

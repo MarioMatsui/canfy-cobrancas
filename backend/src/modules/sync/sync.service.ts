@@ -3,6 +3,12 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
+  cancelUnpaidInstallmentGroup,
+  getInstallmentMembers,
+  memberPaid,
+  reconcileInstallmentGroup,
+} from '../public-checkout/installment-reconciliation';
+import {
   AsaasApiException,
   AsaasService,
 } from '../../asaas/asaas.service';
@@ -132,6 +138,32 @@ export class SyncService {
       if (!payment.providerPaymentId) continue;
 
       try {
+        if (payment.providerInstallmentId) {
+          if (payment.charge.orderStatus === 'PAID') {
+            const otherPaid = await this.prisma.payment.count({
+              where: {
+                chargeId: payment.chargeId,
+                id: { not: payment.id },
+                status: { in: [PaymentStatus.CONFIRMED, PaymentStatus.RECEIVED] },
+              },
+            });
+            if (otherPaid > 0) {
+              // Another method paid this order. Do not leave a second card
+              // installment group open or overwrite the winning payment.
+              await cancelUnpaidInstallmentGroup(
+                this.asaas, payment.providerInstallmentId, payment.installments,
+              );
+              await this.prisma.payment.update({
+                where: { id: payment.id }, data: { status: PaymentStatus.CANCELLED },
+              });
+              updated++;
+              continue;
+            }
+          }
+          await reconcileInstallmentGroup(this.prisma, this.asaas, payment.id);
+          updated++;
+          continue;
+        }
         const remote = await this.asaas.get<AsaasPaymentDetail>(
           '/payments/' + encodeURIComponent(payment.providerPaymentId),
         );
@@ -343,6 +375,26 @@ export class SyncService {
         continue;
       }
 
+      if (alternative.providerInstallmentId) {
+        try {
+          const members = await getInstallmentMembers(
+            this.asaas, alternative.providerInstallmentId, alternative.installments,
+          );
+          if (members.some((member) => memberPaid(member.status))) {
+            this.logger.error(
+              'Segundo meio de pagamento parcelado parcialmente pago. Revisão manual necessária.',
+            );
+          } else {
+            await this.cancelProviderPaymentBestEffort(alternative);
+          }
+        } catch {
+          this.logger.warn(
+            'Não foi possível encerrar parcelamento alternativo. Reavaliar no próximo sync.',
+          );
+        }
+        continue;
+      }
+
       let remote: AsaasPaymentDetail;
       try {
         remote = await this.asaas.get<AsaasPaymentDetail>(
@@ -398,7 +450,7 @@ export class SyncService {
   }
 
   private async cancelProviderPaymentBestEffort(
-    payment: Pick<NewPaymentRecord, 'id' | 'providerPaymentId'>,
+    payment: Pick<NewPaymentRecord, 'id' | 'providerPaymentId' | 'providerInstallmentId' | 'installments'>,
   ): Promise<void> {
     if (!payment.providerPaymentId) {
       await this.prisma.payment.update({
@@ -409,9 +461,15 @@ export class SyncService {
     }
 
     try {
-      await this.asaas.delete<void>(
-        '/payments/' + encodeURIComponent(payment.providerPaymentId),
-      );
+      if (payment.providerInstallmentId) {
+        await cancelUnpaidInstallmentGroup(
+          this.asaas, payment.providerInstallmentId, payment.installments,
+        );
+      } else {
+        await this.asaas.delete<void>(
+          '/payments/' + encodeURIComponent(payment.providerPaymentId),
+        );
+      }
       await this.prisma.payment.update({
         where: { id: payment.id },
         data: { status: PaymentStatus.CANCELLED },

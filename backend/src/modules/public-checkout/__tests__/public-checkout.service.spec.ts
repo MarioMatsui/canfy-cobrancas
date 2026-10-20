@@ -67,6 +67,7 @@ function startCharge(overrides: Record<string, unknown> = {}) {
     dueDate: null,
     description: 'Pedido de medicamentos',
     totalAmount: D('110.00'),
+    maxInstallments: 6,
     customer: {
       id: 'customer-1',
       name: 'Mario Matsui',
@@ -384,6 +385,7 @@ describe('PublicCheckoutService', () => {
       activePayment: {
         method: 'CARD',
         status: 'PENDING',
+        installments: 1,
         amount: 110,
         invoiceUrl: 'https://sandbox.asaas.com/i/pay_card',
       },
@@ -399,6 +401,70 @@ describe('PublicCheckoutService', () => {
     expect(providerBody).not.toHaveProperty('creditCard');
     expect(providerBody).not.toHaveProperty('creditCardHolderInfo');
     expect(providerBody).not.toHaveProperty('installmentCount');
+  });
+
+  it('cria 4 parcelas no Asaas, fixa split TOTAL da venda e preserva valor original', async () => {
+    mockStartCharge(startCharge({ maxInstallments: 4 }));
+    asaas.post.mockResolvedValue({
+      id: 'pay_first', installment: 'inst_four', status: 'PENDING',
+      invoiceUrl: 'https://sandbox.asaas.com/i/pay_first',
+    });
+
+    const result = await service.startPayment(token, { method: 'CARD', installments: 4 });
+    expect(result.activePayment).toMatchObject({
+      method: 'CARD', installments: 4, amount: 110,
+    });
+    expect(tx.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ amount: expect.anything(), installments: 4 }),
+      }),
+    );
+    expect(tx.payment.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          providerPaymentId: 'pay_first', providerInstallmentId: 'inst_four',
+        }),
+      }),
+    );
+    const payload = asaas.post.mock.calls.find((entry) => entry[0] === '/payments')?.[1];
+    expect(payload).toMatchObject({
+      billingType: 'CREDIT_CARD',
+      installmentCount: 4,
+      totalValue: 110,
+      split: [{ walletId: 'wallet_supplier', totalFixedValue: 90 }],
+    });
+    expect(payload).not.toHaveProperty('value');
+    expect(payload.split[0]).not.toHaveProperty('fixedValue');
+    expect(payload).not.toHaveProperty('creditCard');
+  });
+
+  it('rejeita parcelas além do limite do pedido ANTES de chamar o Asaas', async () => {
+    mockStartCharge(startCharge({ maxInstallments: 3 }));
+    await expect(service.startPayment(token, { method: 'CARD', installments: 4 }))
+      .rejects.toThrow('Quantidade de parcelas');
+    expect(asaas.post).not.toHaveBeenCalled();
+    expect(tx.payment.create).not.toHaveBeenCalled();
+  });
+
+  it('nao permite parcelamento para Pix', async () => {
+    mockStartCharge();
+    await expect(service.startPayment(token, { method: 'PIX', installments: 4 }))
+      .rejects.toThrow('Pix não permite');
+    expect(asaas.post).not.toHaveBeenCalled();
+  });
+
+  it('recusa troca silenciosa de parcelamento em fatura ja iniciada', async () => {
+    const existing = {
+      id: 'payment-card', providerPaymentId: 'pay_first',
+      providerInstallmentId: 'inst_four', installments: 4,
+      billingType: 'CREDIT_CARD', amount: D('110.00'), status: 'PENDING',
+      invoiceUrl: 'https://sandbox.asaas.com/i/pay_first',
+      pixQrCode: null, pixCopyPaste: null, dueDate: new Date(), createdAt: new Date(),
+    };
+    mockStartCharge(startCharge({ orderStatus: 'PENDING_PAYMENT', payments: [existing] }));
+    await expect(service.startPayment(token, { method: 'CARD', installments: 2 }))
+      .rejects.toThrow('Já existe uma fatura');
+    expect(asaas.post).not.toHaveBeenCalled();
   });
 
   it('inclui callback de retorno somente quando configurado explicitamente', async () => {

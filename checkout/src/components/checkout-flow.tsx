@@ -45,6 +45,22 @@ export function CheckoutFlow({
   charge: PublicCharge;
   onStarted: (result: PublicPaymentStartResponse, method: PaymentMethod) => void;
 }) {
+  const existingCard = charge.availablePayments?.find((payment) => payment.method === 'CARD');
+  const maxCardInstallments = Math.max(1, Math.min(charge.maxInstallments, 12));
+  const [installments, setInstallments] = useState(existingCard?.installments ?? 1);
+  const money = (amount: number) => new Intl.NumberFormat('pt-BR', {
+    style: 'currency', currency: 'BRL',
+  }).format(amount);
+  const selectedInstallments = existingCard?.installments ?? installments;
+  const installmentCents = Math.round(Math.round(charge.totalAmount * 100) / selectedInstallments);
+  const lastInstallmentCents = Math.round(charge.totalAmount * 100) -
+    installmentCents * (selectedInstallments - 1);
+  const installmentDescription = selectedInstallments === 1
+    ? 'À vista no cartão'
+    : `${selectedInstallments}x — ${selectedInstallments - 1} de ${money(installmentCents / 100)}` +
+      (lastInstallmentCents !== installmentCents
+        ? ` e a última de ${money(lastInstallmentCents / 100)}`
+        : ` e a última de ${money(installmentCents / 100)}`);
   const [loadingMethod, setLoadingMethod] = useState<PaymentMethod | null>(null);
   const [error, setError] = useState<string | null>(null);
   const requestController = useRef<AbortController | null>(null);
@@ -65,7 +81,10 @@ export function CheckoutFlow({
     let completed = false;
 
     try {
-      const result = await startPublicPayment(charge.publicToken, method, controller.signal);
+      const result = await startPublicPayment(
+        charge.publicToken, method,
+        method === 'CARD' ? selectedInstallments : undefined, controller.signal,
+      );
       if (result.kind !== 'success') {
         cardPopup?.close();
         setError(friendlyStartError(result.kind));
@@ -129,6 +148,37 @@ export function CheckoutFlow({
         </p>
       </div>
 
+      {maxCardInstallments > 1 && (
+        <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5">
+          <label htmlFor="card-installments" className="block text-sm font-semibold text-slate-900">
+            Parcelamento no cartão de crédito
+          </label>
+          <p className="mt-1 text-xs leading-5 text-slate-600">
+            Escolha de 1x até {maxCardInstallments}x, conforme o limite definido para seu pedido.
+            A aprovação também depende da bandeira do cartão e das regras do Asaas.
+          </p>
+          <select
+            id="card-installments"
+            value={selectedInstallments}
+            onChange={(event) => setInstallments(Number(event.target.value))}
+            disabled={loadingMethod !== null || Boolean(existingCard)}
+            className="mt-3 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canfy-500 disabled:cursor-not-allowed disabled:bg-slate-100"
+          >
+            {Array.from({ length: maxCardInstallments }, (_, index) => index + 1).map((count) => (
+              <option key={count} value={count}>
+                {count === 1
+                  ? '1x (à vista)'
+                  : `${count}x de aproximadamente ${money(charge.totalAmount / count)}`}
+              </option>
+            ))}
+          </select>
+          <p className="mt-2 text-xs leading-5 text-slate-700">
+            {installmentDescription}. Total: {money(charge.totalAmount)}.
+            {existingCard && ' Já existe uma fatura de cartão aberta; o parcelamento dela não pode ser alterado aqui.'}
+          </p>
+        </div>
+      )}
+
       <div className="mt-6">
         <p className="text-sm font-semibold text-slate-900">Forma de pagamento</p>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -152,7 +202,9 @@ export function CheckoutFlow({
             </span>
             <span>
               <span className="block text-base font-bold text-slate-900">Cartão</span>
-              <span className="mt-0.5 block text-xs leading-5 text-slate-500">Pagamento seguro na página da Asaas</span>
+              <span className="mt-0.5 block text-xs leading-5 text-slate-500">
+                {selectedInstallments > 1 ? `Pagar em ${selectedInstallments}x no Asaas` : 'Pagamento seguro na página da Asaas'}
+              </span>
             </span>
           </button>
         </div>
