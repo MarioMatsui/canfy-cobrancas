@@ -5,6 +5,8 @@ import { Job } from 'bull';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
   cancelUnpaidInstallmentGroup,
+  getInstallmentMembers,
+  memberPaid,
   reconcileInstallmentGroup,
 } from '../public-checkout/installment-reconciliation';
 import { AsaasApiException, AsaasService } from '../../asaas/asaas.service';
@@ -207,6 +209,25 @@ export class WebhooksProcessor {
         await this.prisma.payment.update({
           where: { id: alternative.id },
           data: { status: PaymentStatus.CANCELLED },
+        });
+        continue;
+      }
+
+      if (alternative.providerInstallmentId) {
+        const members = await getInstallmentMembers(
+          this.asaas, alternative.providerInstallmentId, alternative.installments,
+        );
+        if (members.some((member) => memberPaid(member.status))) {
+          this.logger.error(
+            'Parcelamento alternativo parcialmente/totalmente confirmado. Não cancelar nem marcar venda duplicada sem conciliação.',
+          );
+          continue;
+        }
+        await cancelUnpaidInstallmentGroup(
+          this.asaas, alternative.providerInstallmentId, alternative.installments,
+        );
+        await this.prisma.payment.update({
+          where: { id: alternative.id }, data: { status: PaymentStatus.CANCELLED },
         });
         continue;
       }
