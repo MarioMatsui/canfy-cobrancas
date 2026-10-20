@@ -167,7 +167,7 @@ export function CheckoutFlow({
             {Array.from({ length: maxCardInstallments }, (_, index) => index + 1).map((count) => (
               <option key={count} value={count}>
                 {count === 1
-                  ? `1x de ${money(charge.totalAmount)} (à vista)`
+                  ? '1x (à vista)'
                   : `${count}x de aproximadamente ${money(charge.totalAmount / count)}`}
               </option>
             ))}
