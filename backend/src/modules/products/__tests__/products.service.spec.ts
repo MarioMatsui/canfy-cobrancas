@@ -60,6 +60,11 @@ describe('ProductsService', () => {
       subaccount: {
         findFirst: jest.fn(),
       },
+      phytocannabinoid: {
+        findMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      $transaction: jest.fn((fn: (tx: any) => Promise<any>) => fn(prisma)),
     };
     service = new ProductsService(
       prisma as PrismaService,
@@ -226,4 +231,174 @@ describe('ProductsService', () => {
       ]),
     );
   });
+
+  it('retorna opções globais ordenadas, incluindo busca por nome completo', async () => {
+    prisma.phytocannabinoid.findMany.mockResolvedValue([{ id: 'cbd', name: 'CBD', fullName: 'Canabidiol' }]);
+    const result = await service.listPhytocannabinoids('cana');
+    expect(result[0].name).toBe('CBD');
+    expect(prisma.phytocannabinoid.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { OR: [
+          { name: { contains: 'cana', mode: 'insensitive' } },
+          { fullName: { contains: 'cana', mode: 'insensitive' } },
+        ] },
+        orderBy: { name: 'asc' },
+      }),
+    );
+  });
+
+  it('cria produto com múltiplos fitocanabinoides dentro de transação', async () => {
+    const ids = [
+      '33333333-3333-4333-8333-333333333331',
+      '33333333-3333-4333-8333-333333333332',
+      '33333333-3333-4333-8333-333333333333',
+    ];
+    prisma.subaccount.findFirst.mockResolvedValue(supplier());
+    prisma.phytocannabinoid.findMany.mockResolvedValue(ids.map(id => ({ id })));
+    prisma.product.create.mockResolvedValue(product());
+    prisma.product.findUnique.mockResolvedValue(product({
+      phytocannabinoids: ids.map((id, i) => ({ phytocannabinoid: {
+        id, name: ['CBD', 'CBG', 'CBN'][i], fullName: null,
+      } })),
+    }));
+
+    const result = await service.create({
+      name: 'Óleo com 3 componentes',
+      productType: 'OIL' as any,
+      supplierSubaccountId: supplier().id,
+      defaultPrice: 55,
+      phytocannabinoids: ids.map(id => ({ id })),
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.product.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        phytocannabinoids: {
+          create: ids.map(phytocannabinoidId => ({ phytocannabinoidId })),
+        },
+      }),
+    }));
+    expect(result.phytocannabinoids.map((item: any) => item.name)).toEqual(['CBD', 'CBG', 'CBN']);
+  });
+
+  it('normaliza novo termo, cria de forma idempotente e o associa ao produto', async () => {
+    const id = '44444444-4444-4444-8444-444444444444';
+    prisma.subaccount.findFirst.mockResolvedValue(supplier());
+    prisma.phytocannabinoid.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id, normalizedName: 'cbl' }]);
+    prisma.phytocannabinoid.createMany.mockResolvedValue({ count: 1 });
+    prisma.product.create.mockResolvedValue(product());
+    prisma.product.findUnique.mockResolvedValue(product());
+
+    await service.create({
+      name: 'Óleo novo',
+      productType: 'OIL' as any,
+      supplierSubaccountId: supplier().id,
+      defaultPrice: 60,
+      phytocannabinoids: [{ name: '  CBL   ' }],
+    });
+
+    expect(prisma.phytocannabinoid.createMany).toHaveBeenCalledWith({
+      data: [{ normalizedName: 'cbl', name: 'CBL', isDefault: false }],
+      skipDuplicates: true,
+    });
+    expect(prisma.product.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        phytocannabinoids: { create: [{ phytocannabinoidId: id }] },
+      }),
+    }));
+  });
+
+  it('reutiliza termo que corresponde ao nome completo oficial', async () => {
+    const id = '33333333-3333-4333-8333-333333333331';
+    prisma.subaccount.findFirst.mockResolvedValue(supplier());
+    prisma.phytocannabinoid.findMany.mockResolvedValueOnce([
+      { id, normalizedName: 'cbd', fullName: 'Canabidiol' },
+    ]);
+    prisma.product.create.mockResolvedValue(product());
+    prisma.product.findUnique.mockResolvedValue(product());
+
+    await service.create({
+      name: 'Óleo',
+      productType: 'OIL' as any,
+      supplierSubaccountId: supplier().id,
+      defaultPrice: 99,
+      phytocannabinoids: [{ name: 'canabidiol' }],
+    });
+
+    expect(prisma.phytocannabinoid.createMany).not.toHaveBeenCalled();
+    expect(prisma.product.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ phytocannabinoids: { create: [{ phytocannabinoidId: id }] } }),
+    }));
+  });
+
+  it('PATCH sem fitocanabinoides não modifica relações existentes', async () => {
+    prisma.product.findUnique.mockResolvedValue(product());
+    prisma.subaccount.findFirst.mockResolvedValue(supplier());
+    prisma.product.update.mockResolvedValue(product());
+
+    await service.update(product().id, { brand: 'Nova marca' });
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.product.update.mock.calls[0][0].data).not.toHaveProperty('phytocannabinoids');
+  });
+
+  it('PATCH com lista vazia remove apenas associações', async () => {
+    prisma.product.findUnique.mockResolvedValue(product());
+    prisma.subaccount.findFirst.mockResolvedValue(supplier());
+    prisma.product.update.mockResolvedValue(product());
+
+    await service.update(product().id, { phytocannabinoids: [] });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.product.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        phytocannabinoids: { deleteMany: {}, create: [] },
+      }),
+    }));
+  });
+
+  it('rejeita UUID inexistente e tags repetidas sem persistir o produto', async () => {
+    prisma.subaccount.findFirst.mockResolvedValue(supplier());
+    prisma.phytocannabinoid.findMany.mockResolvedValue([]);
+    await expect(service.create({
+      name: 'Teste',
+      productType: 'OIL' as any,
+      supplierSubaccountId: supplier().id,
+      defaultPrice: 50,
+      phytocannabinoids: [{ id: '55555555-5555-4555-8555-555555555555' }],
+    })).rejects.toThrow('não existem');
+    expect(prisma.product.create).not.toHaveBeenCalled();
+
+    await expect(service.create({
+      name: 'Teste',
+      productType: 'OIL' as any,
+      supplierSubaccountId: supplier().id,
+      defaultPrice: 50,
+      phytocannabinoids: [{ name: 'CBD' }, { name: 'cbd' }],
+    })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.product.create).not.toHaveBeenCalled();
+  });
+
+  it('filtra por qualquer um e por todos no banco antes da paginação', async () => {
+    prisma.product.findMany.mockResolvedValue([]);
+    prisma.product.count.mockResolvedValue(0);
+    const ids = [
+      '33333333-3333-4333-8333-333333333331',
+      '33333333-3333-4333-8333-333333333332',
+    ];
+
+    await service.findAll({ phytocannabinoidIds: ids, phytocannabinoidMode: 'any' });
+    expect(prisma.product.findMany.mock.calls[0][0].where.AND).toContainEqual({
+      phytocannabinoids: { some: { phytocannabinoidId: { in: ids } } },
+    });
+    await service.findAll({ phytocannabinoidIds: ids, phytocannabinoidMode: 'all' });
+    expect(prisma.product.count.mock.calls[1][0].where.AND).toEqual(expect.arrayContaining(
+      ids.map(phytocannabinoidId => ({
+        phytocannabinoids: { some: { phytocannabinoidId } },
+      })),
+    ));
+  });
+
 });
