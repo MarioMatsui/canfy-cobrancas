@@ -458,8 +458,7 @@ export class ProductsService {
     const priceCurrency = this.currencyForFulfillment(supplier.fulfillmentType!);
 
     try {
-      const created = await this.prisma.product.create({
-        data: {
+      const createData = {
           name: dto.name.trim(),
           sku,
           description,
@@ -478,8 +477,18 @@ export class ProductsService {
           widthCm: dto.widthCm == null ? null : new Prisma.Decimal(dto.widthCm),
           lengthCm: dto.lengthCm == null ? null : new Prisma.Decimal(dto.lengthCm),
           active: dto.active ?? true,
-        },
-      });
+      };
+      const created = dto.phytocannabinoids !== undefined
+        ? await this.prisma.$transaction(async tx => {
+            const ids = await this.resolvePhytocannabinoids(tx, dto.phytocannabinoids!);
+            return tx.product.create({
+              data: {
+                ...createData,
+                phytocannabinoids: { create: ids.map(phytocannabinoidId => ({ phytocannabinoidId })) },
+              },
+            });
+          })
+        : await this.prisma.product.create({ data: createData });
       return this.findOne(created.id);
     } catch (error) {
       if (this.isUniqueConstraintError(error)) {
@@ -517,9 +526,7 @@ export class ProductsService {
     }
 
     try {
-      await this.prisma.product.update({
-        where: { id },
-        data: {
+      const updateData = {
           ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
           ...(dto.sku !== undefined ? { sku } : {}),
           ...(dto.description !== undefined
@@ -550,8 +557,24 @@ export class ProductsService {
             ? { lengthCm: dto.lengthCm == null ? null : new Prisma.Decimal(dto.lengthCm) }
             : {}),
           ...(dto.active !== undefined ? { active: dto.active } : {}),
-        },
-      });
+      };
+      if (dto.phytocannabinoids !== undefined) {
+        await this.prisma.$transaction(async tx => {
+          const ids = await this.resolvePhytocannabinoids(tx, dto.phytocannabinoids!);
+          return tx.product.update({
+            where: { id },
+            data: {
+              ...updateData,
+              phytocannabinoids: {
+                deleteMany: {},
+                create: ids.map(phytocannabinoidId => ({ phytocannabinoidId })),
+              },
+            },
+          });
+        });
+      } else {
+        await this.prisma.product.update({ where: { id }, data: updateData });
+      }
       return this.findOne(id);
     } catch (error) {
       if (this.isUniqueConstraintError(error)) {
