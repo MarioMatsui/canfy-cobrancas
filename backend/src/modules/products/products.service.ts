@@ -14,9 +14,19 @@ import {
 import {
   CreateProductDto,
   ListProductsDto,
+  PhytocannabinoidInputDto,
   ProductAdminStatusDto,
   UpdateProductDto,
 } from './products.dto';
+
+const MAX_PRODUCT_PHYTOCANNABINOIDS = 30;
+
+const canonicalName = (value: string) => value.normalize('NFC').trim().replace(/\s+/gu, ' ');
+const normalizeName = (value: string) => canonicalName(value).toLowerCase();
+
+const PHYTOCANNABINOID_INCLUDE = {
+  include: { phytocannabinoid: { select: { id: true, name: true, fullName: true } } },
+} as const;
 
 const ELIGIBLE_SUPPLIER: Prisma.SubaccountWhereInput = {
   type: SubaccountType.SUPPLIER,
@@ -60,6 +70,16 @@ export class ProductsService {
   private listWhere(query: ListProductsDto): Prisma.ProductWhereInput {
     const filters: Prisma.ProductWhereInput[] = [];
     if (query.active !== undefined) filters.push({ active: query.active });
+    if (query.phytocannabinoidIds?.length) {
+      const ids = [...new Set(query.phytocannabinoidIds)];
+      if (query.phytocannabinoidMode === 'all') {
+        for (const id of ids) {
+          filters.push({ phytocannabinoids: { some: { phytocannabinoidId: id } } });
+        }
+      } else {
+        filters.push({ phytocannabinoids: { some: { phytocannabinoidId: { in: ids } } } });
+      }
+    }
     if (query.brand) filters.push({ brand: { equals: query.brand, mode: 'insensitive' } });
     if (query.hasImage !== undefined) filters.push({ imageUrl: query.hasImage ? { not: null } : null });
     if (query.hasCoa !== undefined) filters.push({ coaUrl: query.hasCoa ? { not: null } : null });
@@ -162,7 +182,9 @@ export class ProductsService {
       walletId: string | null;
       fulfillmentType: FulfillmentType | null;
     } | null;
+    phytocannabinoids?: Array<{ phytocannabinoid: { id: string; name: string; fullName: string | null } }>;
   }>(product: T, quote: UsdBrlQuote | null = null) {
+    const { phytocannabinoids: links, ...attributes } = product;
     const priceBrl =
       product.priceCurrency === ProductPriceCurrency.BRL
         ? product.defaultPrice.toDecimalPlaces(2).toFixed(2)
@@ -171,7 +193,9 @@ export class ProductsService {
           : null;
 
     return {
-      ...product,
+      ...attributes,
+      phytocannabinoids: (links ?? []).map(link => link.phytocannabinoid)
+        .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
       ...this.eligibility(product),
       marketRate: product.priceCurrency === ProductPriceCurrency.USD && quote ? (quote.marketRate ?? quote.rate).toString() : null,
       exchangeRateMarkup: product.priceCurrency === ProductPriceCurrency.USD && quote ? (quote.markup ?? new Prisma.Decimal('0.03')).toString() : null,
@@ -221,7 +245,7 @@ export class ProductsService {
         where,
         ...(priceSort ? {} : { skip, take: limit }),
         orderBy: (priceSort ? { name: 'asc' } : { [query.sortBy || 'name']: direction }) as Prisma.ProductOrderByWithRelationInput,
-        include: { supplier: { select: this.supplierSelect() } },
+        include: { supplier: { select: this.supplierSelect() }, phytocannabinoids: PHYTOCANNABINOID_INCLUDE },
       }),
       this.prisma.product.count({ where }),
     ]);
@@ -283,10 +307,106 @@ export class ProductsService {
     };
   }
 
+  async listPhytocannabinoids(search?: string) {
+    const query = typeof search === 'string' ? canonicalName(search) : '';
+    if (query.length > 100) throw new BadRequestException('Busca longa demais.');
+    return this.prisma.phytocannabinoid.findMany({
+      where: query ? {
+        OR: [
+          { name: { contains: query, mode: 'insensitive' } },
+          { fullName: { contains: query, mode: 'insensitive' } },
+        ],
+      } : undefined,
+      select: { id: true, name: true, fullName: true, isDefault: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  /**
+   * Resolve todas as tags no MESMO transaction client do salvamento.
+   * createMany(skipDuplicates) gera ON CONFLICT DO NOTHING no PostgreSQL,
+   * inclusive para cadastros concorrentes da mesma forma normalizada.
+   */
+  private async resolvePhytocannabinoids(
+    tx: Prisma.TransactionClient,
+    selections: PhytocannabinoidInputDto[],
+  ): Promise<string[]> {
+    if (!Array.isArray(selections) || selections.length > MAX_PRODUCT_PHYTOCANNABINOIDS) {
+      throw new BadRequestException('Informe até 30 fitocanabinoides.');
+    }
+    const names: Array<{ name: string; normalized: string }> = [];
+    const existingIds: string[] = [];
+    for (const entry of selections) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw new BadRequestException('Fitocanabinoide inválido.');
+      }
+      const hasId = typeof entry.id === 'string' && entry.id.length > 0;
+      const hasName = typeof entry.name === 'string';
+      if (hasId === hasName) {
+        throw new BadRequestException('Informe somente id ou name em cada fitocanabinoide.');
+      }
+      if (hasId) {
+        existingIds.push(entry.id!);
+      } else {
+        const name = canonicalName(entry.name!);
+        if (!name || name.length > 80 || /[\u0000-\u001F\u007F]/u.test(name)) {
+          throw new BadRequestException('O nome do fitocanabinoide deve conter de 1 a 80 caracteres válidos.');
+        }
+        names.push({ name, normalized: normalizeName(name) });
+      }
+    }
+
+    const savedById = existingIds.length ? await tx.phytocannabinoid.findMany({
+      where: { id: { in: existingIds } },
+      select: { id: true },
+    }) : [];
+    if (savedById.length !== new Set(existingIds).size) {
+      throw new BadRequestException('Um ou mais fitocanabinoides selecionados não existem.');
+    }
+
+    const globalMatches = names.length ? await tx.phytocannabinoid.findMany({
+      where: { OR: [
+        { normalizedName: { in: names.map(item => item.normalized) } },
+        { fullName: { in: names.map(item => item.name), mode: 'insensitive' } },
+      ] },
+      select: { id: true, normalizedName: true, fullName: true },
+    }) : [];
+    const matchName = (normalized: string) => globalMatches.find(item =>
+      item.normalizedName === normalized ||
+      (item.fullName && normalizeName(item.fullName) === normalized));
+
+    const toInsert = new Map<string, string>();
+    for (const item of names) {
+      if (!matchName(item.normalized)) toInsert.set(item.normalized, item.name);
+    }
+    if (toInsert.size) {
+      await tx.phytocannabinoid.createMany({
+        data: [...toInsert].map(([normalizedName, name]) => ({
+          normalizedName, name, isDefault: false,
+        })),
+        skipDuplicates: true,
+      });
+    }
+    const inserted = toInsert.size ? await tx.phytocannabinoid.findMany({
+      where: { normalizedName: { in: [...toInsert.keys()] } },
+      select: { id: true, normalizedName: true },
+    }) : [];
+    const insertedByName = new Map(inserted.map(item => [item.normalizedName, item.id]));
+
+    const ids = [
+      ...existingIds,
+      ...names.map(item => matchName(item.normalized)?.id ?? insertedByName.get(item.normalized)),
+    ];
+    if (ids.some(id => !id) || new Set(ids).size !== ids.length) {
+      throw new BadRequestException('A seleção contém fitocanabinoides duplicados ou inválidos.');
+    }
+    return ids as string[];
+  }
+
   async findOne(id: string) {
     const product = await this.prisma.product.findUnique({
       where: { id },
-      include: { supplier: { select: this.supplierSelect() } },
+      include: { supplier: { select: this.supplierSelect() }, phytocannabinoids: PHYTOCANNABINOID_INCLUDE },
     });
     if (!product) throw new NotFoundException('Produto não encontrado');
     const quote = await this.quoteForProducts([product]);
