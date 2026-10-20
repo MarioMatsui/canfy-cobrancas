@@ -356,6 +356,11 @@ export class ProductsService {
       }
     }
 
+    if (new Set(existingIds).size !== existingIds.length ||
+        new Set(names.map(item => item.normalized)).size !== names.length) {
+      throw new BadRequestException('A seleção contém fitocanabinoides duplicados.');
+    }
+
     const savedById = existingIds.length ? await tx.phytocannabinoid.findMany({
       where: { id: { in: existingIds } },
       select: { id: true },
@@ -501,6 +506,22 @@ export class ProductsService {
   async update(id: string, dto: UpdateProductDto) {
     const current = await this.prisma.product.findUnique({ where: { id } });
     if (!current) throw new NotFoundException('Produto não encontrado');
+
+    // PATCH de metadados isolados: não revalida fornecedor legado nem regrava dados financeiros.
+    if (dto.phytocannabinoids !== undefined &&
+        Object.keys(dto).every(key => key === 'phytocannabinoids')) {
+      await this.prisma.$transaction(async tx => {
+        const ids = await this.resolvePhytocannabinoids(tx, dto.phytocannabinoids!);
+        return tx.product.update({
+          where: { id },
+          data: { phytocannabinoids: {
+            deleteMany: {},
+            create: ids.map(phytocannabinoidId => ({ phytocannabinoidId })),
+          } },
+        });
+      });
+      return this.findOne(id);
+    }
 
     const supplierSubaccountId = dto.supplierSubaccountId ?? current.supplierSubaccountId;
     if (!supplierSubaccountId) {
