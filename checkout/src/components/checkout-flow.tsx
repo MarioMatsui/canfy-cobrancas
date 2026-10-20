@@ -52,7 +52,7 @@ export function CheckoutFlow({
     style: 'currency', currency: 'BRL',
   }).format(amount);
   const selectedInstallments = existingCard?.installments ?? installments;
-  const installmentCents = Math.floor(Math.round(charge.totalAmount * 100) / selectedInstallments);
+  const installmentCents = Math.round(Math.round(charge.totalAmount * 100) / selectedInstallments);
   const lastInstallmentCents = Math.round(charge.totalAmount * 100) -
     installmentCents * (selectedInstallments - 1);
   const installmentDescription = selectedInstallments === 1
