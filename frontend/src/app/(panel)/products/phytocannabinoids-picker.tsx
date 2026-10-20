@@ -79,7 +79,7 @@ export function PhytocannabinoidPicker({
       width,
       top: upwards ? undefined : rect.bottom + 6,
       bottom: upwards ? window.innerHeight - rect.top + 6 : undefined,
-      maxHeight: Math.max(110, Math.min(300, (upwards ? above : below) - 18)),
+      maxHeight: Math.max(72, Math.min(300, (upwards ? above : below) - 18)),
     });
   }, []);
 
@@ -101,6 +101,12 @@ export function PhytocannabinoidPicker({
       window.removeEventListener('scroll', movePosition, true);
     };
   }, [open, movePosition]);
+
+  useEffect(() => {
+    if (open && position) {
+      document.getElementById(id + '-option-' + activeIndex)?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [open, position, id, activeIndex]);
 
   const select = (tag: PhytocannabinoidTag) => {
     if (disabled || value.length >= MAX_TAGS) return;
@@ -259,12 +265,16 @@ export function PhytocannabinoidPicker({
           aria-autocomplete="list"
           aria-haspopup="listbox"
           aria-expanded={open}
-          aria-controls={id + '-list'}
+          aria-controls={open ? id + '-list' : undefined}
           aria-activedescendant={open && (activeIndex < filtered.length || canCreate) ? id + '-option-' + activeIndex : undefined}
           value={search}
           maxLength={80}
           disabled={disabled || value.length >= MAX_TAGS}
           onFocus={() => setOpen(true)}
+          onBlur={event => {
+            const next = event.relatedTarget;
+            if (!next || (!rootRef.current?.contains(next) && !popupRef.current?.contains(next))) setOpen(false);
+          }}
           onChange={event => { setSearch(event.target.value); setOpen(true); }}
           onKeyDown={handleKey}
           placeholder={value.length ? 'Adicionar mais...' : 'Buscar CBD, CBG, THC...'}
