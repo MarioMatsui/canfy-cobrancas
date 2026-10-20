@@ -23,7 +23,7 @@ function setup() {
     payment: {
       findUnique: jest.fn().mockResolvedValue({
         id: 'payment-1', chargeId: 'charge-1',
-        providerInstallmentId: 'inst-4', installments: 4,
+        providerPaymentId: 'pay-1', providerInstallmentId: 'inst-4', installments: 4,
         amount: money('1317.65'), status: PaymentStatus.PENDING, paidAt: null,
         charge: {
           orderStatus: 'PENDING_PAYMENT',
