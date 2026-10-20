@@ -408,6 +408,34 @@ export class ProductsService {
     return ids as string[];
   }
 
+  /** Sincronização ordenada: lê, remove diferenças e só então adiciona novas relações. */
+  private async syncPhytocannabinoids(
+    tx: Prisma.TransactionClient,
+    productId: string,
+    ids: string[],
+  ) {
+    const existing = await tx.productPhytocannabinoid.findMany({
+      where: { productId },
+      select: { phytocannabinoidId: true },
+    });
+    const current = new Set(existing.map(item => item.phytocannabinoidId));
+    const desired = new Set(ids);
+    const removed = [...current].filter(id => !desired.has(id));
+    const added = ids.filter(id => !current.has(id));
+
+    if (removed.length) {
+      await tx.productPhytocannabinoid.deleteMany({
+        where: { productId, phytocannabinoidId: { in: removed } },
+      });
+    }
+    if (added.length) {
+      await tx.productPhytocannabinoid.createMany({
+        data: added.map(phytocannabinoidId => ({ productId, phytocannabinoidId })),
+        skipDuplicates: true,
+      });
+    }
+  }
+
   async findOne(id: string) {
     const product = await this.prisma.product.findUnique({
       where: { id },
@@ -512,13 +540,8 @@ export class ProductsService {
         Object.keys(dto).every(key => key === 'phytocannabinoids')) {
       await this.prisma.$transaction(async tx => {
         const ids = await this.resolvePhytocannabinoids(tx, dto.phytocannabinoids!);
-        return tx.product.update({
-          where: { id },
-          data: { phytocannabinoids: {
-            deleteMany: {},
-            create: ids.map(phytocannabinoidId => ({ phytocannabinoidId })),
-          } },
-        });
+        await tx.product.update({ where: { id }, data: { updatedAt: new Date() } });
+        await this.syncPhytocannabinoids(tx, id, ids);
       });
       return this.findOne(id);
     }
@@ -582,16 +605,8 @@ export class ProductsService {
       if (dto.phytocannabinoids !== undefined) {
         await this.prisma.$transaction(async tx => {
           const ids = await this.resolvePhytocannabinoids(tx, dto.phytocannabinoids!);
-          return tx.product.update({
-            where: { id },
-            data: {
-              ...updateData,
-              phytocannabinoids: {
-                deleteMany: {},
-                create: ids.map(phytocannabinoidId => ({ phytocannabinoidId })),
-              },
-            },
-          });
+          await tx.product.update({ where: { id }, data: updateData });
+          await this.syncPhytocannabinoids(tx, id, ids);
         });
       } else {
         await this.prisma.product.update({ where: { id }, data: updateData });
