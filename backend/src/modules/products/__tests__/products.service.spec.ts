@@ -401,4 +401,18 @@ describe('ProductsService', () => {
     ));
   });
 
+  it('permite alterar apenas fitocanabinoides em produto legado sem tocar no fornecedor ou no preço', async () => {
+    const legacy = product({ supplierSubaccountId: null, supplier: null, productType: null });
+    prisma.product.findUnique.mockResolvedValue(legacy);
+    prisma.product.update.mockResolvedValue(legacy);
+
+    await service.update(legacy.id, { phytocannabinoids: [] });
+
+    expect(prisma.subaccount.findFirst).not.toHaveBeenCalled();
+    expect(prisma.product.update).toHaveBeenCalledWith({
+      where: { id: legacy.id },
+      data: { phytocannabinoids: { deleteMany: {}, create: [] } },
+    });
+  });
+
 });
