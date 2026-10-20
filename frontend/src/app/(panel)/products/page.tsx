@@ -135,6 +135,61 @@ const productTypeLabel: Record<ProductType, string> = {
   NASAL_SPRAY: 'Spray nasal',
 };
 
+/** Arquivos de fallback já utilizados no checkout; a imagem individual continua nula. */
+const productTypeFallback: Partial<Record<ProductType, string>> = {
+  OIL: '/tiposProduto/Óleo.jpg',
+  GUMMY: '/tiposProduto/Comestíveis.png',
+  CAPSULE: '/tiposProduto/Cápsulas.png',
+  CREAM: '/tiposProduto/Cosméticos.png',
+};
+
+function ProductPhoto({
+  imageUrl,
+  productType,
+  preview = false,
+}: {
+  imageUrl: string | null;
+  productType: ProductType | '' | null;
+  preview?: boolean;
+}) {
+  const [primaryFailed, setPrimaryFailed] = useState(false);
+  const [fallbackFailed, setFallbackFailed] = useState(false);
+  useEffect(() => {
+    setPrimaryFailed(false);
+    setFallbackFailed(false);
+  }, [imageUrl, productType]);
+
+  const fallback = productType ? productTypeFallback[productType] : undefined;
+  const src = imageUrl && !primaryFailed ? imageUrl : !fallbackFailed ? fallback : undefined;
+
+  if (!src) {
+    return preview ? (
+      <div className="flex flex-col items-center gap-2 text-gray-400">
+        <Package size={32} />
+        <span className="text-xs">Sem imagem cadastrada</span>
+      </div>
+    ) : (
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border bg-gray-50 text-gray-400">
+        <Package size={18} />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={preview ? 'Prévia do produto' : ''}
+      className={preview
+        ? 'h-full w-full object-contain'
+        : 'h-12 w-12 shrink-0 rounded-lg border bg-white object-contain'}
+      onError={() => {
+        if (imageUrl && !primaryFailed) setPrimaryFailed(true);
+        else setFallbackFailed(true);
+      }}
+    />
+  );
+}
+
 const money = (value: unknown) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value || 0));
 
@@ -570,9 +625,7 @@ export default function ProductsPage() {
                     <tr key={product.id} className="align-top hover:bg-gray-50/70">
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-3">
-                          {product.imageUrl ? (
-                            <img src={product.imageUrl} alt="" className="h-12 w-12 shrink-0 rounded-lg border object-contain bg-white" />
-                          ) : <div className="h-12 w-12 shrink-0 rounded-lg border bg-gray-50 flex items-center justify-center text-gray-400"><Package size={18}/></div>}
+                          <ProductPhoto imageUrl={product.imageUrl} productType={product.productType} />
                           <div>
                             <div className="font-medium text-gray-900">{product.name}</div>
                             {product.brand && <div className="text-xs text-gray-500">{product.brand}</div>}
@@ -732,6 +785,7 @@ export default function ProductsPage() {
                   <Field label="SKU" error={fieldErrors.sku}>
                     <input
                       value={form.sku}
+                      maxLength={200}
                       onChange={(event) => setForm((current) => ({ ...current, sku: event.target.value }))}
                       className="w-full rounded-lg border px-3 py-2 text-sm"
                     />
@@ -787,8 +841,7 @@ export default function ProductsPage() {
                   <div className="space-y-3">
                     <div className="text-sm font-medium">Imagem principal</div>
                     <div className="flex h-40 items-center justify-center rounded-xl border bg-gray-50 overflow-hidden">
-                      {form.imageUrl ? <img src={form.imageUrl} alt="Prévia do produto" className="h-full w-full object-contain" />
-                      : <div className="flex flex-col items-center gap-2 text-gray-400"><Package size={32}/><span className="text-xs">Sem imagem cadastrada</span></div>}
+                      <ProductPhoto imageUrl={form.imageUrl} productType={form.productType} preview />
                     </div>
                     <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-gray-50">
                       {uploading === 'image' ? 'Enviando...' : 'Enviar ou substituir imagem'}
