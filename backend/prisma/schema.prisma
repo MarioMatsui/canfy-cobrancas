@@ -807,6 +807,7 @@ model DoctorLicense {
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
   doctor             Doctor @relation(fields:[doctorId],references:[id],onDelete:Restrict)
+  reviewEvents       DoctorReviewEvent[]
   @@unique([crmNormalized,state])
   @@index([doctorId])
   @@map("doctor_licenses")
@@ -876,6 +877,7 @@ model DoctorReviewEvent {
   decision String @db.VarChar(16)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   doctor Doctor @relation(fields:[doctorId],references:[id],onDelete:Restrict)
+  license DoctorLicense @relation(fields:[licenseId],references:[id],onDelete:Restrict)
   @@index([doctorId,createdAt])
   @@map("doctor_review_events")
 }
