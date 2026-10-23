@@ -305,8 +305,19 @@ export class SubaccountsService {
     let accountWalletId = dto.walletId;
 
     try {
-      const accounts = await this.asaas.get<{ data: Array<{ id: string; walletId: string; name: string; cpfCnpj: string; email: string }> }>(`/accounts?walletId=${encodeURIComponent(dto.walletId)}&limit=100`);
-      const account = accounts.data.find((a) => a.walletId === dto.walletId || a.id === dto.walletId);
+      let account: {id:string;walletId:string;name:string;cpfCnpj:string;email:string} | undefined;
+      const limit = 100;
+      for (let page = 0; page < 1000; page++) {
+        const offset = page * limit;
+        const response = await this.asaas.get<{
+          data: Array<{id:string;walletId:string;name:string;cpfCnpj:string;email:string}>;
+          hasMore?: boolean;
+        }>(`/accounts?offset=${offset}&limit=${limit}`);
+        if (!Array.isArray(response.data)) throw new Error('Resposta de subcontas Asaas inválida');
+        account = response.data.find(a => a.walletId === dto.walletId || a.id === dto.walletId);
+        if (account || response.hasMore === false || response.data.length < limit) break;
+      }
+
 
       if (account) {
         accountName = account.name;
