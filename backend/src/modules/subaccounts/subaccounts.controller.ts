@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, Headers, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
@@ -22,8 +22,8 @@ export class SubaccountsController {
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Criar subconta (médico, fornecedor, etc.)' })
-  create(@Body() dto: CreateSubaccountDto) {
-    return this.subaccountsService.create(dto);
+  create(@Body() dto: CreateSubaccountDto, @Headers('idempotency-key') key: string) {
+    return this.subaccountsService.create(dto, key);
   }
 
   @Post('link')
