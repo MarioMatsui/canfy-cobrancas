@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
   Users,
+  Stethoscope,
   Receipt,
   GitBranch,
   Webhook,
@@ -18,6 +19,7 @@ import { NavLink } from '@/components/nav-link';
 
 const allMenuItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'ATTENDANT'] },
+  { href: '/doctors', label: 'Médicos', icon: Stethoscope, roles: ['ADMIN'] },
   { href: '/subaccounts', label: 'Subcontas', icon: Users, roles: ['ADMIN'] },
   { href: '/products', label: 'Produtos', icon: Package, roles: ['ADMIN'] },
   { href: '/charges', label: 'Cobranças', icon: Receipt, roles: ['ADMIN', 'ATTENDANT'] },

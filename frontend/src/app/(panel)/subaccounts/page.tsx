@@ -5,7 +5,6 @@ import { Plus, Search, ToggleLeft, ToggleRight, History, Stethoscope, Package, U
 import { useState, useRef } from 'react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
-import DoctorsProfessionalSection from './DoctorsProfessionalSection';
 
 type SubaccountType = 'DOCTOR' | 'SUPPLIER' | 'OTHER';
 type FulfillmentType = 'NATIONAL' | 'INTERNATIONAL';
@@ -386,11 +385,10 @@ export default function SubaccountsPage() {
 
   return (
     <div className="space-y-6">
-      <DoctorsProfessionalSection />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Subcontas</h1>
-          <p className="text-gray-500 mt-1">Gerencie médicos, fornecedores e subcontas Asaas</p>
+          <p className="text-gray-500 mt-1">Gerencie contas de recebimento e carteiras Asaas de médicos, fornecedores e outros parceiros. Cadastros profissionais ficam na área Médicos.</p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => { creationKey.current = null; setShowForm(true); setFormMode('link'); }} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
@@ -408,7 +406,8 @@ export default function SubaccountsPage() {
       {showForm && (
         <div className="bg-white rounded-xl border p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">{formMode === 'create' ? 'Nova Subconta' : 'Vincular Conta Existente'}</h2>
+            <h2 className="text-lg font-semibold">{formMode === 'create' ? 'Nova conta de recebimento' : 'Vincular Conta Existente'}</h2>
+          <p className="text-xs text-gray-600 mt-1">Esta operação administra apenas o recebimento financeiro. Não cadastra médicos profissionais nem habilita acesso clínico.</p>
             <button onClick={resetForm} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
           </div>
 

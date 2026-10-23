@@ -10,17 +10,20 @@ import { IntegrationWriteService } from './integration-write.service';
 import { IntegrationScopesGuard } from './integration-scopes.guard';
 import { IntegrationsController } from './integrations.controller';
 import { IntegrationsService } from './integrations.service';
+import { MedicalPairingService } from './medical-pairing.service';
+import { MedicalPairingAdminController, MedicalPairingClaimController } from './medical-pairing.controller';
 
 @Module({
   imports: [ChargesModule, ExchangeRateModule, ProductsModule],
-  controllers: [IntegrationsController, IntegrationApiController, IntegrationCatalogController],
+  controllers: [IntegrationsController, IntegrationApiController, IntegrationCatalogController, MedicalPairingAdminController, MedicalPairingClaimController],
   providers: [
     IntegrationsService,
+    MedicalPairingService,
     IntegrationReadService,
     IntegrationWriteService,
     IntegrationApiKeyGuard,
     IntegrationScopesGuard,
   ],
-  exports: [IntegrationsService, IntegrationApiKeyGuard, IntegrationScopesGuard],
+  exports: [IntegrationsService, IntegrationApiKeyGuard, IntegrationScopesGuard, MedicalPairingService],
 })
 export class IntegrationsModule {}
