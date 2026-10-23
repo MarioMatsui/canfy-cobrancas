@@ -1,0 +1,46 @@
+name: Doctor migrations — disposable PostgreSQL
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches:
+      - 'feat/doctor-phase2-*'
+permissions:
+  contents: read
+jobs:
+  migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: canfy_doctor_migration_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d canfy_doctor_migration_ci"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql://postgres:testpassword@localhost:5432/canfy_doctor_migration_ci?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx prisma validate
+      - run: npx prisma generate
+      - name: Apply complete migration history to disposable PostgreSQL
+        run: npx prisma migrate deploy
+      - name: Read-only legacy inventory on clean schema
+        run: node scripts/doctor-legacy-audit.cjs --dry-run
+      - name: Check schema drift after migrations
+        run: npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --exit-code
