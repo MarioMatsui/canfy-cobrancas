@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { createHash } from 'node:crypto';
 import { DoctorRegistrationStatus, Prisma, SubaccountType } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { CreateDoctorDto, DoctorFinancialLinkDto, DoctorLicenseInputDto, DoctorListDto, ReviewDoctorLicenseDto, UpdateDoctorDto } from './doctors.dto';
+import { CreateDoctorDto, DoctorFinancialLinkDto, DoctorLicenseInputDto, DoctorListDto, ReviewDoctorLicenseDto, ReviewDoctorFinancialLinkDto, UpdateDoctorDto } from './doctors.dto';
 
 export function assertCpf(value?: string) {
   if (!value) return;
@@ -243,6 +243,67 @@ export class DoctorsService {
       }});
     }catch(err){return conflict(err);}
     return this.detail(id,organizationId);
+  }
+
+
+  /** Manual ownership review for an Asaas account already validated as parent-owned.
+   * An administrator must provide a durable evidence reference; no provider
+   * account, wallet, split, or user is created or edited by this operation. */
+  async reviewFinancialLink(
+    doctorId:string,linkId:string,dto:ReviewDoctorFinancialLinkDto,rawKey:string,actorId:string,
+  ) {
+    const key=idempotency(rawKey);
+    if(!actorId)throw new BadRequestException('Operador autenticado obrigatório');
+    const requestHash=createHash('sha256').update(stableStringify({
+      doctorId,linkId,decision:dto.decision,evidenceReference:dto.evidenceReference.trim(),actorId
+    })).digest('hex');
+    const old=await this.db.doctorProvisioningOperation.findUnique({where:{idempotencyKey:key}});
+    if(old) {
+      if(old.kind!=='FINANCIAL_REVIEW'||old.requestHash!==requestHash||old.doctorId!==doctorId)
+        throw new ConflictException('Idempotency-Key já utilizada em outra revisão');
+      if(old.status!=='COMPLETED')throw new ConflictException('Revisão financeira requer reconciliação');
+      return this.detail(doctorId);
+    }
+    try {
+      await this.db.$transaction(async tx=>{
+        const doctor=await tx.doctor.findUnique({where:{id:doctorId},select:{accessActive:true}});
+        if(!doctor)throw new NotFoundException('Médico não encontrado');
+        const link=await tx.doctorFinancialLink.findUnique({
+          where:{id:linkId},include:{subaccount:true}
+        });
+        if(!link||link.doctorId!==doctorId||!link.active||link.status!=='PENDING_REVIEW')
+          throw new ConflictException('Vínculo não está pendente de revisão');
+        const sub=link.subaccount;
+        if(sub.type!==SubaccountType.DOCTOR||!sub.active||sub.deletedAt||!sub.walletId||
+           !sub.asaasId||sub.asaasId.startsWith('external_'))
+          throw new ConflictException('Subconta médica sem titularidade Asaas verificável');
+        const concurrent=await tx.doctorFinancialLink.findFirst({
+          where:{subaccountId:sub.id,active:true,id:{not:linkId}}
+        });
+        if(concurrent)throw new ConflictException('Conta financeira já vinculada a outro profissional');
+        if(dto.decision==='REJECTED'&&doctor.accessActive)
+          throw new ConflictException('Desative o acesso clínico nos dois sistemas antes de rejeitar uma carteira em operação');
+        await tx.doctorProvisioningOperation.create({data:{
+          doctorId,kind:'FINANCIAL_REVIEW',idempotencyKey:key,requestHash,status:'PENDING',
+          actorUserId:actorId,evidenceReference:dto.evidenceReference.trim(),
+        }});
+        const changed=await tx.doctorFinancialLink.updateMany({where:{
+          id:linkId,doctorId,status:'PENDING_REVIEW',active:true,
+        },data:dto.decision==='VERIFIED'
+          ?{status:'VERIFIED',verifiedAt:new Date()}
+          :{status:'REJECTED',active:false,revokedAt:new Date()}});
+        if(changed.count!==1)throw new ConflictException('Vínculo alterado durante a revisão');
+        await tx.doctorProvisioningOperation.update({
+          where:{idempotencyKey:key},data:{status:'COMPLETED',resultDoctorId:doctorId}
+        });
+      },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+    }catch(error){
+      if(error instanceof Prisma.PrismaClientKnownRequestError &&
+        (error.code==='P2002'||error.code==='P2034'))
+        throw new ConflictException('Revisão concorrente; confira o vínculo e repita com a mesma chave');
+      throw error;
+    }
+    return this.detail(doctorId);
   }
 
   /**
