@@ -3,7 +3,7 @@ import React, {useState,useRef} from 'react';
 import {useQuery,useQueryClient} from '@tanstack/react-query';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
-import {Stethoscope,Plus,RefreshCw} from 'lucide-react';
+import {Stethoscope,Plus} from 'lucide-react';
 
 type License={id?:string;crmNormalized:string;state:string;verificationStatus:string};
 type Doctor={id:string;fullName:string;registrationStatus:string;provisioningStatus:string;accessActive:boolean;maskedCpf?:string|null;financialStatus?:string;licenses:License[];updatedAt:string;email?:string;cpfNormalized?:string;rg?:string;rgIssuer?:string;rgState?:string;birthDate?:string;mobilePhone?:string;postalCode?:string;street?:string;streetNumber?:string;addressComplement?:string;neighborhood?:string;city?:string;state?:string;country?:string;financialLinks?:unknown[]};
