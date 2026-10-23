@@ -28,12 +28,13 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  const [detailId,setDetailId]=useState<string|null>(null),[edit,setEdit]=useState(false),[working,setWorking]=useState(false);
  const [form,setForm]=useState<Record<string,string>>({...blank,country:'BR'}),[crm,setCrm]=useState(''),[uf,setUf]=useState('SP');
  const [walletToLink,setWalletToLink]=useState(''),[showLegacy,setShowLegacy]=useState(false);
- const [organizationIntegrationId,setOrganizationIntegrationId]=useState('');
+ const [organizationIntegrationId,setOrganizationIntegrationId]=useState(''),[organizationEvidence,setOrganizationEvidence]=useState('');
+ const [statusFilter,setStatusFilter]=useState('');
  const medicalIntegrations=useQuery<{id:string;name:string;status:string;doctorOrganizationId?:string|null;scopes:string[]}[]>({queryKey:['medical-integrations'],queryFn:()=>api.get('/integrations').then(r=>r.data),enabled:!!detailId});
  const pairedIntegrations=(medicalIntegrations.data||[]).filter(i=>i.status==='ACTIVE'&&i.doctorOrganizationId&&i.scopes.includes('doctors:admin:read')&&i.scopes.includes('doctors:admin:write'));
 
  const [reviewReference,setReviewReference]=useState(''),[reviewLicenseId,setReviewLicenseId]=useState('');
- const result=useQuery<Result>({queryKey:['professional-doctors',page,search],queryFn:()=>api.get('/doctors',{params:{page,limit:20,search}}).then(r=>r.data),enabled:expanded});
+ const result=useQuery<Result>({queryKey:['professional-doctors',page,search,statusFilter],queryFn:()=>api.get('/doctors',{params:{page,limit:20,search,registrationStatus:statusFilter||undefined}}).then(r=>r.data),enabled:expanded});
  const selected=useQuery<Doctor>({queryKey:['professional-doctor',detailId],queryFn:()=>api.get('/doctors/'+detailId).then(r=>r.data),enabled:!!detailId});
  const legacy=useQuery<{data:{subaccountId:string;name:string;reviewRequired:boolean;financialIdentifierVerified:boolean}[]}>({
   queryKey:['doctor-legacy-candidates'],queryFn:()=>api.get('/doctors/legacy-candidates',{params:{page:1,limit:20}}).then(r=>r.data),
@@ -65,11 +66,11 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  catch(e){toast.error(message(e));}finally{setWorking(false);}
  }
  async function associateOrganization(){
-  if(!detailId||working||!organizationIntegrationId||selected.data?.msgdeskOrganizationId)return;
+  if(!detailId||working||!organizationIntegrationId||organizationEvidence.trim().length<8||selected.data?.msgdeskOrganizationId)return;
   if(!confirm('Associar este médico à organização comprovadamente pareada com a integração selecionada? Esta ação será auditada e não poderá ser usada para transferência entre organizações.'))return;
   setWorking(true);
-  try{await api.post('/doctors/'+detailId+'/organization',{integrationId:organizationIntegrationId});
-    toast.success('Médico associado à organização autorizada');setOrganizationIntegrationId('');refresh();}
+  try{await api.post('/doctors/'+detailId+'/organization',{integrationId:organizationIntegrationId,evidenceReference:organizationEvidence.trim()});
+    toast.success('Médico associado à organização autorizada');setOrganizationIntegrationId('');setOrganizationEvidence('');refresh();}
   catch(e){toast.error(message(e));}finally{setWorking(false);}
  }
  async function review(decision:'VERIFIED'|'REJECTED'){
@@ -93,7 +94,7 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  <div className="flex flex-wrap gap-2 items-center justify-between"><p className="text-sm text-gray-600">Resultados da pesquisa: <strong>{result.isError?'—':result.data?.pagination.total??'—'}</strong></p>
  <div className="flex gap-2"><button className="border rounded-lg px-3 py-2 text-sm" onClick={()=>setShowLegacy(v=>!v)}>Revisar legados</button>
  <button className="bg-emerald-700 text-white rounded-lg px-3 py-2 text-sm flex gap-2" onClick={newDoctor}><Plus size={16}/>Novo médico</button></div></div>
- <input aria-label="Buscar médico" className="w-full sm:w-80 border rounded-lg p-2 text-sm" value={search} placeholder="Nome ou CRM" onChange={e=>{setPage(1);setSearch(e.target.value);}}/>
+ <div className="flex flex-wrap gap-3 items-end"><label className="text-xs font-medium text-gray-700">Busca por nome ou CRM<input aria-label="Buscar médico" className="block w-full sm:w-80 border rounded-lg p-2 text-sm mt-1" value={search} placeholder="Nome ou CRM" onChange={e=>{setPage(1);setSearch(e.target.value);}}/></label><label className="text-xs font-medium text-gray-700">Estado do cadastro<select aria-label="Filtrar cadastro" className="block border rounded-lg p-2 text-sm mt-1" value={statusFilter} onChange={e=>{setPage(1);setStatusFilter(e.target.value);}}><option value="">Todos</option>{[['DRAFT','Incompletos'],['PENDING_REVIEW','Em revisão'],['VERIFIED','Verificados'],['REJECTED','Rejeitados']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label></div>
  {result.isLoading?<p role="status">Consultando cadastros…</p>:result.isError?<p role="alert" className="text-sm text-red-700">Não foi possível consultar médicos profissionais. Confirme a aplicação das migrations no banco Canfy e sua permissão ADMIN.</p>:
  !result.data?.data.length?<p className="text-sm text-gray-500">Nenhum cadastro encontrado.</p>:
  <div className="overflow-x-auto border rounded-lg"><table className="min-w-[630px] w-full text-sm">
@@ -124,7 +125,7 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  <p className="text-xs text-gray-500">Cadastro em revisão não equivale à verificação oficial do CRM. Provisionamento MsgDesk depende de vínculo seguro com a organização.</p>
  <section className="border-t pt-4 space-y-3"><h4 className="font-semibold text-sm">Organização e acesso MsgDesk</h4>
  <p className="text-sm">{selected.data.msgdeskOrganizationId?'Organização associada por integração validada':'Ainda sem organização; este profissional não aparece no MsgDesk até revisão e associação.'}</p>
- {!selected.data.msgdeskOrganizationId&&<><label className="block text-xs font-medium">Integração pareada com a organização<select className="border rounded-lg p-2 w-full mt-1 text-sm" value={organizationIntegrationId} onChange={e=>setOrganizationIntegrationId(e.target.value)}><option value="">Selecione uma integração autorizada</option>{pairedIntegrations.map(i=><option key={i.id} value={i.id}>{i.name}</option>)}</select></label><p className="text-xs text-gray-600">Somente integrações com pareamento concluído e escopos administrativos válidos aparecem aqui. Nenhum ID de organização é aceito do navegador.</p><button type="button" className="rounded border px-3 py-2 text-sm disabled:opacity-50" disabled={working||!organizationIntegrationId} onClick={()=>void associateOrganization()}>Associar profissional à organização</button></>}
+ {!selected.data.msgdeskOrganizationId&&<><label className="block text-xs font-medium">Integração pareada com a organização<select className="border rounded-lg p-2 w-full mt-1 text-sm" value={organizationIntegrationId} onChange={e=>setOrganizationIntegrationId(e.target.value)}><option value="">Selecione uma integração autorizada</option>{pairedIntegrations.map(i=><option key={i.id} value={i.id}>{i.name}</option>)}</select></label><label className="block text-xs font-medium">Referência da comprovação de vínculo<input className="border rounded-lg p-2 w-full mt-1 text-sm" minLength={8} maxLength={250} placeholder="Protocolo interno ou evidência verificável" value={organizationEvidence} onChange={e=>setOrganizationEvidence(e.target.value)}/></label><p className="text-xs text-gray-600">A associação será auditada. Somente integrações já pareadas aparecem aqui; nenhum UUID de organização pode ser enviado pelo navegador.</p><button type="button" className="rounded border px-3 py-2 text-sm disabled:opacity-50" disabled={working||!organizationIntegrationId||organizationEvidence.trim().length<8} onClick={()=>void associateOrganization()}>Associar profissional à organização</button></>}
  </section>
  <div className="flex flex-wrap gap-2"><button className="border rounded px-3 py-2 text-sm" onClick={editDoctor}>Editar</button>
  <button className="bg-emerald-700 text-white rounded px-3 py-2 text-sm" disabled={working||selected.data.registrationStatus==='VERIFIED'} onClick={()=>void regularize()}>Encaminhar para revisão</button></div>

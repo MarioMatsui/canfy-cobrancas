@@ -178,7 +178,7 @@ export class DoctorsService {
 
   /** Canfy ADMIN may link an unowned professional only to an already paired, active integration.
    * The browser provides an integration identifier, never a self-asserted tenant UUID. */
-  async associateOrganization(id:string,integrationId:string,actorId:string) {
+  async associateOrganization(id:string,integrationId:string,actorId:string,evidenceReference:string) {
     const integration=await this.db.integrationApiKey.findUnique({where:{id:integrationId}});
     if (!integration || integration.status!=='ACTIVE' || integration.revokedAt || !integration.doctorOrganizationId ||
         !integration.scopes.includes('doctors:admin:read') || !integration.scopes.includes('doctors:admin:write'))
@@ -193,7 +193,7 @@ export class DoctorsService {
         data:{msgdeskOrganizationId:integration.doctorOrganizationId}});
       if (updated.count!==1) throw new ConflictException('Vínculo alterado durante revisão; recarregue');
       await tx.doctorOrganizationLinkEvent.create({data:{doctorId:id,organizationId:integration.doctorOrganizationId!,
-        integrationKeyId:integration.id,actorUserId:actorId}});
+        integrationKeyId:integration.id,actorUserId:actorId,evidenceReference:evidenceReference.trim()}});
     });
     return this.detail(id);
   }

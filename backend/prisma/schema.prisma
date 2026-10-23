@@ -898,6 +898,7 @@ model IntegrationDoctorPairingEvent {
 
 model DoctorOrganizationLinkEvent {
   id String @id @default(uuid())
+  evidenceReference String @map("evidence_reference") @db.VarChar(250)
   doctorId String @map("doctor_id")
   organizationId String @map("organization_id") @db.Uuid
   integrationKeyId String @map("integration_key_id")

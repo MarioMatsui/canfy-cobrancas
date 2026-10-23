@@ -13,7 +13,7 @@ Uma única credencial `CanDesk Chat/CRM` pode ser utilizada nas consultas financ
 ## Controles
 - Não altera nenhuma chave, escopo ou organização em produção durante aplicação da migration.
 - Pareamento é explicitamente opt-in em dois painéis; rollback não deve reatribuir uma chave a outra organização. Rotação, revogação, reconciliação ou mudança de organização requerem fluxo administrativo separado.
-- Vínculo Canfy atribui apenas médicos sem organização e sem Auth UID prévio, preserva histórico e grava evento de auditoria. Médicos já vinculados a outros tenants não são transferidos.
+- Vínculo Canfy atribui apenas médicos sem organização e sem Auth UID prévio, preserva histórico e grava evento de auditoria, incluindo uma referência de comprovação fornecida pelo operador. Médicos já vinculados a outros tenants não são transferidos.
 - Nenhum token ou senha de acesso clínico é criado pelo pareamento. Financeiro e carteiras permanecem independentes.
 
 ## Dependências de publicação

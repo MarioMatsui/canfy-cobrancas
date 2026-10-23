@@ -20,6 +20,7 @@ CREATE TABLE "doctor_organization_link_events" (
   "organization_id" UUID NOT NULL,
   "integration_key_id" TEXT NOT NULL,
   "actor_user_id" TEXT NOT NULL,
+  "evidence_reference" VARCHAR(250) NOT NULL,
   "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "doctor_organization_link_events_pkey" PRIMARY KEY ("id")
 );
