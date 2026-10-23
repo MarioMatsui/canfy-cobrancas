@@ -4,6 +4,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
 import { DoctorsService } from './doctors.service';
 import { CreateDoctorDto, DoctorFinancialLinkDto, DoctorLicenseInputDto, DoctorListDto, ReviewDoctorLicenseDto, UpdateDoctorDto } from './doctors.dto';
+import { IsUUID,IsString,MinLength,MaxLength } from 'class-validator';
+export class AssociateDoctorOrganizationDto { @IsUUID() integrationId!: string; @IsString() @MinLength(8) @MaxLength(250) evidenceReference!:string; }
 
 @ApiTags('Médicos profissionais (admin)')
 @ApiBearerAuth()
@@ -22,6 +24,10 @@ export class DoctorsController {
   @Post(':id/licenses') license(@Param('id',ParseUUIDPipe) id:string,@Body() dto:DoctorLicenseInputDto){return this.doctors.addLicense(id,dto);}
   @Post(':id/regularize') regularize(@Param('id',ParseUUIDPipe) id:string){return this.doctors.regularize(id);}
   @Post(':id/financial-links') link(@Param('id',ParseUUIDPipe) id:string,@Body() dto:DoctorFinancialLinkDto){return this.doctors.linkExisting(id,dto);}
+  @Post(':id/organization')
+  associateOrganization(@Param('id',ParseUUIDPipe) id:string,@Body() dto:AssociateDoctorOrganizationDto,@Request() req:{user:{id:string}}){
+    return this.doctors.associateOrganization(id,dto.integrationId,req.user.id,dto.evidenceReference);
+  }
   @Post(':id/licenses/review') review(
     @Param('id',ParseUUIDPipe) id:string,
     @Body() dto:ReviewDoctorLicenseDto,

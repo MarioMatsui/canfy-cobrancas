@@ -77,10 +77,21 @@ export class DoctorsService {
         financialLinks:{where:{active:true},select:{status:true,subaccountId:true}}}}),
       this.db.doctor.count({where})
     ]);
-    return {data:rows.map(d=>({
+    const organizationWhere:Prisma.DoctorWhereInput = organizationId?{msgdeskOrganizationId:organizationId}:{};
+    const [statuses,activeForCare,financiallyLinked,withoutOrganization]=await Promise.all([
+      this.db.doctor.groupBy({by:['registrationStatus'],where:organizationWhere,_count:{_all:true}}),
+      this.db.doctor.count({where:{...organizationWhere,accessActive:true,registrationStatus:'VERIFIED',provisioningStatus:'LINKED'}}),
+      this.db.doctor.count({where:{...organizationWhere,financialLinks:{some:{active:true}}}}),
+      organizationId?Promise.resolve(0):this.db.doctor.count({where:{msgdeskOrganizationId:null}})
+    ]);
+    const counts=Object.fromEntries(statuses.map(s=>[s.registrationStatus,s._count._all])) as Record<string,number>;
+    const summary={total:statuses.reduce((acc,s)=>acc+s._count._all,0),verified:counts.VERIFIED||0,
+      awaitingReview:counts.PENDING_REVIEW||0,incomplete:counts.DRAFT||0,rejected:counts.REJECTED||0,
+      clinicalActive:activeForCare,withFinancialLink:financiallyLinked,withoutOrganization};
+    return {summary,data:rows.map(d=>({
       id:d.id,fullName:d.fullName,maskedCpf:maskCpf(d.cpfNormalized),
       registrationStatus:d.registrationStatus,provisioningStatus:d.provisioningStatus,
-      accessActive:d.accessActive,licenses:d.licenses,
+      accessActive:d.accessActive,organizationLinked:!!d.msgdeskOrganizationId,licenses:d.licenses,
       financialStatus:d.financialLinks[0]?.status??'UNLINKED',
       createdAt:d.createdAt,updatedAt:d.updatedAt,
     })),pagination:{page,limit,total,totalPages:Math.ceil(total/limit)}};
@@ -163,6 +174,28 @@ export class DoctorsService {
       }
       return conflict(err);
     }
+  }
+
+  /** Canfy ADMIN may link an unowned professional only to an already paired, active integration.
+   * The browser provides an integration identifier, never a self-asserted tenant UUID. */
+  async associateOrganization(id:string,integrationId:string,actorId:string,evidenceReference:string) {
+    const integration=await this.db.integrationApiKey.findUnique({where:{id:integrationId}});
+    if (!integration || integration.status!=='ACTIVE' || integration.revokedAt || !integration.doctorOrganizationId ||
+        !integration.scopes.includes('doctors:admin:read') || !integration.scopes.includes('doctors:admin:write'))
+      throw new BadRequestException('Integração médica não está pareada e autorizada');
+    const doctor=await this.db.doctor.findUnique({where:{id},select:{id:true,msgdeskOrganizationId:true,msgdeskAuthUserId:true}});
+    if (!doctor) throw new NotFoundException('Médico não encontrado');
+    if (doctor.msgdeskOrganizationId===integration.doctorOrganizationId) return this.detail(id);
+    if (doctor.msgdeskOrganizationId || doctor.msgdeskAuthUserId)
+      throw new ConflictException('Médico já associado; revisão administrativa específica necessária');
+    await this.db.$transaction(async tx=>{
+      const updated=await tx.doctor.updateMany({where:{id,msgdeskOrganizationId:null,msgdeskAuthUserId:null},
+        data:{msgdeskOrganizationId:integration.doctorOrganizationId}});
+      if (updated.count!==1) throw new ConflictException('Vínculo alterado durante revisão; recarregue');
+      await tx.doctorOrganizationLinkEvent.create({data:{doctorId:id,organizationId:integration.doctorOrganizationId!,
+        integrationKeyId:integration.id,actorUserId:actorId,evidenceReference:evidenceReference.trim()}});
+    });
+    return this.detail(id);
   }
 
   async update(id:string,dto:UpdateDoctorDto,organizationId?:string) {

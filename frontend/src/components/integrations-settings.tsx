@@ -26,6 +26,7 @@ type Integration = {
   maskedKey: string;
   status: IntegrationStatus;
   scopes: string[];
+  doctorOrganizationId?:string|null;
   createdAt: string;
   lastUsedAt: string | null;
   revokedAt: string | null;
@@ -43,9 +44,11 @@ const SCOPE_OPTIONS = [
   { value: 'charges:cancel', label: 'Cancelar cobranças' },
 ] as const;
 
-const scopeLabel: Record<string, string> = Object.fromEntries(
-  SCOPE_OPTIONS.map((scope) => [scope.value, scope.label]),
-);
+const scopeLabel: Record<string, string> = {
+  ...Object.fromEntries(SCOPE_OPTIONS.map((scope) => [scope.value, scope.label])),
+  'doctors:admin:read':'Consultar cadastro profissional (administrativo)',
+  'doctors:admin:write':'Administrar médicos (escopo organizacional)',
+};
 
 function formatDate(value: string | null) {
   if (!value) return 'Nunca utilizada';
@@ -62,6 +65,7 @@ export function IntegrationsSettings() {
   const [scopes, setScopes] = useState<string[]>([]);
   const [secret, setSecret] = useState<{ key: string; title: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [pairing,setPairing]=useState<{code:string;expiresAt:string;integrationName:string}|null>(null);
   const [confirm, setConfirm] = useState<{
     type: 'revoke' | 'rotate';
     integration: Integration;
@@ -130,7 +134,12 @@ export function IntegrationsSettings() {
     onError: () => toast.error('Não foi possível habilitar o catálogo para essa chave'),
   });
 
-  const isSubmitting = createMutation.isPending || revokeMutation.isPending || rotateMutation.isPending || enableCatalogMutation.isPending;
+  const pairingMutation=useMutation({
+    mutationFn:async(i:Integration)=>{const {data}=await api.post<{pairingCode:string;expiresAt:string}>(`/integrations/${i.id}/doctor-pairing`);return {code:data.pairingCode,expiresAt:data.expiresAt,integrationName:i.name};},
+    onSuccess:setPairing,
+    onError:()=>toast.error('Não foi possível iniciar o pareamento desta integração'),
+  });
+  const isSubmitting = createMutation.isPending || revokeMutation.isPending || rotateMutation.isPending || enableCatalogMutation.isPending || pairingMutation.isPending;
   const canCreate = useMemo(() => name.trim().length >= 2 && scopes.length > 0, [name, scopes]);
 
   const toggleScope = (scope: string) => {
@@ -240,6 +249,7 @@ export function IntegrationsSettings() {
                   ))}
                 </div>
 
+                <div className="text-xs text-gray-600 border rounded-lg p-3 bg-gray-50"><strong>Integração médica administrativa:</strong> {integration.doctorOrganizationId?'Organização pareada e associada':'Organização não pareada'}; escopos: {integration.scopes.includes('doctors:admin:read')&&integration.scopes.includes('doctors:admin:write')?'leitura e escrita autorizadas':'sem autorização administrativa completa'}.</div>
                 {integration.revokedAt && (
                   <p className="text-xs text-gray-500">Revogada em {formatDate(integration.revokedAt)}</p>
                 )}
@@ -247,6 +257,7 @@ export function IntegrationsSettings() {
 
               {integration.status === 'ACTIVE' && (
                 <div className="flex shrink-0 flex-wrap gap-2">
+                  {!integration.doctorOrganizationId && <button type="button" disabled={isSubmitting} onClick={()=>{if(window.confirm('Gerar código temporário para conectar esta chave já existente a uma organização MsgDesk? Somente um administrador autenticado no MsgDesk poderá concluir o pareamento.'))pairingMutation.mutate(integration);}} className="rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 px-3 py-2 text-sm disabled:opacity-50">Parear médicos com MsgDesk</button>}
                   {!integration.scopes.includes('catalog:read') && (
                     <button
                       type="button"
@@ -343,6 +354,7 @@ export function IntegrationsSettings() {
         </div>
       )}
 
+      {pairing && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"><div className="w-full max-w-lg rounded-xl bg-white shadow-xl p-6 space-y-4" role="dialog" aria-modal="true" aria-label="Código de pareamento médico"><h3 className="font-semibold text-lg">Conectar {pairing.integrationName} ao MsgDesk</h3><p className="text-sm text-gray-600">No MsgDesk, acesse Configurações → Equipe → Médicos e cole este código usando a conta de um administrador ativo. Válido por 10 minutos; pode ser usado somente uma vez. Não é uma nova chave de API.</p><code className="block break-all bg-gray-50 border p-3 rounded-lg text-sm">{pairing.code}</code><button type="button" onClick={()=>void navigator.clipboard.writeText(pairing.code).then(()=>toast.success('Código copiado')).catch(()=>toast.error('Copie o código manualmente'))} className="w-full border rounded-lg p-2 text-sm">Copiar código</button><p className="text-xs text-gray-600">Após a confirmação no MsgDesk, os escopos médicos administrativos serão concedidos apenas a esta chave e vinculados à organização autenticada.</p><button type="button" className="w-full bg-blue-600 text-white p-2 rounded-lg" onClick={()=>{setPairing(null);void refresh();}}>Fechar</button></div></div>}
       {secret && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-xl rounded-xl bg-white shadow-xl">

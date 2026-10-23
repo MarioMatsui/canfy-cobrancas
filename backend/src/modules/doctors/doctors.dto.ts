@@ -3,13 +3,15 @@ import { PartialType } from '@nestjs/swagger';
 import { IsIn, ArrayMaxSize, IsArray, IsDateString, IsEmail, IsEnum, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 import { DoctorRegistrationStatus } from '@prisma/client';
 
+const BRAZIL_UFS=['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
+
 const digits = ({value}: {value:unknown}) => typeof value === 'string' ? value.replace(/\D/g,'') : value;
 const upper = ({value}: {value:unknown}) => typeof value === 'string' ? value.trim().toUpperCase() : value;
 const trimmed = ({value}: {value:unknown}) => typeof value === 'string' ? value.trim() : value;
 
 export class DoctorLicenseInputDto {
   @Transform(digits) @IsString() @Matches(/^[0-9]{1,20}$/) crmNormalized!: string;
-  @Transform(upper) @Matches(/^[A-Z]{2}$/) state!: string;
+  @Transform(upper) @IsIn(BRAZIL_UFS) state!: string;
 }
 
 export class CreateDoctorDto {
@@ -17,7 +19,7 @@ export class CreateDoctorDto {
   @IsOptional() @Transform(digits) @Matches(/^[0-9]{11}$/) cpfNormalized?: string;
   @IsOptional() @IsString() @MaxLength(30) rg?: string;
   @IsOptional() @IsString() @MaxLength(60) rgIssuer?: string;
-  @IsOptional() @Transform(upper) @Matches(/^[A-Z]{2}$/) rgState?: string;
+  @IsOptional() @Transform(upper) @IsIn(BRAZIL_UFS) rgState?: string;
   @IsOptional() @IsDateString() birthDate?: string;
   @IsOptional() @IsEmail() @MaxLength(254) email?: string;
   @IsOptional() @IsString() @MaxLength(32) mobilePhone?: string;
@@ -27,7 +29,7 @@ export class CreateDoctorDto {
   @IsOptional() @IsString() @MaxLength(120) addressComplement?: string;
   @IsOptional() @IsString() @MaxLength(120) neighborhood?: string;
   @IsOptional() @IsString() @MaxLength(120) city?: string;
-  @IsOptional() @Transform(upper) @Matches(/^[A-Z]{2}$/) state?: string;
+  @IsOptional() @Transform(upper) @IsIn(BRAZIL_UFS) state?: string;
   @IsOptional() @Transform(upper) @Matches(/^[A-Z]{2}$/) country?: string;
   @IsOptional() @IsString() @MaxLength(500) registrationNotes?: string;
   @IsOptional() @IsArray() @ArrayMaxSize(10) @ValidateNested({each:true}) @Type(()=>DoctorLicenseInputDto)

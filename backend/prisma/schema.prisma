@@ -706,6 +706,9 @@ model IntegrationApiKey {
   status          IntegrationApiKeyStatus @default(ACTIVE)
   scopes          String[]                @default([])
   doctorOrganizationId String?             @map("doctor_organization_id") @db.Uuid
+  doctorPairCodeHash String? @map("doctor_pair_code_hash") @db.VarChar(64)
+  doctorPairExpiresAt DateTime? @map("doctor_pair_expires_at") @db.Timestamptz(6)
+  doctorPairRequestedByUserId String? @map("doctor_pair_requested_by_user_id")
   createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
   lastUsedAt      DateTime?               @map("last_used_at") @db.Timestamptz(6)
@@ -880,4 +883,27 @@ model DoctorReviewEvent {
   license DoctorLicense @relation(fields:[licenseId],references:[id],onDelete:Restrict)
   @@index([doctorId,createdAt])
   @@map("doctor_review_events")
+}
+
+// Admin-reviewed, one-time organization pairing; no external API key or secret is stored.
+model IntegrationDoctorPairingEvent {
+  id String @id @default(uuid())
+  integrationKeyId String @map("integration_key_id")
+  organizationId String @map("organization_id") @db.Uuid
+  initiatedByCanfyUserId String? @map("initiated_by_canfy_user_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  @@index([integrationKeyId,createdAt], map: "integration_doctor_pairing_key_created_idx")
+  @@map("integration_doctor_pairing_events")
+}
+
+model DoctorOrganizationLinkEvent {
+  id String @id @default(uuid())
+  evidenceReference String @map("evidence_reference") @db.VarChar(250)
+  doctorId String @map("doctor_id")
+  organizationId String @map("organization_id") @db.Uuid
+  integrationKeyId String @map("integration_key_id")
+  actorUserId String @map("actor_user_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  @@index([doctorId,createdAt])
+  @@map("doctor_organization_link_events")
 }

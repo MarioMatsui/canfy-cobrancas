@@ -34,6 +34,7 @@ export class IntegrationsService {
         keyPrefix: true,
         status: true,
         scopes: true,
+        doctorOrganizationId: true,
         createdAt: true,
         lastUsedAt: true,
         revokedAt: true,
