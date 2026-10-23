@@ -47,3 +47,8 @@ export class DoctorListDto {
 export class DoctorFinancialLinkDto {
   @IsUUID() subaccountId!: string;
 }
+
+/** Trusted integration-only. Never expose this field through generic Doctor PATCH. */
+export class ConfirmDoctorProvisioningDto {
+  @IsUUID() authUserId!: string;
+}
