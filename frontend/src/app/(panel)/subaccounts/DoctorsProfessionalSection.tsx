@@ -15,6 +15,7 @@ const fields:[string,string,string][]=[
  ['streetNumber','Número','text'],['addressComplement','Complemento','text'],['neighborhood','Bairro','text'],
  ['city','Cidade','text'],['state','UF','text'],['country','País (ISO 2)','text']
 ];
+const UFS=['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
 const labels:Record<string,string>={DRAFT:'Incompleto',PENDING_REVIEW:'Em revisão',VERIFIED:'Verificado',REJECTED:'Rejeitado',AWAITING_MSGDESK:'Aguardando organização/acesso',LINKED:'Vinculado',BLOCKED:'Bloqueado',NEEDS_RECONCILIATION:'Requer reconciliação',UNLINKED:'Sem carteira'};
 const blank=Object.fromEntries(fields.map(([k])=>[k,''])) as Record<string,string>;
 function message(error:unknown){
@@ -114,9 +115,9 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  {(detailId||edit)&&<div className="border border-emerald-200 rounded-xl p-5 space-y-4">
  <div className="flex justify-between"><h3 className="font-semibold">{edit?(detailId?'Editar cadastro':'Cadastrar profissional'):'Detalhe profissional'}</h3><button className="text-sm underline" onClick={()=>{setEdit(false);setDetailId(null);}}>Fechar</button></div>
  {edit?<form className="space-y-4" onSubmit={submit}>
- <fieldset className="space-y-3"><legend className="font-semibold text-gray-800 mb-3">Identificação, endereço e informações profissionais</legend><div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{fields.map(([k,n,t])=><label className="text-sm" key={k}>{n}<input className="border rounded-lg block w-full p-2 mt-1" type={t} value={form[k]||''} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))} required={k==='fullName'} maxLength={254}/></label>)}</div></fieldset>
+ <fieldset className="space-y-3"><legend className="font-semibold text-gray-800 mb-3">Identificação, endereço e informações profissionais</legend><div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{fields.map(([k,n,t])=><label className="text-sm" key={k}>{n}{['rgState','state'].includes(k)?<select className="border rounded-lg block w-full p-2 mt-1" value={form[k]||''} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))}><option value="">Selecionar UF</option>{UFS.map(uf=><option value={uf} key={uf}>{uf}</option>)}</select>:<input className="border rounded-lg block w-full p-2 mt-1" type={t} value={form[k]||''} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))} required={k==='fullName'} maxLength={254}/>}</label>)}</div></fieldset>
  {!detailId&&<div className="grid grid-cols-2 gap-3"><label className="text-sm">CRM<input className="border rounded-lg p-2 block w-full mt-1" value={crm} onChange={e=>setCrm(e.target.value)}/></label>
- <label className="text-sm">UF CRM<input className="border rounded-lg p-2 block w-full mt-1" value={uf} maxLength={2} onChange={e=>setUf(e.target.value.toUpperCase())}/></label></div>}
+ <label className="text-sm">UF CRM<select className="border rounded-lg p-2 block w-full mt-1" value={uf} onChange={e=>setUf(e.target.value)}>{UFS.map(value=><option value={value} key={value}>{value}</option>)}</select></label></div>}
  <p className="text-xs text-gray-600">Salvar cria apenas o cadastro profissional. A organização será vinculada posteriormente a uma integração pareada; CRM, login clínico e carteira financeira exigem processos separados.</p>
  <button className="bg-emerald-700 text-white px-4 py-2 rounded-lg disabled:opacity-60" disabled={working}>{working?'Salvando…':'Salvar profissional'}</button>
  </form>:selected.isLoading?<p>Carregando…</p>:selected.data?<div className="space-y-4">
