@@ -1,5 +1,6 @@
 'use client';
-import React, {useState,useRef} from 'react';
+import React, {useState} from 'react';
+import Link from 'next/link';
 import {useQuery,useQueryClient} from '@tanstack/react-query';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
@@ -34,10 +35,10 @@ function message(error:unknown){
  return (Array.isArray(m)?m[0]:m)||'Operação não concluída. Verifique o estado antes de repetir.';
 }
 export default function DoctorsProfessionalSection({initiallyExpanded=false}:{initiallyExpanded?:boolean}){
- const qc=useQueryClient(),key=useRef<string|null>(null);
+ const qc=useQueryClient();
  const [search,setSearch]=useState(''),[page,setPage]=useState(1),[expanded,setExpanded]=useState(initiallyExpanded);
  const [detailId,setDetailId]=useState<string|null>(null),[edit,setEdit]=useState(false),[working,setWorking]=useState(false);
- const [form,setForm]=useState<Record<string,string>>({...blank,country:'BR'}),[crm,setCrm]=useState(''),[uf,setUf]=useState('SP');
+ const [form,setForm]=useState<Record<string,string>>({...blank,country:'BR'});
  const [walletToLink,setWalletToLink]=useState(''),[showLegacy,setShowLegacy]=useState(false);
  const [organizationIntegrationId,setOrganizationIntegrationId]=useState(''),[organizationEvidence,setOrganizationEvidence]=useState('');
  const [statusFilter,setStatusFilter]=useState('');
@@ -52,17 +53,15 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
   enabled:expanded&&showLegacy,
  });
  function refresh(){void qc.invalidateQueries({queryKey:['professional-doctors']});if(detailId)void qc.invalidateQueries({queryKey:['professional-doctor',detailId]});}
- function newDoctor(){setDetailId(null);setEdit(true);setForm({...blank,country:'BR'});setCrm('');setUf('SP');key.current=crypto.randomUUID();}
- function editDoctor(){const d=selected.data;if(!d)return;setEdit(true);setForm(Object.fromEntries(fields.map(([k])=>[k,String(d[k as keyof Doctor]??'')])));key.current=null;}
+ 
+ function editDoctor(){const d=selected.data;if(!d)return;setEdit(true);setForm(Object.fromEntries(fields.map(([k])=>[k,String(d[k as keyof Doctor]??'')])));}
  async function submit(e:React.FormEvent){
- e.preventDefault();if(working)return;setWorking(true);
+ e.preventDefault();if(working||!detailId)return;setWorking(true);
  try{
   const data:Record<string,unknown>=Object.fromEntries(Object.entries(form).filter(([,v])=>v.trim()!=='').map(([k,v])=>[k,['cpfNormalized','postalCode'].includes(k)?v.replace(/\D/g,''):v.trim()]));
-  if(!detailId && crm.trim())data.licenses=[{crmNormalized:crm.replace(/\D/g,''),state:uf}];
-  if(detailId)await api.patch('/doctors/'+detailId,data);
-  else {key.current??=crypto.randomUUID();await api.post('/doctors',data,{headers:{'Idempotency-Key':key.current}});}
-  toast.success(detailId?'Cadastro atualizado':'Médico criado sem gerar subconta Asaas');
-  setEdit(false);key.current=null;refresh();
+  await api.patch('/doctors/'+detailId,data);
+  toast.success('Cadastro profissional atualizado');
+  setEdit(false);refresh();
  }catch(e){toast.error(message(e));}finally{setWorking(false);}
  }
  async function regularize(){
@@ -98,13 +97,13 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  <div className="p-5 flex flex-wrap gap-4 justify-between items-center">
  <div className="flex gap-3 items-start"><div className="bg-emerald-50 text-emerald-700 rounded-lg p-2"><Stethoscope size={19}/></div>
  <div><h2 className="text-lg font-semibold text-gray-900">Médicos profissionais</h2>
- <p className="text-xs text-gray-500 mt-1">Identidade profissional única, verificação de CRM e organização. A conta financeira e o login clínico são independentes.</p></div></div>
+ <p className="text-xs text-gray-500 mt-1">Identidade profissional única, verificação de CRM e organização. Todo médico operacional deve possuir conta Asaas vinculada. Aprovação profissional e acesso clínico têm estados próprios.</p></div></div>
  <button type="button" className="rounded-lg border px-4 py-2 text-sm hover:bg-gray-50" onClick={()=>setExpanded(v=>!v)} aria-expanded={expanded}>{expanded?'Recolher área':'Gerenciar médicos'}</button></div>
  {expanded&&<div className="p-5 border-t space-y-5">
  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" aria-label="Indicadores do cadastro médico">{([['Profissionais',result.data?.summary?.total],['Verificados',result.data?.summary?.verified],['Em revisão',result.data?.summary?.awaitingReview],['Acesso clínico ativo',result.data?.summary?.clinicalActive],['Incompletos',result.data?.summary?.incomplete],['Sem organização',result.data?.summary?.withoutOrganization],['Com vínculo financeiro',result.data?.summary?.withFinancialLink]] as const).map(([title,count])=><div key={title} className="border border-gray-200 rounded-lg p-4 bg-gray-50"><p className="text-xs text-gray-600">{title}</p><strong className="text-xl text-gray-900">{result.isError||result.isLoading?'—':count??'—'}</strong></div>)}</div>
  <div className="flex flex-wrap gap-2 items-center justify-between"><p className="text-sm text-gray-600">Resultados da pesquisa: <strong>{result.isError?'—':result.data?.pagination.total??'—'}</strong></p>
  <div className="flex gap-2"><button className="border rounded-lg px-3 py-2 text-sm" onClick={()=>setShowLegacy(v=>!v)}>Revisar legados</button>
- <button className="bg-emerald-700 text-white rounded-lg px-3 py-2 text-sm flex gap-2" onClick={newDoctor}><Plus size={16}/>Novo médico</button></div></div>
+ <Link href="/subaccounts/medical/new" className="bg-emerald-700 text-white rounded-lg px-3 py-2 text-sm flex gap-2"><Plus size={16}/>Adicionar médico</Link></div></div>
  <div className="flex flex-wrap gap-3 items-end"><label className="text-xs font-medium text-gray-700">Busca por nome ou CRM<input aria-label="Buscar médico" className="block w-full sm:w-80 border rounded-lg p-2 text-sm mt-1" value={search} placeholder="Nome ou CRM" onChange={e=>{setPage(1);setSearch(e.target.value);}}/></label><label className="text-xs font-medium text-gray-700">Estado do cadastro<select aria-label="Filtrar cadastro" className="block border rounded-lg p-2 text-sm mt-1" value={statusFilter} onChange={e=>{setPage(1);setStatusFilter(e.target.value);}}><option value="">Todos</option>{[['DRAFT','Incompletos'],['PENDING_REVIEW','Em revisão'],['VERIFIED','Verificados'],['REJECTED','Rejeitados']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label></div>
  {result.isLoading?<p role="status">Consultando cadastros…</p>:result.isError?<p role="alert" className="text-sm text-red-700">Não foi possível consultar médicos profissionais. Confirme a aplicação das migrations no banco Canfy e sua permissão ADMIN.</p>:
  !result.data?.data.length?<p className="text-sm text-gray-500">Nenhum cadastro encontrado.</p>:
@@ -122,13 +121,12 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  {legacy.isLoading?<p className="text-sm">Carregando candidatos…</p>:legacy.isError?<p role="alert" className="text-sm text-red-700">Candidatos indisponíveis</p>:
  legacy.data?.data.map(l=><div className="text-sm border-t pt-2" key={l.subaccountId}><strong>{l.name}</strong> • {l.financialIdentifierVerified?'Identificador financeiro existente':'Identificador não validado'}
  <p className="text-xs text-gray-500">ID: {l.subaccountId}. Use somente após revisão no cadastro do médico.</p>{detailId&&<button type="button" className="text-xs text-emerald-700 underline" onClick={()=>setWalletToLink(l.subaccountId)}>Selecionar para vínculo manual</button>}</div>)}</div>}
- {(detailId||edit)&&<div className="border border-emerald-200 rounded-xl p-5 space-y-4">
- <div className="flex justify-between"><h3 className="font-semibold">{edit?(detailId?'Editar cadastro':'Cadastrar profissional'):'Detalhe profissional'}</h3><button className="text-sm underline" onClick={()=>{setEdit(false);setDetailId(null);}}>Fechar</button></div>
+ {detailId&&<div className="border border-emerald-200 rounded-xl p-5 space-y-4">
+ <div className="flex justify-between"><h3 className="font-semibold">{edit?'Editar cadastro':'Detalhe profissional'}</h3><button className="text-sm underline" onClick={()=>{setEdit(false);setDetailId(null);}}>Fechar</button></div>
  {edit?<form className="space-y-4" onSubmit={submit}>
  {fieldGroups.map(group=><fieldset className="rounded-lg border border-gray-200 p-4 sm:p-5 space-y-3" key={group.title}><legend className="font-semibold text-gray-800 px-2">{group.title}</legend><p className="text-xs text-gray-500">{group.help}</p><div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{fields.filter(([k])=>group.keys.includes(k)).map(([k,n,t])=><label className="text-sm" key={k}>{n}{['rgState','state'].includes(k)?<select className="border rounded-lg block w-full p-2 mt-1" value={form[k]||''} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))}><option value="">Selecionar UF</option>{UFS.map(uf=><option value={uf} key={uf}>{uf}</option>)}</select>:<input className="border rounded-lg block w-full p-2 mt-1" type={t} value={formattedDocument(k,form[k]||'')} onChange={e=>setForm(f=>({...f,[k]:['cpfNormalized','postalCode'].includes(k)?e.target.value.replace(/\D/g,''):e.target.value}))} required={k==='fullName'} maxLength={k==='cpfNormalized'?14:k==='postalCode'?9:254}/>}</label>)}</div></fieldset>)}
- {!detailId&&<fieldset className="border border-gray-200 rounded-lg p-4 sm:p-5 space-y-3"><legend className="font-semibold text-gray-800 px-2">Registro profissional</legend><p className="text-xs text-gray-500">Informe o CRM para revisão. O registro ainda não será considerado verificado.</p><div className="grid grid-cols-2 gap-3"><label className="text-sm">CRM<input className="border rounded-lg p-2 block w-full mt-1" value={crm} onChange={e=>setCrm(e.target.value)}/></label>
- <label className="text-sm">UF CRM<select className="border rounded-lg p-2 block w-full mt-1" value={uf} onChange={e=>setUf(e.target.value)}>{UFS.map(value=><option value={value} key={value}>{value}</option>)}</select></label></div></fieldset>}
- <p className="text-xs text-gray-600">Salvar cria apenas o cadastro profissional. A organização será vinculada posteriormente a uma integração pareada; CRM, login clínico e carteira financeira exigem processos separados.</p>
+ 
+ <p className="text-xs text-gray-600">A edição atualiza o perfil existente sem criar outra carteira. CRM e vínculo financeiro exigem ações específicas.</p>
  <button className="bg-emerald-700 text-white px-4 py-2 rounded-lg disabled:opacity-60" disabled={working}>{working?'Salvando…':'Salvar profissional'}</button>
  </form>:selected.isLoading?<p>Carregando…</p>:selected.data?<div className="space-y-4">
  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">{[['Cadastro',selected.data.registrationStatus],['Acesso',selected.data.provisioningStatus],['Financeiro',selected.data.financialStatus||'UNLINKED']].map(([k,v])=><div className="border rounded p-3" key={k}><p className="text-xs text-gray-500">{k}</p><strong>{labels[v]||v}</strong></div>)}</div>
