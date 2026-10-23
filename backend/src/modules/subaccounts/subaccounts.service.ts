@@ -528,6 +528,15 @@ export class SubaccountsService {
       throw new BadRequestException('Conversão para Médico requer o cadastro profissional e vínculo validado.');
     }
 
+    if (subaccount.type === SubaccountType.DOCTOR && nextType !== SubaccountType.DOCTOR) {
+      const linked = await this.prisma.doctorFinancialLink.count({
+        where:{subaccountId:subaccount.id,active:true},
+      });
+      if (linked) throw new ConflictException(
+        'Subconta associada a médico ativo. Revise o vínculo profissional antes de alterar o tipo.',
+      );
+    }
+
     if (nextType !== SubaccountType.SUPPLIER && dto.fulfillmentType != null) {
       this.validateLocalMetadata(nextType, dto.fulfillmentType, false);
     }
