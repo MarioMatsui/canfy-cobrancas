@@ -19,6 +19,18 @@ function validCnpj(value: string): boolean {
   };
   return check(12) && check(13);
 }
+function stableStringify(value:unknown):string {
+  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';
+  if (value && typeof value === 'object') {
+    const obj=value as Record<string,unknown>;
+    return '{' + Object.keys(obj).sort().map(k=>JSON.stringify(k)+':'+stableStringify(obj[k])).join(',') + '}';
+  }
+  return JSON.stringify(value);
+}
+function derivedKey(key: string, purpose: string): string {
+  const hex = createHash('sha256').update('canfy-medical-v1:' + purpose + ':' + key).digest('hex');
+  return [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20,32)].join('-');
+}
 function financialKey(key: string): string {
   // Stable separate key for the existing durable SubaccountCreateOperation ledger.
   const hex = createHash('sha256').update('canfy-doctor-asaas-v1:' + key).digest('hex');
@@ -69,12 +81,34 @@ export class DoctorOnboardingService {
       throw new BadRequestException('Modo financeiro inválido');
     }
 
+    // Reserve the full workflow's intent before either a local Doctor or remote
+    // Asaas side effect. A reused key cannot change the operation mode/account.
+    const requestHash=createHash('sha256').update(stableStringify(dto)).digest('hex');
+    const replay=await this.db.doctorProvisioningOperation.findUnique({where:{idempotencyKey:key}});
+    if (replay) {
+      if (replay.kind!=='DOCTOR_ONBOARD' || replay.requestHash!==requestHash)
+        throw new ConflictException('Chave de operação utilizada com outro cadastro ou modo financeiro');
+    } else {
+      try {
+        await this.db.doctorProvisioningOperation.create({data:{
+          kind:'DOCTOR_ONBOARD',idempotencyKey:key,requestHash,status:'PENDING',actorUserId:actorId,
+        }});
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code!=='P2002') throw error;
+        const concurrent=await this.db.doctorProvisioningOperation.findUnique({where:{idempotencyKey:key}});
+        if (!concurrent || concurrent.kind!=='DOCTOR_ONBOARD' || concurrent.requestHash!==requestHash)
+          throw new ConflictException('Chave de operação utilizada simultaneamente com outra solicitação');
+      }
+    }
+
     // Doctor.create records a persistent DOCTOR_CREATE idempotency operation,
     // and rejects CPF/CRM duplicates before any remote financial side effect.
     const doctor = await this.doctors.create(
       {...dto.doctor, cpfNormalized:doctorCpf},
-      key,
+      derivedKey(key,'professional'),
     );
+
+    await this.db.doctorProvisioningOperation.update({where:{idempotencyKey:key},data:{doctorId:doctor.id}});
 
     const account = dto.mode === DoctorOnboardingFinancialMode.CREATE
       ? await this.subaccounts.create(dto.newAccount!, financialKey(key), true)
@@ -112,6 +146,7 @@ export class DoctorOnboardingService {
       await this.doctors.associateOrganization(doctor.id,dto.integrationId,actorId,dto.evidenceReference!);
     }
 
+    await this.db.doctorProvisioningOperation.update({where:{idempotencyKey:key},data:{status:'COMPLETED',resultDoctorId:doctor.id}});
     const canonical = await this.doctors.detail(doctor.id);
     return {
       doctor:canonical,
