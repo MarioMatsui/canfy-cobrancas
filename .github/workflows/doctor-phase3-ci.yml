@@ -6,6 +6,9 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/canfy_ci
+      JWT_SECRET: ci-only-dummy-secret-never-used-for-live-auth
     timeout-minutes: 18
     permissions:
       contents: read
