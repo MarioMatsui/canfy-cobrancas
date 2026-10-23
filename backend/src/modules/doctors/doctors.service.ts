@@ -220,4 +220,48 @@ export class DoctorsService {
     return {doctorId:id,provisioned:false,status:'AWAITING_MSGDESK',
       message:'Provisionamento Auth não habilitado nesta etapa; nenhuma credencial criada'};
   }
+  /**
+   * Confirm an Auth UID only from the organization-scoped integration v2.
+   * Never changes subaccounts, balances, historical charges or CRM verification.
+   */
+  async confirmProvisioning(id:string, authUserId:string, rawKey:string, organizationId:string) {
+    const key=idempotency(rawKey);
+    const doctor=await this.db.doctor.findUnique({where:{id},select:{
+      id:true,msgdeskOrganizationId:true,msgdeskAuthUserId:true,registrationStatus:true
+    }});
+    if(!doctor || !organizationId || doctor.msgdeskOrganizationId!==organizationId)
+      throw new NotFoundException('Médico não encontrado');
+    if(doctor.registrationStatus!==DoctorRegistrationStatus.VERIFIED)
+      throw new ConflictException('Cadastro profissional não verificado');
+    if(doctor.msgdeskAuthUserId && doctor.msgdeskAuthUserId!==authUserId)
+      throw new ConflictException('Médico já vinculado a outra identidade Auth');
+    const requestHash=createHash('sha256').update(stableStringify({id,authUserId,organizationId})).digest('hex');
+    const previous=await this.db.doctorProvisioningOperation.findUnique({where:{idempotencyKey:key}});
+    if(previous){
+      if(previous.kind!=='AUTH_CONFIRM' || previous.requestHash!==requestHash)
+        throw new ConflictException('Chave de idempotência reutilizada');
+      if(previous.status!=='COMPLETED')
+        throw new ConflictException('Reconciliação de provisionamento necessária');
+      return this.provisioning(id,organizationId);
+    }
+    try {
+      await this.db.$transaction(async tx=>{
+        const op=await tx.doctorProvisioningOperation.create({
+          data:{doctorId:id,kind:'AUTH_CONFIRM',idempotencyKey:key,requestHash,status:'PENDING'}
+        });
+        const updated=await tx.doctor.updateMany({
+          where:{id,msgdeskOrganizationId:organizationId,msgdeskAuthUserId:doctor.msgdeskAuthUserId},
+          data:{msgdeskAuthUserId:authUserId,provisioningStatus:'LINKED',accessActive:false}
+        });
+        if(updated.count!==1)throw new ConflictException('Cadastro alterado em paralelo; reconciliação necessária');
+        await tx.doctorProvisioningOperation.update({where:{id:op.id},data:{status:'COMPLETED',resultDoctorId:id}});
+      });
+    }catch(error){
+      if(error instanceof Prisma.PrismaClientKnownRequestError && error.code==='P2002')
+        throw new ConflictException('Identidade Auth ou confirmação já vinculada; verifique antes de repetir');
+      throw error;
+    }
+    return this.provisioning(id,organizationId);
+  }
+
 }
