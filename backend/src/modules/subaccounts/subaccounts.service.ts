@@ -365,7 +365,7 @@ export class SubaccountsService {
   async update(id: string, dto: UpdateSubaccountDto) {
     const subaccount = await this.findOne(id);
 
-    if (subaccount.asaasId) {
+    if (this.isRealAsaasId(subaccount.asaasId)) {
       await this.asaas.put(`/accounts/${subaccount.asaasId}`, dto);
     }
 

@@ -44,6 +44,17 @@ function conflict(error:unknown):never {
   throw error;
 }
 
+// Canonical request hashing prevents harmless JSON object key reordering from
+// changing the meaning of an idempotent create attempt.
+function stableStringify(value:unknown):string {
+  if (Array.isArray(value)) return '['+value.map(stableStringify).join(',')+']';
+  if (value && typeof value==='object' && !(value instanceof Date)) {
+    const obj=value as Record<string,unknown>;
+    return '{'+Object.keys(obj).sort().map(key=>JSON.stringify(key)+':'+stableStringify(obj[key])).join(',')+'}';
+  }
+  return JSON.stringify(value);
+}
+
 @Injectable()
 export class DoctorsService {
   constructor(private readonly db:PrismaService) {}
@@ -74,6 +85,29 @@ export class DoctorsService {
     })),pagination:{page,limit,total,totalPages:Math.ceil(total/limit)}};
   }
 
+  async legacyCandidates(query:DoctorListDto,includeOther=false) {
+    const page=query.page??1, limit=query.limit??20;
+    // Classifying OTHER as physician is never automatic; show it only on
+    // explicit request for manual review.
+    const where:Prisma.SubaccountWhereInput={
+      type:includeOther?{in:[SubaccountType.DOCTOR,SubaccountType.OTHER]}:SubaccountType.DOCTOR,
+      doctorFinancialLinks:{none:{active:true}},
+      ...(query.search?{name:{contains:query.search,mode:Prisma.QueryMode.insensitive}}:{})
+    };
+    const [rows,total]=await Promise.all([
+      this.db.subaccount.findMany({where,skip:(page-1)*limit,take:limit,
+        orderBy:{createdAt:'desc'},
+        select:{id:true,name:true,type:true,active:true,deletedAt:true,asaasId:true,walletId:true,createdAt:true}}),
+      this.db.subaccount.count({where})
+    ]);
+    return {data:rows.map(x=>({
+      subaccountId:x.id,name:x.name,classification:x.type,
+      reviewRequired:true,active:x.active,softDeleted:!!x.deletedAt,
+      financialIdentifierVerified:!!x.walletId && !x.asaasId.startsWith('external_'),
+      createdAt:x.createdAt
+    })),pagination:{page,limit,total,totalPages:Math.ceil(total/limit)}};
+  }
+
   async detail(id:string) {
     const doctor=await this.db.doctor.findUnique({where:{id},include:{
       licenses:true,financialLinks:{include:{subaccount:{
@@ -90,7 +124,7 @@ export class DoctorsService {
     assertCpf(dto.cpfNormalized);
     const data=sensitiveData(dto);
     const licenses=dto.licenses??[];
-    const requestHash=createHash('sha256').update(JSON.stringify({data,licenses})).digest('hex');
+    const requestHash=createHash('sha256').update(stableStringify({data,licenses})).digest('hex');
     const previous=await this.db.doctorProvisioningOperation.findUnique({where:{idempotencyKey:key}});
     if(previous){
       if(previous.kind!=='DOCTOR_CREATE' || previous.requestHash!==requestHash)

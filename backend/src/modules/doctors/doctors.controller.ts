@@ -14,6 +14,9 @@ export class DoctorsController {
   constructor(private readonly doctors:DoctorsService) {}
   @Get() list(@Query() q:DoctorListDto){return this.doctors.list(q);}
   @Post() create(@Body() dto:CreateDoctorDto,@Headers('idempotency-key') key?:string){return this.doctors.create(dto,key);}
+  @Get('legacy-candidates') legacy(@Query() q:DoctorListDto) {
+    return this.doctors.legacyCandidates(q);
+  }
   @Get(':id') detail(@Param('id',ParseUUIDPipe) id:string){return this.doctors.detail(id);}
   @Patch(':id') update(@Param('id',ParseUUIDPipe) id:string,@Body() dto:UpdateDoctorDto){return this.doctors.update(id,dto);}
   @Post(':id/licenses') license(@Param('id',ParseUUIDPipe) id:string,@Body() dto:DoctorLicenseInputDto){return this.doctors.addLicense(id,dto);}

@@ -42,3 +42,6 @@ Não se deve rodar migrate deploy contra a base de produção sem aprovação.
 - Não existe provisionador Supabase Auth neste Prompt 2; não marcar doctor login como ativo.
 - A verificação oficial CRM não está automatizada; regularize move para PENDING_REVIEW.
 - Validar endpoints e testes contra DB de desenvolvimento antes de merge/deploy.
+
+## Novos candidatos legados
+`GET /api/doctors/legacy-candidates` e o equivalente integrado `/api/integrations/v2/admin/doctors/legacy-candidates` devolvem APENAS candidatos DOCTOR sem vínculo ativo, sem CPF/Wallet/API Key. Os registros OTHER não são classificados automaticamente; precisam de revisão manual em processo futuro. Nenhum backfill executado.

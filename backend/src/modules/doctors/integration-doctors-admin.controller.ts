@@ -14,6 +14,8 @@ export class IntegrationDoctorsAdminController {
   constructor(private readonly doctors:DoctorsService){}
   @Get() @RequireIntegrationScopes('doctors:admin:read')
   list(@Query() q:DoctorListDto){return this.doctors.list(q);}
+  @Get('legacy-candidates') @RequireIntegrationScopes('doctors:admin:read')
+  legacy(@Query() q:DoctorListDto){return this.doctors.legacyCandidates(q);}
   @Get(':id') @RequireIntegrationScopes('doctors:admin:read')
   detail(@Param('id',ParseUUIDPipe) id:string){return this.doctors.detail(id);}
   @Post() @RequireIntegrationScopes('doctors:admin:write')
