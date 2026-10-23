@@ -843,3 +843,24 @@ model DoctorProvisioningOperation {
   @@index([doctorId,status])
   @@map("doctor_provisioning_operations")
 }
+
+enum SubaccountCreationStatus {
+  SENDING
+  RESPONSE_RECEIVED
+  COMPLETED
+  NEEDS_RECONCILIATION
+}
+
+model SubaccountCreateOperation {
+  id               String @id @default(uuid())
+  idempotencyKey   String @unique @map("idempotency_key") @db.VarChar(100)
+  requestHash      String @map("request_hash") @db.VarChar(64)
+  status           SubaccountCreationStatus @default(SENDING)
+  remoteAccountId  String? @map("remote_account_id") @db.VarChar(100)
+  localSubaccountId String? @map("local_subaccount_id")
+  errorCode        String? @map("error_code") @db.VarChar(64)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  @@index([status,createdAt])
+  @@map("subaccount_create_operations")
+}
