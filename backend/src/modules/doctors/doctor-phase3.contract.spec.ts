@@ -30,6 +30,38 @@ describe('stage 3 clinical provisioning contract',()=>{
   await expect(service.confirmProvisioning('d1','uid','bad','org-1'))
    .rejects.toBeInstanceOf(BadRequestException);
  });
+ it('preserves activated clinical access on repeated UID confirmation with a new key',async()=>{
+  const db=makeDB();
+  db.doctor.findUnique.mockResolvedValue({
+    ...doctor,msgdeskAuthUserId:'uid',registrationStatus:'VERIFIED'
+  });
+  const service=new DoctorsService(db as never);
+  jest.spyOn(service,'provisioning').mockResolvedValue({
+    id:'d1',msgdeskAuthUserId:'uid',provisioningStatus:'LINKED',
+    accessActive:true,provisioned:true
+  } as never);
+  const result=await service.confirmProvisioning(
+    'd1','uid','9d88900f-236a-48b3-bd6f-2816a8ec0a01','org-1'
+  );
+  expect(result.accessActive).toBe(true);
+  expect(db.$transaction).not.toHaveBeenCalled();
+  expect(db.doctorProvisioningOperation.findUnique).toHaveBeenCalledTimes(1);
+ });
+ it('refuses replay of an ambiguous partially linked identity without rewriting clinical state',async()=>{
+  const db=makeDB();
+  db.doctor.findUnique.mockResolvedValue({
+    ...doctor,msgdeskAuthUserId:'uid',registrationStatus:'VERIFIED'
+  });
+  const service=new DoctorsService(db as never);
+  jest.spyOn(service,'provisioning').mockResolvedValue({
+    id:'d1',msgdeskAuthUserId:'uid',provisioningStatus:'PENDING',
+    accessActive:false,provisioned:true
+  } as never);
+  await expect(service.confirmProvisioning(
+    'd1','uid','bd830360-352c-4524-b046-e2701f3a7cda','org-1'
+  )).rejects.toThrow('reconciliação necessária');
+  expect(db.$transaction).not.toHaveBeenCalled();
+ });
  it('confirms only the doctor identity, without financial mutations',async()=>{
   const db=makeDB();
   const service=new DoctorsService(db as never);

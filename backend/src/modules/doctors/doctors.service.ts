@@ -325,6 +325,16 @@ export class DoctorsService {
         throw new ConflictException('Reconciliação de provisionamento necessária');
       return this.provisioning(id,organizationId);
     }
+    // A previously confirmed UID is already linked. A retry (even with a
+    // newly generated idempotency key) must NEVER reset clinical access.
+    // In particular, the original updateMany below sets accessActive=false
+    // for a *new* link and would otherwise revoke an activated doctor.
+    if(doctor.msgdeskAuthUserId===authUserId) {
+      const existing=await this.provisioning(id,organizationId);
+      if(existing.provisioningStatus==='LINKED') return existing;
+      // Any inconsistent partial state requires operator reconciliation.
+      throw new ConflictException('Vínculo Auth parcial; reconciliação necessária');
+    }
     try {
       await this.db.$transaction(async tx=>{
         const op=await tx.doctorProvisioningOperation.create({
