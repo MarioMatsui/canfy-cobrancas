@@ -1,11 +1,11 @@
 'use client';
-import {useState,useRef} from 'react';
+import React, {useState,useRef} from 'react';
 import {useQuery,useQueryClient} from '@tanstack/react-query';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 import {Stethoscope,Plus,RefreshCw} from 'lucide-react';
 
-type License={crmNormalized:string;state:string;verificationStatus:string};
+type License={id?:string;crmNormalized:string;state:string;verificationStatus:string};
 type Doctor={id:string;fullName:string;registrationStatus:string;provisioningStatus:string;accessActive:boolean;maskedCpf?:string|null;financialStatus?:string;licenses:License[];updatedAt:string;email?:string;cpfNormalized?:string;rg?:string;rgIssuer?:string;rgState?:string;birthDate?:string;mobilePhone?:string;postalCode?:string;street?:string;streetNumber?:string;addressComplement?:string;neighborhood?:string;city?:string;state?:string;country?:string;financialLinks?:unknown[]};
 type Result={data:Doctor[];pagination:{page:number;limit:number;total:number;totalPages:number}};
 const fields:[string,string,string][]=[
@@ -28,6 +28,7 @@ export default function DoctorsProfessionalSection(){
  const [detailId,setDetailId]=useState<string|null>(null),[edit,setEdit]=useState(false),[working,setWorking]=useState(false);
  const [form,setForm]=useState<Record<string,string>>({...blank,country:'BR'}),[crm,setCrm]=useState(''),[uf,setUf]=useState('SP');
  const [walletToLink,setWalletToLink]=useState(''),[showLegacy,setShowLegacy]=useState(false);
+ const [reviewReference,setReviewReference]=useState(''),[reviewLicenseId,setReviewLicenseId]=useState('');
  const result=useQuery<Result>({queryKey:['professional-doctors',page,search],queryFn:()=>api.get('/doctors',{params:{page,limit:20,search}}).then(r=>r.data),enabled:expanded});
  const selected=useQuery<Doctor>({queryKey:['professional-doctor',detailId],queryFn:()=>api.get('/doctors/'+detailId).then(r=>r.data),enabled:!!detailId});
  const legacy=useQuery<{data:{subaccountId:string;name:string;reviewRequired:boolean;financialIdentifierVerified:boolean}[]}>({
@@ -58,6 +59,16 @@ export default function DoctorsProfessionalSection(){
  setWorking(true);try{await api.post('/doctors/'+detailId+'/financial-links',{subaccountId:walletToLink.trim()});
  toast.success('Vínculo submetido à revisão financeira');setWalletToLink('');refresh();}
  catch(e){toast.error(message(e));}finally{setWorking(false);}
+ }
+ async function review(decision:'VERIFIED'|'REJECTED'){
+  if(!detailId||working||!reviewLicenseId||reviewReference.trim().length<8)return;
+  if(!confirm(decision==='VERIFIED'?'Confirma que consultou o CRM no conselho competente e possui referência verificável?':'Rejeitar este CRM após revisão humana?'))return;
+  setWorking(true);
+  try{
+    await api.post('/doctors/'+detailId+'/licenses/review',{licenseId:reviewLicenseId,decision,evidenceReference:reviewReference.trim()});
+    toast.success('Decisão de revisão auditada. O acesso MsgDesk continua separado.');
+    setReviewLicenseId('');setReviewReference('');refresh();
+  }catch(e){toast.error(message(e));}finally{setWorking(false);}
  }
  return <section className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden" aria-label="Médicos profissionais">
  <div className="p-5 flex flex-wrap gap-4 justify-between items-center">
@@ -100,6 +111,18 @@ export default function DoctorsProfessionalSection(){
  <p className="text-xs text-gray-500">Cadastro em revisão não equivale à verificação oficial do CRM. Provisionamento MsgDesk depende de vínculo seguro com a organização.</p>
  <div className="flex flex-wrap gap-2"><button className="border rounded px-3 py-2 text-sm" onClick={editDoctor}>Editar</button>
  <button className="bg-emerald-700 text-white rounded px-3 py-2 text-sm" disabled={working||selected.data.registrationStatus==='VERIFIED'} onClick={()=>void regularize()}>Encaminhar para revisão</button></div>
+ {selected.data.registrationStatus==='PENDING_REVIEW' && selected.data.licenses.some(l=>l.verificationStatus==='PENDING')&&
+ <section className="border-t pt-4 space-y-3" aria-label="Revisão documental do CRM">
+  <h4 className="font-semibold text-sm">Revisão humana do CRM</h4>
+  <p className="text-xs text-gray-600">Verifique o registro no conselho competente antes de aprovar. O cadastro não é verificado automaticamente.</p>
+  <label className="block text-sm">Registro a revisar<select className="border rounded-lg p-2 w-full mt-1" value={reviewLicenseId} onChange={e=>setReviewLicenseId(e.target.value)}>
+   <option value="">Selecionar CRM pendente</option>
+   {selected.data.licenses.filter(l=>l.id&&l.verificationStatus==='PENDING').map(l=><option key={l.id} value={l.id}>{l.crmNormalized} / {l.state}</option>)}
+  </select></label>
+  <label className="block text-sm">Referência da consulta ao conselho<input className="border rounded-lg p-2 w-full mt-1" value={reviewReference} onChange={e=>setReviewReference(e.target.value)} maxLength={250} placeholder="URL pública do registro ou protocolo verificável"/></label>
+  <div className="flex gap-2"><button className="rounded border px-3 py-2 text-sm" disabled={working||!reviewLicenseId||reviewReference.trim().length<8} onClick={()=>void review('REJECTED')}>Rejeitar CRM</button>
+  <button className="rounded bg-emerald-700 text-white px-3 py-2 text-sm" disabled={working||!reviewLicenseId||reviewReference.trim().length<8} onClick={()=>void review('VERIFIED')}>Confirmar verificação humana</button></div>
+ </section>}
  <div className="border-t pt-4 space-y-2"><h4 className="font-medium text-sm">Vincular subconta existente</h4>
  <p className="text-xs text-gray-500">Requer carteira DOCTOR verificada. Não cria Asaas nem modifica splits ou histórico.</p>
  <input className="border rounded-lg p-2 text-sm w-full max-w-md" aria-label="ID da subconta" placeholder="UUID da subconta existente" value={walletToLink} onChange={e=>setWalletToLink(e.target.value)}/>
