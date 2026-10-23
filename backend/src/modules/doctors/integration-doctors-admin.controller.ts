@@ -21,11 +21,11 @@ export class IntegrationDoctorsAdminController {
   @Post() @RequireIntegrationScopes('doctors:admin:write')
   create(@Body() dto:CreateDoctorDto,@Headers('idempotency-key') key:string,@Request() req:{integration:{doctorOrganizationId:string}}){return this.doctors.create(dto,key,req.integration.doctorOrganizationId);}
   @Patch(':id') @RequireIntegrationScopes('doctors:admin:write')
-  update(@Param('id',ParseUUIDPipe) id:string,@Body() dto:UpdateDoctorDto,@Request() req:{integration:{doctorOrganizationId:string}}){return this.doctors.update(id,dto,req.integration.doctorOrganizationId);}
+  async update(@Param('id',ParseUUIDPipe) id:string,@Body() dto:UpdateDoctorDto,@Request() req:{integration:{doctorOrganizationId:string}}){await this.doctors.update(id,dto,req.integration.doctorOrganizationId);return this.doctors.detailForIntegration(id,req.integration.doctorOrganizationId);}
   @Post(':id/licenses') @RequireIntegrationScopes('doctors:admin:write')
-  license(@Param('id',ParseUUIDPipe) id:string,@Body() dto:DoctorLicenseInputDto,@Request() req:{integration:{doctorOrganizationId:string}}){return this.doctors.addLicense(id,dto,req.integration.doctorOrganizationId);}
+  async license(@Param('id',ParseUUIDPipe) id:string,@Body() dto:DoctorLicenseInputDto,@Request() req:{integration:{doctorOrganizationId:string}}){await this.doctors.addLicense(id,dto,req.integration.doctorOrganizationId);return this.doctors.detailForIntegration(id,req.integration.doctorOrganizationId);}
   @Post(':id/regularize') @RequireIntegrationScopes('doctors:admin:write')
-  regularize(@Param('id',ParseUUIDPipe) id:string,@Request() req:{integration:{doctorOrganizationId:string}}){return this.doctors.regularize(id,req.integration.doctorOrganizationId);}
+  async regularize(@Param('id',ParseUUIDPipe) id:string,@Request() req:{integration:{doctorOrganizationId:string}}){await this.doctors.regularize(id,req.integration.doctorOrganizationId);return this.doctors.detailForIntegration(id,req.integration.doctorOrganizationId);}
   // Financial links require Canfy operator review until subaccount ownership is modeled.
   @Get(':id/provisioning') @RequireIntegrationScopes('doctors:admin:read')
   provisioning(@Param('id',ParseUUIDPipe) id:string,@Request() req:{integration:{doctorOrganizationId:string}}){return this.doctors.provisioning(id,req.integration.doctorOrganizationId);}
