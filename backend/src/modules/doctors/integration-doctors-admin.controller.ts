@@ -17,7 +17,7 @@ export class IntegrationDoctorsAdminController {
   list(@Query() q:DoctorListDto,@Request() req:{integration:{doctorOrganizationId:string}}){return this.doctors.list(q,req.integration.doctorOrganizationId);}
   // Legacy financial candidates are not tenant-tagged. Expose only to Canfy JWT admins.
   @Get(':id') @RequireIntegrationScopes('doctors:admin:read')
-  detail(@Param('id',ParseUUIDPipe) id:string,@Request() req:{integration:{doctorOrganizationId:string}}){return this.doctors.detail(id,req.integration.doctorOrganizationId);}
+  detail(@Param('id',ParseUUIDPipe) id:string,@Request() req:{integration:{doctorOrganizationId:string}}){return this.doctors.detailForIntegration(id,req.integration.doctorOrganizationId);}
   @Post() @RequireIntegrationScopes('doctors:admin:write')
   create(@Body() dto:CreateDoctorDto,@Headers('idempotency-key') key:string,@Request() req:{integration:{doctorOrganizationId:string}}){return this.doctors.create(dto,key,req.integration.doctorOrganizationId);}
   @Patch(':id') @RequireIntegrationScopes('doctors:admin:write')
