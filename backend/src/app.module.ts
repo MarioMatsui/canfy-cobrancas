@@ -19,6 +19,7 @@ import { UsersModule } from './modules/users/users.module';
 import { PublicCheckoutModule } from './modules/public-checkout/public-checkout.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { HealthController } from './health.controller';
+import { DoctorsModule } from './modules/doctors/doctors.module';
 
 @Module({
   controllers: [HealthController],
@@ -49,6 +50,7 @@ import { HealthController } from './health.controller';
     UsersModule,
     PublicCheckoutModule,
     IntegrationsModule,
+    DoctorsModule,
     WebhooksModule,
     SyncModule,
     DashboardModule,
