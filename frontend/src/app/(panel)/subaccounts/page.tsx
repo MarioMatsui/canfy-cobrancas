@@ -5,6 +5,7 @@ import { Plus, Search, ToggleLeft, ToggleRight, History, Stethoscope, Package, U
 import { useState, useRef } from 'react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
+import DoctorsProfessionalSection from './DoctorsProfessionalSection';
 
 type SubaccountType = 'DOCTOR' | 'SUPPLIER' | 'OTHER';
 type FulfillmentType = 'NATIONAL' | 'INTERNATIONAL';
@@ -385,6 +386,7 @@ export default function SubaccountsPage() {
 
   return (
     <div className="space-y-6">
+      <DoctorsProfessionalSection />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Subcontas</h1>
