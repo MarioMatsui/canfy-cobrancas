@@ -1,6 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import { PartialType } from '@nestjs/swagger';
-import { ArrayMaxSize, IsArray, IsDateString, IsEmail, IsEnum, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { IsIn, ArrayMaxSize, IsArray, IsDateString, IsEmail, IsEnum, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 import { DoctorRegistrationStatus } from '@prisma/client';
 
 const digits = ({value}: {value:unknown}) => typeof value === 'string' ? value.replace(/\D/g,'') : value;
@@ -46,4 +46,20 @@ export class DoctorListDto {
 
 export class DoctorFinancialLinkDto {
   @IsUUID() subaccountId!: string;
+}
+
+/** Trusted integration-only. Never expose this field through generic Doctor PATCH. */
+export class ConfirmDoctorProvisioningDto {
+  @IsUUID() authUserId!: string;
+}
+
+/** Only a Canfy ADMIN can attest a manual CRM registry verification. */
+export class ReviewDoctorLicenseDto {
+  @IsUUID() licenseId!:string;
+  @IsIn(['VERIFIED','REJECTED']) decision!:'VERIFIED'|'REJECTED';
+  @IsString() @MinLength(8) @MaxLength(250) evidenceReference!:string;
+}
+
+export class ConfirmClinicalAccessDto {
+  @IsUUID() authUserId!:string;
 }

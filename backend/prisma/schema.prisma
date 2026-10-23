@@ -790,6 +790,7 @@ model Doctor {
   licenses           DoctorLicense[]
   financialLinks     DoctorFinancialLink[]
   operations         DoctorProvisioningOperation[]
+  reviewEvents       DoctorReviewEvent[]
   @@index([registrationStatus])
   @@index([fullName])
   @@index([msgdeskOrganizationId])
@@ -806,6 +807,7 @@ model DoctorLicense {
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
   doctor             Doctor @relation(fields:[doctorId],references:[id],onDelete:Restrict)
+  reviewEvents       DoctorReviewEvent[]
   @@unique([crmNormalized,state])
   @@index([doctorId])
   @@map("doctor_licenses")
@@ -863,4 +865,19 @@ model SubaccountCreateOperation {
   updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
   @@index([status,createdAt])
   @@map("subaccount_create_operations")
+}
+
+/** Evidência administrativa para revisão humana. Não substitui consulta ao conselho. */
+model DoctorReviewEvent {
+  id String @id @default(uuid())
+  doctorId String @map("doctor_id")
+  licenseId String @map("license_id")
+  actorUserId String @map("actor_user_id")
+  evidenceReference String @map("evidence_reference") @db.VarChar(250)
+  decision String @db.VarChar(16)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  doctor Doctor @relation(fields:[doctorId],references:[id],onDelete:Restrict)
+  license DoctorLicense @relation(fields:[licenseId],references:[id],onDelete:Restrict)
+  @@index([doctorId,createdAt])
+  @@map("doctor_review_events")
 }

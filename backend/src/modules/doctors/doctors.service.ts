@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { createHash } from 'node:crypto';
 import { DoctorRegistrationStatus, Prisma, SubaccountType } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { CreateDoctorDto, DoctorFinancialLinkDto, DoctorLicenseInputDto, DoctorListDto, UpdateDoctorDto } from './doctors.dto';
+import { CreateDoctorDto, DoctorFinancialLinkDto, DoctorLicenseInputDto, DoctorListDto, ReviewDoctorLicenseDto, UpdateDoctorDto } from './doctors.dto';
 
 export function assertCpf(value?: string) {
   if (!value) return;
@@ -120,6 +120,14 @@ export class DoctorsService {
     return doctor;
   }
 
+  /** Integration details never expose Asaas wallet/account identifiers or financial PII. */
+  async detailForIntegration(id:string,organizationId:string) {
+    const {financialLinks,...doctor}=await this.detail(id,organizationId);
+    return {...doctor,financialLinks:financialLinks.map(link=>({
+      status:link.status,active:link.active,createdAt:link.createdAt
+    }))};
+  }
+
   async create(dto:CreateDoctorDto,rawKey?:string,organizationId?:string) {
     const key=idempotency(rawKey);
     assertCpf(dto.cpfNormalized);
@@ -204,6 +212,42 @@ export class DoctorsService {
     return this.detail(id,organizationId);
   }
 
+  /**
+   * JWT ADMIN manual review, with reference to independently checked CRM evidence.
+   * Simply submitting data via regularize() never verifies a professional.
+   */
+  async reviewLicense(id:string,dto:ReviewDoctorLicenseDto,actorUserId:string) {
+    if(!actorUserId)throw new BadRequestException('Ator administrativo não identificado');
+    const doctor=await this.detail(id);
+    if(doctor.registrationStatus!==DoctorRegistrationStatus.PENDING_REVIEW)
+      throw new ConflictException('Apenas cadastros em revisão podem ser verificados');
+    const license=doctor.licenses.find(l=>l.id===dto.licenseId);
+    if(!license || license.verificationStatus!=='PENDING')
+      throw new ConflictException('CRM não encontrado ou já revisado');
+    const evidence=dto.evidenceReference.trim();
+    if(evidence.length<8||evidence.length>250)
+      throw new BadRequestException('Referência de verificação inválida');
+    await this.db.$transaction(async tx=>{
+      const updated=await tx.doctorLicense.updateMany({
+        where:{id:dto.licenseId,doctorId:id,verificationStatus:'PENDING'},
+        data:{verificationStatus:dto.decision,verifiedAt:dto.decision==='VERIFIED'?new Date():null}
+      });
+      if(updated.count!==1)throw new ConflictException('CRM revisado em paralelo');
+      await tx.doctorReviewEvent.create({data:{
+        doctorId:id,licenseId:dto.licenseId,actorUserId,evidenceReference:evidence,decision:dto.decision
+      }});
+      const statuses=await tx.doctorLicense.findMany({where:{doctorId:id},select:{verificationStatus:true}});
+      const verified=statuses.some(x=>x.verificationStatus==='VERIFIED');
+      const rejected=statuses.every(x=>x.verificationStatus==='REJECTED');
+      await tx.doctor.update({where:{id},data:verified?{
+        registrationStatus:'VERIFIED',verifiedAt:new Date()
+      }:rejected?{registrationStatus:'REJECTED',verifiedAt:null}:{
+        registrationStatus:'PENDING_REVIEW',verifiedAt:null
+      }});
+    });
+    return this.detail(id);
+  }
+
   async provisioning(id:string,organizationId?:string) {
     const d=await this.db.doctor.findUnique({where:{id},select:{
       msgdeskOrganizationId:true,
@@ -220,4 +264,85 @@ export class DoctorsService {
     return {doctorId:id,provisioned:false,status:'AWAITING_MSGDESK',
       message:'Provisionamento Auth não habilitado nesta etapa; nenhuma credencial criada'};
   }
+  /**
+   * Confirm an Auth UID only from the organization-scoped integration v2.
+   * Never changes subaccounts, balances, historical charges or CRM verification.
+   */
+  /** Clinic authorization is separate from financial eligibility, identity and license review. */
+  async activateClinicalAccess(id:string,authUserId:string,rawKey:string,organizationId:string){
+    const key=idempotency(rawKey);
+    const doctor=await this.db.doctor.findUnique({where:{id},
+      include:{licenses:{select:{verificationStatus:true}}}});
+    if(!doctor || !organizationId || doctor.msgdeskOrganizationId!==organizationId)
+      throw new NotFoundException('Médico não encontrado');
+    if(doctor.msgdeskAuthUserId!==authUserId ||
+      doctor.registrationStatus!=='VERIFIED'||doctor.provisioningStatus!=='LINKED'||
+      !doctor.licenses.some(l=>l.verificationStatus==='VERIFIED'))
+      throw new ConflictException('Médico não elegível para acesso clínico');
+    const requestHash=createHash('sha256').update(stableStringify({id,authUserId,organizationId})).digest('hex');
+    const previous=await this.db.doctorProvisioningOperation.findUnique({where:{idempotencyKey:key}});
+    if(previous) {
+      if(previous.kind!=='CLINICAL_ACTIVATE'||previous.requestHash!==requestHash)
+        throw new ConflictException('Idempotency-Key reutilizada com outra solicitação');
+      if(previous.status!=='COMPLETED') throw new ConflictException('Ativação requer reconciliação');
+      return this.provisioning(id,organizationId);
+    }
+    try {
+      await this.db.$transaction(async tx=>{
+        const op=await tx.doctorProvisioningOperation.create({data:{
+          doctorId:id,kind:'CLINICAL_ACTIVATE',idempotencyKey:key,requestHash,status:'PENDING'
+        }});
+        const updated=await tx.doctor.updateMany({where:{
+          id,msgdeskOrganizationId:organizationId,msgdeskAuthUserId:authUserId,
+          registrationStatus:'VERIFIED',provisioningStatus:'LINKED'
+        },data:{accessActive:true}});
+        if(updated.count!==1)throw new ConflictException('Revalidação de acesso falhou');
+        await tx.doctorProvisioningOperation.update({where:{id:op.id},data:{
+          status:'COMPLETED',resultDoctorId:id
+        }});
+      });
+    }catch(err){return conflict(err);}
+    return this.provisioning(id,organizationId);
+  }
+
+  async confirmProvisioning(id:string, authUserId:string, rawKey:string, organizationId:string) {
+    const key=idempotency(rawKey);
+    const doctor=await this.db.doctor.findUnique({where:{id},select:{
+      id:true,msgdeskOrganizationId:true,msgdeskAuthUserId:true,registrationStatus:true
+    }});
+    if(!doctor || !organizationId || doctor.msgdeskOrganizationId!==organizationId)
+      throw new NotFoundException('Médico não encontrado');
+    if(doctor.registrationStatus!==DoctorRegistrationStatus.VERIFIED)
+      throw new ConflictException('Cadastro profissional não verificado');
+    if(doctor.msgdeskAuthUserId && doctor.msgdeskAuthUserId!==authUserId)
+      throw new ConflictException('Médico já vinculado a outra identidade Auth');
+    const requestHash=createHash('sha256').update(stableStringify({id,authUserId,organizationId})).digest('hex');
+    const previous=await this.db.doctorProvisioningOperation.findUnique({where:{idempotencyKey:key}});
+    if(previous){
+      if(previous.kind!=='AUTH_CONFIRM' || previous.requestHash!==requestHash)
+        throw new ConflictException('Chave de idempotência reutilizada');
+      if(previous.status!=='COMPLETED')
+        throw new ConflictException('Reconciliação de provisionamento necessária');
+      return this.provisioning(id,organizationId);
+    }
+    try {
+      await this.db.$transaction(async tx=>{
+        const op=await tx.doctorProvisioningOperation.create({
+          data:{doctorId:id,kind:'AUTH_CONFIRM',idempotencyKey:key,requestHash,status:'PENDING'}
+        });
+        const updated=await tx.doctor.updateMany({
+          where:{id,msgdeskOrganizationId:organizationId,msgdeskAuthUserId:doctor.msgdeskAuthUserId},
+          data:{msgdeskAuthUserId:authUserId,provisioningStatus:'LINKED',accessActive:false}
+        });
+        if(updated.count!==1)throw new ConflictException('Cadastro alterado em paralelo; reconciliação necessária');
+        await tx.doctorProvisioningOperation.update({where:{id:op.id},data:{status:'COMPLETED',resultDoctorId:id}});
+      });
+    }catch(error){
+      if(error instanceof Prisma.PrismaClientKnownRequestError && error.code==='P2002')
+        throw new ConflictException('Identidade Auth ou confirmação já vinculada; verifique antes de repetir');
+      throw error;
+    }
+    return this.provisioning(id,organizationId);
+  }
+
 }
