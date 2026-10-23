@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, ToggleLeft, ToggleRight, History, Stethoscope, Package, Users as UsersIcon, X, Link2, Trash2, MailCheck, Pencil } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 
@@ -82,6 +82,8 @@ function formatCep(value: string) {
 
 export default function SubaccountsPage() {
   const queryClient = useQueryClient();
+  // Stable per-form key prevents a network retry from creating a second Asaas account.
+  const creationKey = useRef<string | null>(null);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<SubaccountType | ''>('');
   const [page, setPage] = useState(1);
@@ -131,8 +133,12 @@ export default function SubaccountsPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (payload: Record<string, unknown>) => api.post('/subaccounts', payload),
+    mutationFn: (payload: Record<string, unknown>) => {
+      creationKey.current ??= crypto.randomUUID();
+      return api.post('/subaccounts', payload, { headers: {'Idempotency-Key': creationKey.current} });
+    },
     onSuccess: () => {
+      creationKey.current = null;
       toast.success('Subconta criada com sucesso!');
       resetForm();
       queryClient.invalidateQueries({ queryKey: ['subaccounts'] });
