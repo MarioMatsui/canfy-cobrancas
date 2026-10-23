@@ -217,6 +217,7 @@ export default function SubaccountsPage() {
   });
 
   const resetForm = () => {
+    creationKey.current = null;
     setShowForm(false);
     setFormMode('create');
     setFormName('');
@@ -390,11 +391,11 @@ export default function SubaccountsPage() {
           <p className="text-gray-500 mt-1">Gerencie médicos, fornecedores e subcontas Asaas</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => { setShowForm(true); setFormMode('link'); }} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
+          <button onClick={() => { creationKey.current = null; setShowForm(true); setFormMode('link'); }} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
             <Link2 size={20} />
             Vincular Existente
           </button>
-          <button onClick={() => { setShowForm(true); setFormMode('create'); }} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+          <button onClick={() => { creationKey.current = null; setShowForm(true); setFormMode('create'); }} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
             <Plus size={20} />
             Nova Subconta
           </button>
