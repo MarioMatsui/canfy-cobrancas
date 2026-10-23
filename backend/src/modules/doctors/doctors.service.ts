@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { createHash } from 'node:crypto';
 import { DoctorRegistrationStatus, Prisma, SubaccountType } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { CreateDoctorDto, DoctorFinancialLinkDto, DoctorLicenseInputDto, DoctorListDto, UpdateDoctorDto } from './doctors.dto';
+import { CreateDoctorDto, DoctorFinancialLinkDto, DoctorLicenseInputDto, DoctorListDto, ReviewDoctorLicenseDto, UpdateDoctorDto } from './doctors.dto';
 
 export function assertCpf(value?: string) {
   if (!value) return;
@@ -210,6 +210,42 @@ export class DoctorsService {
       }});
     }catch(err){return conflict(err);}
     return this.detail(id,organizationId);
+  }
+
+  /**
+   * JWT ADMIN manual review, with reference to independently checked CRM evidence.
+   * Simply submitting data via regularize() never verifies a professional.
+   */
+  async reviewLicense(id:string,dto:ReviewDoctorLicenseDto,actorUserId:string) {
+    if(!actorUserId)throw new BadRequestException('Ator administrativo não identificado');
+    const doctor=await this.detail(id);
+    if(doctor.registrationStatus!==DoctorRegistrationStatus.PENDING_REVIEW)
+      throw new ConflictException('Apenas cadastros em revisão podem ser verificados');
+    const license=doctor.licenses.find(l=>l.id===dto.licenseId);
+    if(!license || license.verificationStatus!=='PENDING')
+      throw new ConflictException('CRM não encontrado ou já revisado');
+    const evidence=dto.evidenceReference.trim();
+    if(evidence.length<8||evidence.length>250)
+      throw new BadRequestException('Referência de verificação inválida');
+    await this.db.$transaction(async tx=>{
+      const updated=await tx.doctorLicense.updateMany({
+        where:{id:dto.licenseId,doctorId:id,verificationStatus:'PENDING'},
+        data:{verificationStatus:dto.decision,verifiedAt:dto.decision==='VERIFIED'?new Date():null}
+      });
+      if(updated.count!==1)throw new ConflictException('CRM revisado em paralelo');
+      await tx.doctorReviewEvent.create({data:{
+        doctorId:id,licenseId:dto.licenseId,actorUserId,evidenceReference:evidence,decision:dto.decision
+      }});
+      const statuses=await tx.doctorLicense.findMany({where:{doctorId:id},select:{verificationStatus:true}});
+      const verified=statuses.some(x=>x.verificationStatus==='VERIFIED');
+      const rejected=statuses.every(x=>x.verificationStatus==='REJECTED');
+      await tx.doctor.update({where:{id},data:verified?{
+        registrationStatus:'VERIFIED',verifiedAt:new Date()
+      }:rejected?{registrationStatus:'REJECTED',verifiedAt:null}:{
+        registrationStatus:'PENDING_REVIEW',verifiedAt:null
+      }});
+    });
+    return this.detail(id);
   }
 
   async provisioning(id:string,organizationId?:string) {
