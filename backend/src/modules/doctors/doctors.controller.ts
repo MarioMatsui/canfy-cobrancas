@@ -6,7 +6,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
 import { DoctorsService } from './doctors.service';
-import { DoctorFinancialLinkDto, DoctorLicenseInputDto, DoctorListDto, ReviewDoctorLicenseDto, UpdateDoctorDto } from './doctors.dto';
+import { DoctorFinancialLinkDto, DoctorLicenseInputDto, DoctorListDto, ReviewDoctorLicenseDto, ReviewDoctorFinancialLinkDto, UpdateDoctorDto } from './doctors.dto';
 import { IsUUID,IsString,MinLength,MaxLength } from 'class-validator';
 export class AssociateDoctorOrganizationDto { @IsUUID() integrationId!: string; @IsString() @MinLength(8) @MaxLength(250) evidenceReference!:string; }
 
@@ -28,6 +28,12 @@ export class DoctorsController {
   @Post(':id/licenses') license(@Param('id',ParseUUIDPipe) id:string,@Body() dto:DoctorLicenseInputDto){return this.doctors.addLicense(id,dto);}
   @Post(':id/regularize') regularize(@Param('id',ParseUUIDPipe) id:string){return this.doctors.regularize(id);}
   @Post(':id/financial-links') link(@Param('id',ParseUUIDPipe) id:string,@Body() dto:DoctorFinancialLinkDto){return this.doctors.linkExisting(id,dto);}
+  @Post(':id/financial-links/:linkId/review')
+  reviewFinancialLink(
+    @Param('id',ParseUUIDPipe) id:string,@Param('linkId',ParseUUIDPipe) linkId:string,
+    @Body() dto:ReviewDoctorFinancialLinkDto,@Headers('idempotency-key') key:string,
+    @Request() req:{user:{id:string}}
+  ){return this.doctors.reviewFinancialLink(id,linkId,dto,key,req.user.id);}
   @Post(':id/organization')
   associateOrganization(@Param('id',ParseUUIDPipe) id:string,@Body() dto:AssociateDoctorOrganizationDto,@Request() req:{user:{id:string}}){
     return this.doctors.associateOrganization(id,dto.integrationId,req.user.id,dto.evidenceReference);
