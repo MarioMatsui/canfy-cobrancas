@@ -1,3 +1,4 @@
+import { GoneException } from '@nestjs/common';
 import { Body, Controller, Get, Headers, Request, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { IntegrationApiKeyGuard } from '../integrations/integration-api-key.guard';
@@ -5,7 +6,7 @@ import { IntegrationScopesGuard } from '../integrations/integration-scopes.guard
 import { RequireIntegrationScopes } from '../integrations/integration-scopes.decorator';
 import { DoctorsService } from './doctors.service';
 import { DoctorIntegrationOrganizationGuard } from './doctor-integration-organization.guard';
-import { CreateDoctorDto, DoctorFinancialLinkDto, DoctorLicenseInputDto, ConfirmDoctorProvisioningDto, ConfirmClinicalAccessDto, DoctorListDto, UpdateDoctorDto } from './doctors.dto';
+import { DoctorFinancialLinkDto, DoctorLicenseInputDto, ConfirmDoctorProvisioningDto, ConfirmClinicalAccessDto, DoctorListDto, UpdateDoctorDto } from './doctors.dto';
 
 @ApiTags('Integração médica administrativa — v2')
 @ApiSecurity('canfy-integration-key')
@@ -19,7 +20,7 @@ export class IntegrationDoctorsAdminController {
   @Get(':id') @RequireIntegrationScopes('doctors:admin:read')
   detail(@Param('id',ParseUUIDPipe) id:string,@Request() req:{integration:{doctorOrganizationId:string}}){return this.doctors.detailForIntegration(id,req.integration.doctorOrganizationId);}
   @Post() @RequireIntegrationScopes('doctors:admin:write')
-  create(@Body() dto:CreateDoctorDto,@Headers('idempotency-key') key:string,@Request() req:{integration:{doctorOrganizationId:string}}){return this.doctors.create(dto,key,req.integration.doctorOrganizationId);}
+  create(){throw new GoneException('Cadastro médico centralizado no Canfy Cobranças > Subcontas.');}
   @Patch(':id') @RequireIntegrationScopes('doctors:admin:write')
   async update(@Param('id',ParseUUIDPipe) id:string,@Body() dto:UpdateDoctorDto,@Request() req:{integration:{doctorOrganizationId:string}}){await this.doctors.update(id,dto,req.integration.doctorOrganizationId);return this.doctors.detailForIntegration(id,req.integration.doctorOrganizationId);}
   @Post(':id/licenses') @RequireIntegrationScopes('doctors:admin:write')

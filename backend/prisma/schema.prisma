@@ -842,10 +842,13 @@ model DoctorProvisioningOperation {
   resultDoctorId      String? @map("result_doctor_id")
   remoteAccountId     String? @map("remote_account_id") @db.VarChar(100)
   safeErrorCode       String? @map("safe_error_code") @db.VarChar(80)
+  actorUserId         String? @map("actor_user_id")
+  evidenceReference   String? @map("evidence_reference") @db.VarChar(250)
   createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
   doctor              Doctor? @relation(fields:[doctorId],references:[id],onDelete:Restrict)
   @@index([doctorId,status])
+  @@index([actorUserId,createdAt])
   @@map("doctor_provisioning_operations")
 }
 

@@ -1,8 +1,9 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, HttpException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException, HttpException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AsaasService } from '../../asaas/asaas.service';
 import { FulfillmentType, SubaccountType, Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
+import { AsaasApiException } from '../../asaas/asaas.service';
 import {
   CreateSubaccountDto,
   UpdateSubaccountDto,
@@ -141,7 +142,10 @@ export class SubaccountsService {
    * An uncertain remote outcome is never retried automatically. Replays either
    * return a confirmed local account or require manual reconciliation.
    */
-  async create(dto: CreateSubaccountDto, key?: string) {
+  async create(dto: CreateSubaccountDto, key?: string, fromDoctorOnboarding = false) {
+    if (dto.type === SubaccountType.DOCTOR && !fromDoctorOnboarding) {
+      throw new BadRequestException('Cadastre médicos exclusivamente pelo fluxo unificado em Subcontas > Adicionar médico.');
+    }
     if (!key || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)) {
       throw new BadRequestException('Idempotency-Key UUID obrigatório para criar subconta');
     }
@@ -285,7 +289,73 @@ export class SubaccountsService {
     }
   }
 
+
+  /**
+   * Match only accounts returned by the authenticated parent Asaas account.
+   * No external_ placeholders or self-declared wallet ownership for doctors.
+   * May be called more than once after a partial onboarding failure.
+   */
+  async linkManagedDoctorAccount(identifier: string) {
+    const id = identifier.trim();
+    if (!/^[a-zA-Z0-9_-]{8,100}$/.test(id)) {
+      throw new BadRequestException('Identificador Asaas inválido');
+    }
+    type ParentAccount = { id: string; walletId: string; name: string; cpfCnpj: string; email?: string };
+    let account: ParentAccount | undefined;
+    try {
+      const fetched = await this.asaas.get<ParentAccount>('/accounts/' + encodeURIComponent(id));
+      account = fetched && (fetched.id === id || fetched.walletId === id) ? fetched : undefined;
+    } catch (error) {
+      if (!(error instanceof AsaasApiException) || ![400,404].includes(error.providerStatus ?? 0)) throw error;
+    }
+    if (!account) {
+      const limit = 100;
+      for (let page = 0; page < 100; page++) {
+        const response = await this.asaas.get<{data: ParentAccount[]; hasMore?: boolean}>(
+          `/accounts?offset=${page * limit}&limit=${limit}`,
+        );
+        if (!Array.isArray(response.data)) throw new ConflictException('Resposta de subcontas Asaas inválida');
+        account = response.data.find(a => a.id === id || a.walletId === id);
+        if (account || response.hasMore === false || response.data.length < limit) break;
+        if (page === 99) throw new ConflictException('Listagem Asaas excedeu limite; reconciliação necessária');
+      }
+    }
+    if (!account || !account.id || !account.walletId || !account.cpfCnpj || !account.name) {
+      throw new BadRequestException('Conta não verificável entre as subcontas da conta-pai Asaas.');
+    }
+    const cpfCnpj = account.cpfCnpj.replace(/\D/g, '');
+    if (![11, 14].includes(cpfCnpj.length)) {
+      throw new ConflictException('Titularidade Asaas indisponível para conferência; solicitar revisão.');
+    }
+    const previous = await this.prisma.subaccount.findFirst({
+      where: { OR: [{asaasId:account.id}, {walletId:account.walletId}] },
+    });
+    if (previous) {
+      if (previous.deletedAt || previous.type !== SubaccountType.DOCTOR ||
+        previous.asaasId !== account.id || previous.walletId !== account.walletId ||
+        previous.cpfCnpj.replace(/\D/g, '') !== cpfCnpj) {
+        throw new ConflictException('Conta já cadastrada com vínculo, tipo ou dados conflitantes; revisão obrigatória.');
+      }
+      return this.sanitize(previous);
+    }
+    try {
+      const saved = await this.prisma.subaccount.create({data:{
+        asaasId:account.id,walletId:account.walletId,
+        name:account.name,cpfCnpj,email:account.email || null,type:SubaccountType.DOCTOR,
+      }});
+      return this.sanitize(saved);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Conta vinculada simultaneamente; recarregue e revise o vínculo.');
+      }
+      throw error;
+    }
+  }
+
   async linkExisting(dto: LinkExistingSubaccountDto) {
+    if (dto.type === SubaccountType.DOCTOR) {
+      throw new BadRequestException('Vinculação médica disponível somente pelo cadastro unificado.');
+    }
     const localType = (dto.type ?? SubaccountType.OTHER) as SubaccountType;
     this.validateLocalMetadata(localType, dto.fulfillmentType, true);
 
@@ -455,6 +525,18 @@ export class SubaccountsService {
     if (!subaccount) throw new NotFoundException('Subconta não encontrada');
 
     const nextType = (dto.type ?? subaccount.type) as SubaccountType;
+    if (nextType === SubaccountType.DOCTOR && subaccount.type !== SubaccountType.DOCTOR) {
+      throw new BadRequestException('Conversão para Médico requer o cadastro profissional e vínculo validado.');
+    }
+
+    if (subaccount.type === SubaccountType.DOCTOR && nextType !== SubaccountType.DOCTOR) {
+      const linked = await this.prisma.doctorFinancialLink.count({
+        where:{subaccountId:subaccount.id,active:true},
+      });
+      if (linked) throw new ConflictException(
+        'Subconta associada a médico ativo. Revise o vínculo profissional antes de alterar o tipo.',
+      );
+    }
 
     if (nextType !== SubaccountType.SUPPLIER && dto.fulfillmentType != null) {
       this.validateLocalMetadata(nextType, dto.fulfillmentType, false);

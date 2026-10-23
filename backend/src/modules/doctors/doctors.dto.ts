@@ -62,6 +62,12 @@ export class ReviewDoctorLicenseDto {
   @IsString() @MinLength(8) @MaxLength(250) evidenceReference!:string;
 }
 
+/** An authorized administrator must record evidence before endorsing financial ownership. */
+export class ReviewDoctorFinancialLinkDto {
+  @IsIn(['VERIFIED','REJECTED']) decision!:'VERIFIED'|'REJECTED';
+  @IsString() @MinLength(8) @MaxLength(250) evidenceReference!:string;
+}
+
 export class ConfirmClinicalAccessDto {
   @IsUUID() authUserId!:string;
 }

@@ -11,6 +11,7 @@ describe('SubaccountsService metadata local', () => {
 
   beforeEach(() => {
     prisma = {
+      doctorFinancialLink:{count:jest.fn().mockResolvedValue(0)},
       subaccount: {
         findFirst: jest.fn(),
         update: jest.fn(),
@@ -70,45 +71,31 @@ describe('SubaccountsService metadata local', () => {
     expect(asaas.put).not.toHaveBeenCalled();
   });
 
-  it('limpa fulfillment ao deixar de ser fornecedor', async () => {
+  it('impede transformar fornecedor em médico sem identidade profissional', async () => {
     prisma.subaccount.findFirst.mockResolvedValue(base());
-    prisma.subaccount.update.mockResolvedValue(
-      base({ type: SubaccountType.DOCTOR, fulfillmentType: null }),
-    );
-
-    await service.updateMetadata('supplier-1', {
-      type: 'DOCTOR' as any,
-      fulfillmentType: null,
-    });
-
-    expect(prisma.subaccount.update).toHaveBeenCalledWith({
-      where: { id: 'supplier-1' },
-      data: {
-        type: SubaccountType.DOCTOR,
-        fulfillmentType: null,
-      },
-    });
+    await expect(service.updateMetadata('supplier-1', {
+      type: 'DOCTOR' as any, fulfillmentType:null,
+    })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.subaccount.update).not.toHaveBeenCalled();
     expect(asaas.put).not.toHaveBeenCalled();
   });
 
-  it('limpa fulfillment antigo ao mudar apenas o tipo para médico', async () => {
-    prisma.subaccount.findFirst.mockResolvedValue(base());
-    prisma.subaccount.update.mockResolvedValue(
-      base({ type: SubaccountType.DOCTOR, fulfillmentType: null }),
+  it('preserva edição de metadata de médico já cadastrado', async () => {
+    prisma.subaccount.findFirst.mockResolvedValue(base({type:SubaccountType.DOCTOR,fulfillmentType:null}));
+    prisma.subaccount.update.mockResolvedValue(base({type:SubaccountType.DOCTOR,fulfillmentType:null}));
+    await service.updateMetadata('supplier-1',{type:'DOCTOR' as any});
+    expect(prisma.subaccount.update).toHaveBeenCalled();
+  });
+
+  it('protege carteira de médico que possui vínculo ativo contra troca para fornecedor', async () => {
+    prisma.doctorFinancialLink={count:jest.fn().mockResolvedValue(1)};
+    prisma.subaccount.findFirst.mockResolvedValue(
+      base({type:SubaccountType.DOCTOR,fulfillmentType:null}),
     );
-
-    await service.updateMetadata('supplier-1', {
-      type: 'DOCTOR' as any,
-    });
-
-    expect(prisma.subaccount.update).toHaveBeenCalledWith({
-      where: { id: 'supplier-1' },
-      data: {
-        type: SubaccountType.DOCTOR,
-        fulfillmentType: null,
-      },
-    });
-    expect(asaas.put).not.toHaveBeenCalled();
+    await expect(service.updateMetadata('supplier-1',{
+      type:'SUPPLIER' as any, fulfillmentType:FulfillmentType.NATIONAL,
+    })).rejects.toThrow('Subconta associada a médico ativo');
+    expect(prisma.subaccount.update).not.toHaveBeenCalled();
   });
 
   it('rejeita modalidade de fornecedor em médico/outro', async () => {
