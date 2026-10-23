@@ -705,6 +705,7 @@ model IntegrationApiKey {
   keyHash         String                  @unique @map("key_hash")
   status          IntegrationApiKeyStatus @default(ACTIVE)
   scopes          String[]                @default([])
+  doctorOrganizationId String?             @map("doctor_organization_id") @db.Uuid
   createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
   lastUsedAt      DateTime?               @map("last_used_at") @db.Timestamptz(6)
