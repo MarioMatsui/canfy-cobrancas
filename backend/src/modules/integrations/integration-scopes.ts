@@ -3,6 +3,8 @@ export const INTEGRATION_SCOPES = [
   'catalog:read',
   'subaccounts:read',
   'doctors:read',
+  'doctors:admin:read',
+  'doctors:admin:write',
   'charges:create',
   'charges:read',
   'charges:cancel',

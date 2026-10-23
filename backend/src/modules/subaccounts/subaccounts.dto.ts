@@ -85,6 +85,7 @@ export class CreateSubaccountDto {
   @ApiProperty({ example: 5000, description: 'Renda/faturamento mensal — obrigatório pela Asaas' })
   @Type(() => Number)
   @IsNumber()
+  @Min(1)
   incomeValue!: number;
 }
 

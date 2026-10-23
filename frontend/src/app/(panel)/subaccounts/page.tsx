@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, ToggleLeft, ToggleRight, History, Stethoscope, Package, Users as UsersIcon, X, Link2, Trash2, MailCheck, Pencil } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 
@@ -82,6 +82,8 @@ function formatCep(value: string) {
 
 export default function SubaccountsPage() {
   const queryClient = useQueryClient();
+  // Stable per-form key prevents a network retry from creating a second Asaas account.
+  const creationKey = useRef<string | null>(null);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<SubaccountType | ''>('');
   const [page, setPage] = useState(1);
@@ -131,8 +133,12 @@ export default function SubaccountsPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (payload: Record<string, unknown>) => api.post('/subaccounts', payload),
+    mutationFn: (payload: Record<string, unknown>) => {
+      creationKey.current ??= crypto.randomUUID();
+      return api.post('/subaccounts', payload, { headers: {'Idempotency-Key': creationKey.current} });
+    },
     onSuccess: () => {
+      creationKey.current = null;
       toast.success('Subconta criada com sucesso!');
       resetForm();
       queryClient.invalidateQueries({ queryKey: ['subaccounts'] });
@@ -211,6 +217,7 @@ export default function SubaccountsPage() {
   });
 
   const resetForm = () => {
+    creationKey.current = null;
     setShowForm(false);
     setFormMode('create');
     setFormName('');
@@ -384,11 +391,11 @@ export default function SubaccountsPage() {
           <p className="text-gray-500 mt-1">Gerencie médicos, fornecedores e subcontas Asaas</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => { setShowForm(true); setFormMode('link'); }} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
+          <button onClick={() => { creationKey.current = null; setShowForm(true); setFormMode('link'); }} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
             <Link2 size={20} />
             Vincular Existente
           </button>
-          <button onClick={() => { setShowForm(true); setFormMode('create'); }} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+          <button onClick={() => { creationKey.current = null; setShowForm(true); setFormMode('create'); }} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
             <Plus size={20} />
             Nova Subconta
           </button>

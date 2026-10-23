@@ -1,4 +1,4 @@
-import { ArrayMinSize, IsArray, IsIn, IsString, MaxLength, MinLength } from 'class-validator';
+import { ArrayMinSize, IsArray, IsIn, IsOptional, IsUUID, IsString, MaxLength, MinLength } from 'class-validator';
 import { INTEGRATION_SCOPES, IntegrationScope } from './integration-scopes';
 
 export class CreateIntegrationDto {
@@ -11,4 +11,8 @@ export class CreateIntegrationDto {
   @ArrayMinSize(1)
   @IsIn([...INTEGRATION_SCOPES], { each: true })
   scopes!: IntegrationScope[];
+
+  @IsOptional()
+  @IsUUID()
+  doctorOrganizationId?: string;
 }

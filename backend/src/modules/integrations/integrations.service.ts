@@ -19,6 +19,7 @@ export interface AuthenticatedIntegration {
   id: string;
   name: string;
   scopes: IntegrationScope[];
+  doctorOrganizationId: string | null;
 }
 
 @Injectable()
@@ -48,6 +49,10 @@ export class IntegrationsService {
   }
 
   async create(dto: CreateIntegrationDto, createdByUserId: string) {
+    if (dto.scopes.some(scope => scope === 'doctors:admin:read' || scope === 'doctors:admin:write')
+        && !dto.doctorOrganizationId) {
+      throw new BadRequestException('Integração médica administrativa exige organização vinculada');
+    }
     const credential = this.generateCredential();
     const integration = await this.prisma.integrationApiKey.create({
       data: {
@@ -55,6 +60,7 @@ export class IntegrationsService {
         keyPrefix: credential.keyPrefix,
         keyHash: credential.keyHash,
         scopes: this.normalizeScopes(dto.scopes),
+        doctorOrganizationId: dto.doctorOrganizationId ?? null,
         createdByUserId,
       },
     });
@@ -184,6 +190,7 @@ export class IntegrationsService {
       id: integration.id,
       name: integration.name,
       scopes: integration.scopes as IntegrationScope[],
+      doctorOrganizationId: integration.doctorOrganizationId,
     };
   }
 
@@ -225,6 +232,7 @@ export class IntegrationsService {
       maskedKey: this.maskKey(integration.keyPrefix),
       status: integration.status,
       scopes: integration.scopes,
+      doctorOrganizationId: integration.doctorOrganizationId,
       createdAt: integration.createdAt,
       lastUsedAt: integration.lastUsedAt,
       createdByUserId: integration.createdByUserId,
