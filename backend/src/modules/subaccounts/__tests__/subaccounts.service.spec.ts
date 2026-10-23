@@ -70,45 +70,20 @@ describe('SubaccountsService metadata local', () => {
     expect(asaas.put).not.toHaveBeenCalled();
   });
 
-  it('limpa fulfillment ao deixar de ser fornecedor', async () => {
+  it('impede transformar fornecedor em médico sem identidade profissional', async () => {
     prisma.subaccount.findFirst.mockResolvedValue(base());
-    prisma.subaccount.update.mockResolvedValue(
-      base({ type: SubaccountType.DOCTOR, fulfillmentType: null }),
-    );
-
-    await service.updateMetadata('supplier-1', {
-      type: 'DOCTOR' as any,
-      fulfillmentType: null,
-    });
-
-    expect(prisma.subaccount.update).toHaveBeenCalledWith({
-      where: { id: 'supplier-1' },
-      data: {
-        type: SubaccountType.DOCTOR,
-        fulfillmentType: null,
-      },
-    });
+    await expect(service.updateMetadata('supplier-1', {
+      type: 'DOCTOR' as any, fulfillmentType:null,
+    })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.subaccount.update).not.toHaveBeenCalled();
     expect(asaas.put).not.toHaveBeenCalled();
   });
 
-  it('limpa fulfillment antigo ao mudar apenas o tipo para médico', async () => {
-    prisma.subaccount.findFirst.mockResolvedValue(base());
-    prisma.subaccount.update.mockResolvedValue(
-      base({ type: SubaccountType.DOCTOR, fulfillmentType: null }),
-    );
-
-    await service.updateMetadata('supplier-1', {
-      type: 'DOCTOR' as any,
-    });
-
-    expect(prisma.subaccount.update).toHaveBeenCalledWith({
-      where: { id: 'supplier-1' },
-      data: {
-        type: SubaccountType.DOCTOR,
-        fulfillmentType: null,
-      },
-    });
-    expect(asaas.put).not.toHaveBeenCalled();
+  it('preserva edição de metadata de médico já cadastrado', async () => {
+    prisma.subaccount.findFirst.mockResolvedValue(base({type:SubaccountType.DOCTOR,fulfillmentType:null}));
+    prisma.subaccount.update.mockResolvedValue(base({type:SubaccountType.DOCTOR,fulfillmentType:null}));
+    await service.updateMetadata('supplier-1',{type:'DOCTOR' as any});
+    expect(prisma.subaccount.update).toHaveBeenCalled();
   });
 
   it('rejeita modalidade de fornecedor em médico/outro', async () => {
