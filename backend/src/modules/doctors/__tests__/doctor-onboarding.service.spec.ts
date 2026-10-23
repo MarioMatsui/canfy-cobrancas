@@ -43,7 +43,7 @@ describe('Unified medical onboarding',()=>{
       }),
     };
     service=new DoctorOnboardingService(db,doctors,subaccounts);
-    db.$transaction.mockImplementation(async fn=>{
+    db.$transaction.mockImplementation(async (fn:(tx:any)=>Promise<unknown>)=>{
       const tx={
         doctorFinancialLink:{
           findMany:jest.fn().mockResolvedValue([]),
@@ -69,7 +69,7 @@ describe('Unified medical onboarding',()=>{
     expect(result.clinicalAccessActive).toBe(false);
   });
   it('creates an Asaas account via the durable ledger with a derived idempotency key',async()=>{
-    const result=await service.onboard(input('CREATE') as any,key,'admin-id');
+    const result=await service.onboard(input(DoctorOnboardingFinancialMode.CREATE) as any,key,'admin-id');
     expect(subaccounts.create).toHaveBeenCalledWith(expect.objectContaining({type:'DOCTOR'}),expect.any(String),true);
     expect(result.financialOwnershipVerified).toBe(true);
   });
@@ -82,7 +82,7 @@ describe('Unified medical onboarding',()=>{
     expect(subaccounts.linkManagedDoctorAccount).not.toHaveBeenCalled();
   });
   it('blocks another doctor owning the same active wallet',async()=>{
-    db.$transaction.mockImplementation(async fn=>fn({
+    db.$transaction.mockImplementation(async (fn:(tx:any)=>Promise<unknown>)=>fn({
       doctorFinancialLink:{
         findMany:jest.fn().mockResolvedValue([{doctorId:'someone-else',subaccountId:'sub-1'}]),
       },
