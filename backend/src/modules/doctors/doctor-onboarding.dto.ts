@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsOptional, IsString, Matches, ValidateIf, ValidateNested } from 'class-validator';
+import { IsDefined, IsEnum, IsOptional, IsString, IsUUID, Matches, MinLength, MaxLength, ValidateIf, ValidateNested } from 'class-validator';
 import { CreateDoctorDto } from './doctors.dto';
 import { CreateSubaccountDto } from '../subaccounts/subaccounts.dto';
 
@@ -12,6 +12,7 @@ export enum DoctorOnboardingFinancialMode {
   LINK = 'LINK',
 }
 export class DoctorOnboardingDto {
+  @IsDefined()
   @ValidateNested()
   @Type(() => CreateDoctorDto)
   doctor!: CreateDoctorDto;
@@ -20,12 +21,25 @@ export class DoctorOnboardingDto {
   mode!: DoctorOnboardingFinancialMode;
 
   @ValidateIf(o => o.mode === DoctorOnboardingFinancialMode.CREATE)
+  @IsDefined()
   @ValidateNested()
   @Type(() => CreateSubaccountDto)
   newAccount?: CreateSubaccountDto;
 
   @ValidateIf(o => o.mode === DoctorOnboardingFinancialMode.LINK)
+  @IsDefined()
   @IsString()
   @Matches(/^[a-zA-Z0-9_-]{8,100}$/)
   accountIdentifier?: string;
+
+  @IsOptional()
+  @IsUUID()
+  integrationId?: string;
+
+  @ValidateIf(o => Boolean(o.integrationId))
+  @IsDefined()
+  @IsString()
+  @MinLength(8)
+  @MaxLength(250)
+  evidenceReference?: string;
 }
