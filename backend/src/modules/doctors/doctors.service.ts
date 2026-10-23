@@ -359,13 +359,6 @@ export class DoctorsService {
       throw new NotFoundException('Médico não encontrado');
     if(doctor.registrationStatus!==DoctorRegistrationStatus.VERIFIED)
       throw new ConflictException('Cadastro profissional não verificado');
-    const financeForLogin = await this.db.doctorFinancialLink.findFirst({
-      where:{doctorId:id,active:true,status:'VERIFIED',
-        subaccount:{type:'DOCTOR',active:true,deletedAt:null,walletId:{not:null}}},
-      include:{subaccount:{select:{asaasId:true}}},
-    });
-    if (!financeForLogin || financeForLogin.subaccount.asaasId.startsWith('external_'))
-      throw new ConflictException('Vínculo financeiro Asaas validado obrigatório antes da confirmação do login médico');
     if(doctor.msgdeskAuthUserId && doctor.msgdeskAuthUserId!==authUserId)
       throw new ConflictException('Médico já vinculado a outra identidade Auth');
     const requestHash=createHash('sha256').update(stableStringify({id,authUserId,organizationId})).digest('hex');
@@ -387,6 +380,13 @@ export class DoctorsService {
       // Any inconsistent partial state requires operator reconciliation.
       throw new ConflictException('Vínculo Auth parcial; reconciliação necessária');
     }
+    const financeForLogin = await this.db.doctorFinancialLink.findFirst({
+      where:{doctorId:id,active:true,status:'VERIFIED',
+        subaccount:{type:'DOCTOR',active:true,deletedAt:null,walletId:{not:null}}},
+      include:{subaccount:{select:{asaasId:true}}},
+    });
+    if (!financeForLogin || financeForLogin.subaccount.asaasId.startsWith('external_'))
+      throw new ConflictException('Vínculo financeiro Asaas validado obrigatório antes da confirmação do login médico');
     try {
       await this.db.$transaction(async tx=>{
         const op=await tx.doctorProvisioningOperation.create({
