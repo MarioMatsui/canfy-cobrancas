@@ -91,7 +91,7 @@ export class DoctorsService {
     return {summary,data:rows.map(d=>({
       id:d.id,fullName:d.fullName,maskedCpf:maskCpf(d.cpfNormalized),
       registrationStatus:d.registrationStatus,provisioningStatus:d.provisioningStatus,
-      accessActive:d.accessActive,licenses:d.licenses,
+      accessActive:d.accessActive,organizationLinked:!!d.msgdeskOrganizationId,licenses:d.licenses,
       financialStatus:d.financialLinks[0]?.status??'UNLINKED',
       createdAt:d.createdAt,updatedAt:d.updatedAt,
     })),pagination:{page,limit,total,totalPages:Math.ceil(total/limit)}};
