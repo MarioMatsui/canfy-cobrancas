@@ -13,7 +13,7 @@ describe('subaccount creation idempotency', () => {
     const db: any = { subaccountCreateOperation: {} };
     const remote = { post: jest.fn() };
     const service = new SubaccountsService(db, remote as any);
-    await expect(service.create(dto)).rejects.toThrow('Idempotency-Key');
+    await expect(service.create(dto, undefined, true)).rejects.toThrow('Idempotency-Key');
     expect(remote.post).not.toHaveBeenCalled();
   });
 
@@ -34,8 +34,8 @@ describe('subaccount creation idempotency', () => {
     };
     const remote = { post: jest.fn().mockRejectedValue(new Error('timeout')) };
     const service = new SubaccountsService(db, remote as any);
-    await expect(service.create(dto, key)).rejects.toThrow();
-    await expect(service.create(dto, key)).rejects.toThrow();
+    await expect(service.create(dto, key, true)).rejects.toThrow();
+    await expect(service.create(dto, key, true)).rejects.toThrow();
     expect(remote.post).toHaveBeenCalledTimes(1);
     expect(db.subaccountCreateOperation.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({
