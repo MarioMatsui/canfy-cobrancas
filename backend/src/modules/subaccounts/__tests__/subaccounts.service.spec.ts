@@ -86,6 +86,17 @@ describe('SubaccountsService metadata local', () => {
     expect(prisma.subaccount.update).toHaveBeenCalled();
   });
 
+  it('protege carteira de médico que possui vínculo ativo contra troca para fornecedor', async () => {
+    prisma.doctorFinancialLink={count:jest.fn().mockResolvedValue(1)};
+    prisma.subaccount.findFirst.mockResolvedValue(
+      base({type:SubaccountType.DOCTOR,fulfillmentType:null}),
+    );
+    await expect(service.updateMetadata('supplier-1',{
+      type:'SUPPLIER' as any, fulfillmentType:FulfillmentType.NATIONAL,
+    })).rejects.toThrow('Subconta associada a médico ativo');
+    expect(prisma.subaccount.update).not.toHaveBeenCalled();
+  });
+
   it('rejeita modalidade de fornecedor em médico/outro', async () => {
     prisma.subaccount.findFirst.mockResolvedValue(
       base({ type: SubaccountType.DOCTOR, fulfillmentType: null }),
