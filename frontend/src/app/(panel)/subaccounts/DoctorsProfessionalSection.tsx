@@ -1,5 +1,5 @@
 'use client';
-import React, {useState} from 'react';
+import React, {useState,useRef} from 'react';
 import Link from 'next/link';
 import {useQuery,useQueryClient} from '@tanstack/react-query';
 import api from '@/lib/api';
@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 import {Stethoscope,Plus} from 'lucide-react';
 
 type License={id?:string;crmNormalized:string;state:string;verificationStatus:string};
-type Doctor={msgdeskOrganizationId?:string|null;organizationLinked?:boolean;id:string;fullName:string;registrationStatus:string;provisioningStatus:string;accessActive:boolean;maskedCpf?:string|null;financialStatus?:string;licenses:License[];updatedAt:string;email?:string;cpfNormalized?:string;rg?:string;rgIssuer?:string;rgState?:string;birthDate?:string;mobilePhone?:string;postalCode?:string;street?:string;streetNumber?:string;addressComplement?:string;neighborhood?:string;city?:string;state?:string;country?:string;financialLinks?:unknown[]};
+type Doctor={msgdeskOrganizationId?:string|null;organizationLinked?:boolean;id:string;fullName:string;registrationStatus:string;provisioningStatus:string;accessActive:boolean;maskedCpf?:string|null;financialStatus?:string;licenses:License[];updatedAt:string;email?:string;cpfNormalized?:string;rg?:string;rgIssuer?:string;rgState?:string;birthDate?:string;mobilePhone?:string;postalCode?:string;street?:string;streetNumber?:string;addressComplement?:string;neighborhood?:string;city?:string;state?:string;country?:string;financialLinks?:Array<{id:string;status:string;active:boolean;subaccount:{id:string;name:string;asaasId:string;walletId?:string|null;active:boolean;deletedAt?:string|null}}>;};
 type Result={summary?:{total:number;verified:number;awaitingReview:number;incomplete:number;rejected:number;clinicalActive:number;withFinancialLink:number;withoutOrganization:number};data:Doctor[];pagination:{page:number;limit:number;total:number;totalPages:number}};
 const fields:[string,string,string][]=[
  ['fullName','Nome completo','text'],['cpfNormalized','CPF','text'],['rg','RG','text'],
@@ -36,6 +36,8 @@ function message(error:unknown){
 }
 export default function DoctorsProfessionalSection({initiallyExpanded=false}:{initiallyExpanded?:boolean}){
  const qc=useQueryClient();
+ const financialReviewKey=useRef<string|null>(null);
+ const [financialEvidence,setFinancialEvidence]=useState('');
  const [search,setSearch]=useState(''),[page,setPage]=useState(1),[expanded,setExpanded]=useState(initiallyExpanded);
  const [detailId,setDetailId]=useState<string|null>(null),[edit,setEdit]=useState(false),[working,setWorking]=useState(false);
  const [form,setForm]=useState<Record<string,string>>({...blank,country:'BR'});
@@ -74,6 +76,22 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  setWorking(true);try{await api.post('/doctors/'+detailId+'/financial-links',{subaccountId:walletToLink.trim()});
  toast.success('Vínculo submetido à revisão financeira');setWalletToLink('');refresh();}
  catch(e){toast.error(message(e));}finally{setWorking(false);}
+ }
+ async function reviewFinancial(linkId:string,decision:'VERIFIED'|'REJECTED'){
+  if(!detailId||working||financialEvidence.trim().length<8)return;
+  if(!confirm(decision==='VERIFIED'
+   ?'Confirmou pessoalmente a titularidade da conta Asaas e registrou evidência verificável?'
+   :'Rejeitar este vínculo financeiro após revisão documentada?'))return;
+  setWorking(true);
+  financialReviewKey.current??=crypto.randomUUID();
+  try{
+   await api.post('/doctors/'+detailId+'/financial-links/'+linkId+'/review',{
+    decision,evidenceReference:financialEvidence.trim(),
+   },{headers:{'Idempotency-Key':financialReviewKey.current}});
+   toast.success('Revisão financeira registrada com trilha de auditoria');
+   financialReviewKey.current=null;setFinancialEvidence('');refresh();
+  }catch(e){toast.error(message(e)+' Não altere a chave sem conferir o resultado da operação.');}
+  finally{setWorking(false);}
  }
  async function associateOrganization(){
   if(!detailId||working||!organizationIntegrationId||organizationEvidence.trim().length<8||selected.data?.msgdeskOrganizationId)return;
@@ -150,6 +168,27 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
   <div className="flex gap-2"><button className="rounded border px-3 py-2 text-sm" disabled={working||!reviewLicenseId||reviewReference.trim().length<8} onClick={()=>void review('REJECTED')}>Rejeitar CRM</button>
   <button className="rounded bg-emerald-700 text-white px-3 py-2 text-sm" disabled={working||!reviewLicenseId||reviewReference.trim().length<8} onClick={()=>void review('VERIFIED')}>Confirmar verificação humana</button></div>
  </section>}
+ {selected.data.financialLinks?.filter(l=>l.active&&l.status==='PENDING_REVIEW').map(link=>
+ <section key={link.id} className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3" aria-label="Revisão financeira pendente">
+  <h4 className="font-semibold text-sm text-amber-900">Revisar titularidade financeira</h4>
+  <p className="text-xs text-amber-900">Conta Asaas: {link.subaccount.name} · {link.subaccount.asaasId}. Confirme a associação documental antes de aprovar. Esta ação não substitui a aprovação cadastral da Asaas.</p>
+  <label className="block text-sm font-medium text-slate-800">Referência de evidência (protocolo ou documentação verificada)
+   <input className="mt-1 block w-full rounded-lg border border-amber-300 bg-white p-2 text-sm"
+    maxLength={250} minLength={8} value={financialEvidence}
+    onChange={e=>setFinancialEvidence(e.target.value)} disabled={working||!!financialReviewKey.current}
+    placeholder="Protocolo interno ou documento revisado"/>
+  </label>
+  <div className="flex flex-wrap gap-2">
+   <button type="button" className="rounded-lg border bg-white px-3 py-2 text-sm disabled:opacity-50"
+    disabled={working||financialEvidence.trim().length<8}
+    onClick={()=>void reviewFinancial(link.id,'REJECTED')}>Rejeitar associação</button>
+   <button type="button" className="rounded-lg bg-emerald-700 px-3 py-2 text-sm text-white disabled:opacity-50"
+    disabled={working||financialEvidence.trim().length<8}
+    onClick={()=>void reviewFinancial(link.id,'VERIFIED')}>Aprovar após conferência</button>
+  </div>
+  {financialReviewKey.current&&<p className="text-xs text-amber-900">Houve tentativa anterior. Confirme o estado do vínculo antes de iniciar uma nova revisão.</p>}
+ </section>
+ )}
  <div className="border-t pt-4 space-y-2"><h4 className="font-medium text-sm">Vincular subconta existente</h4>
  <p className="text-xs text-gray-500">Opcional: requer carteira DOCTOR verificada e revisão de titularidade. Não cria Asaas nem modifica splits ou histórico.</p>
  <input className="border rounded-lg p-2 text-sm w-full max-w-md" aria-label="ID da subconta" placeholder="UUID da subconta existente" value={walletToLink} onChange={e=>setWalletToLink(e.target.value)}/>
