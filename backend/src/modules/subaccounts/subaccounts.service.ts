@@ -1,7 +1,8 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, HttpException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AsaasService } from '../../asaas/asaas.service';
-import { FulfillmentType, SubaccountType } from '@prisma/client';
+import { FulfillmentType, SubaccountType, Prisma } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import {
   CreateSubaccountDto,
   UpdateSubaccountDto,
@@ -135,90 +136,153 @@ export class SubaccountsService {
     return true;
   }
 
-  async create(dto: CreateSubaccountDto) {
+  /**
+   * Safe remote creation: an operation is durably reserved BEFORE network I/O.
+   * An uncertain remote outcome is never retried automatically. Replays either
+   * return a confirmed local account or require manual reconciliation.
+   */
+  async create(dto: CreateSubaccountDto, key?: string) {
+    if (!key || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)) {
+      throw new BadRequestException('Idempotency-Key UUID obrigatório para criar subconta');
+    }
     const localType = dto.type as SubaccountType;
     this.validateLocalMetadata(localType, dto.fulfillmentType, true);
-
-    // Cria subconta no Asaas
-    const asaasPayload: Record<string, unknown> = {
-      name: dto.name,
-      cpfCnpj: dto.cpfCnpj,
-      email: dto.email,
-      phone: dto.phone,
-      mobilePhone: dto.mobilePhone,
-      companyType: dto.companyType,
-      postalCode: dto.postalCode,
-      address: dto.address,
-      addressNumber: dto.addressNumber,
-      complement: dto.complement,
-      province: dto.province,
-    };
-
-    if (dto.birthDate) asaasPayload.birthDate = dto.birthDate;
     if (!Number.isFinite(dto.incomeValue) || dto.incomeValue <= 0) {
-      throw new BadRequestException('incomeValue é obrigatório e deve ser positivo');
+      throw new BadRequestException('incomeValue deve ser positivo');
     }
-    asaasPayload.incomeValue = dto.incomeValue;
+    const requestHash = createHash('sha256').update(JSON.stringify({
+      name:dto.name,cpfCnpj:dto.cpfCnpj,email:dto.email,
+      phone:dto.phone,mobilePhone:dto.mobilePhone,companyType:dto.companyType,
+      postalCode:dto.postalCode,address:dto.address,addressNumber:dto.addressNumber,
+      complement:dto.complement,province:dto.province,birthDate:dto.birthDate,
+      incomeValue:dto.incomeValue,type:dto.type,fulfillmentType:dto.fulfillmentType,
+    })).digest('hex');
 
-    let asaasAccount: { id: string; walletId: string; apiKey?: string };
+    const replay = async () => {
+      const previous = await this.prisma.subaccountCreateOperation.findUnique({
+        where: { idempotencyKey:key },
+      });
+      if (!previous) return null;
+      if (previous.requestHash !== requestHash) {
+        throw new BadRequestException('Idempotency-Key já usada com payload diferente');
+      }
+      if (previous.status === 'COMPLETED' && previous.localSubaccountId) {
+        const local = await this.prisma.subaccount.findUnique({
+          where:{id:previous.localSubaccountId},
+        });
+        if (!local) throw new HttpException('Subconta requer reconciliação',409);
+        return this.sanitize(local);
+      }
+      throw new HttpException({
+        message:'Resultado da criação de subconta incerto. Não repetir o POST no Asaas.',
+        status:previous.status,operationId:previous.id,
+      },409);
+    };
+    const existing = await replay();
+    if (existing) return existing;
 
+    // Reservation is the durable no-double-POST barrier.
+    let operation:{id:string};
     try {
-      asaasAccount = await this.asaas.post<{ id: string; walletId: string; apiKey?: string }>('/accounts', asaasPayload);
+      operation = await this.prisma.subaccountCreateOperation.create({
+        data:{idempotencyKey:key,requestHash,status:'SENDING'},
+        select:{id:true},
+      });
     } catch (error) {
-      // Se o email já está em uso no Asaas, tenta reativar subconta soft-deleted
-      if (dto.email && error instanceof HttpException) {
-        const errorResponse = error.getResponse() as { details?: { errors?: Array<{ code: string; description: string }> } };
-        const emailInUse = errorResponse?.details?.errors?.some(
-          (e) => e.description?.includes('já está em uso'),
-        );
-
-        if (emailInUse) {
-          const deleted = await this.prisma.subaccount.findFirst({
-            where: { email: dto.email, deletedAt: { not: null } },
-          });
-
-          if (deleted) {
-            const reactivated = await this.prisma.subaccount.update({
-              where: { id: deleted.id },
-              data: {
-                name: dto.name,
-                cpfCnpj: dto.cpfCnpj,
-                phone: dto.phone,
-                mobilePhone: dto.mobilePhone,
-                type: localType,
-                fulfillmentType:
-                  localType === SubaccountType.SUPPLIER ? dto.fulfillmentType! : null,
-                active: true,
-                deletedAt: null,
-              },
-            });
-            this.logger.log(`Subconta reativada: ${reactivated.name} (${reactivated.email}) — Asaas: ${reactivated.asaasId}`);
-            return this.sanitize(reactivated);
-          }
-        }
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        return (await replay())!;
       }
       throw error;
     }
 
-    // Persiste localmente (inclui apiKey para referência futura)
-    const subaccount = await this.prisma.subaccount.create({
-      data: {
-        asaasId: asaasAccount.id,
-        walletId: asaasAccount.walletId,
-        apiKey: asaasAccount.apiKey || null,
-        name: dto.name,
-        cpfCnpj: dto.cpfCnpj,
-        email: dto.email,
-        phone: dto.phone,
-        mobilePhone: dto.mobilePhone,
-        type: localType,
-        fulfillmentType:
-          localType === SubaccountType.SUPPLIER ? dto.fulfillmentType! : null,
-      },
-    });
+    const payload:Record<string,unknown>={
+      name:dto.name,cpfCnpj:dto.cpfCnpj,email:dto.email,phone:dto.phone,
+      mobilePhone:dto.mobilePhone,companyType:dto.companyType,postalCode:dto.postalCode,
+      address:dto.address,addressNumber:dto.addressNumber,complement:dto.complement,
+      province:dto.province,incomeValue:dto.incomeValue,
+    };
+    if (dto.birthDate) payload.birthDate = dto.birthDate;
 
-    this.logger.log(`Subconta criada: ${subaccount.name} (${subaccount.type}) — Asaas: ${asaasAccount.id}`);
-    return this.sanitize(subaccount);
+    let remote:{id:string;walletId:string;apiKey?:string};
+    try {
+      remote = await this.asaas.post<{id:string;walletId:string;apiKey?:string}>('/accounts',payload);
+    } catch (error) {
+      // Known email conflict may mean an EXISTING locally soft-deleted account.
+      // Reactivate only after matching immutable CPF/CNPJ; no new remote POST.
+      const response=error instanceof HttpException ? error.getResponse() : null;
+      const details=response && typeof response==='object'
+        ? (response as {details?:{errors?:Array<{description?:string}>}}).details : null;
+      const emailUsed=details?.errors?.some(e=>e.description?.includes('já está em uso'));
+      if (emailUsed && dto.email) {
+        const deleted = await this.prisma.subaccount.findFirst({
+          where:{email:dto.email,cpfCnpj:dto.cpfCnpj,deletedAt:{not:null}},
+        });
+        if (deleted && this.isRealAsaasId(deleted.asaasId)) {
+          const updated = await this.prisma.$transaction(async tx=>{
+            const result=await tx.subaccount.update({
+              where:{id:deleted.id}, data:{
+                name:dto.name,phone:dto.phone,mobilePhone:dto.mobilePhone,
+                type:localType,fulfillmentType:localType==='SUPPLIER'
+                  ? dto.fulfillmentType! : null,active:true,deletedAt:null,
+              },
+            });
+            await tx.subaccountCreateOperation.update({
+              where:{id:operation.id},data:{
+                status:'COMPLETED',remoteAccountId:result.asaasId,
+                localSubaccountId:result.id,
+              },
+            });
+            return result;
+          });
+          return this.sanitize(updated);
+        }
+      }
+      await this.prisma.subaccountCreateOperation.update({
+        where:{id:operation.id},
+        data:{status:'NEEDS_RECONCILIATION',errorCode:'REMOTE_OUTCOME_UNKNOWN'},
+      });
+      throw new HttpException({
+        message:'Verifique a operação no Asaas antes de tentar novamente.',
+        operationId:operation.id,
+      },409);
+    }
+    if (!remote?.id || !remote.walletId) {
+      await this.prisma.subaccountCreateOperation.update({
+        where:{id:operation.id},data:{status:'NEEDS_RECONCILIATION',errorCode:'REMOTE_MISSING_ID'},
+      });
+      throw new HttpException({message:'Resposta incompleta do Asaas; reconciliação necessária',operationId:operation.id},409);
+    }
+    // Save provider ID before local creation: if persistence fails, a trusted
+    // operator has a reference to reconcile without creating another account.
+    await this.prisma.subaccountCreateOperation.update({
+      where:{id:operation.id},
+      data:{status:'RESPONSE_RECEIVED',remoteAccountId:remote.id},
+    });
+    try {
+      const local=await this.prisma.$transaction(async tx=>{
+        const saved=await tx.subaccount.create({
+          data:{
+            asaasId:remote.id,walletId:remote.walletId,apiKey:remote.apiKey??null,
+            name:dto.name,cpfCnpj:dto.cpfCnpj,email:dto.email,
+            phone:dto.phone,mobilePhone:dto.mobilePhone,type:localType,
+            fulfillmentType:localType==='SUPPLIER' ? dto.fulfillmentType! : null,
+          },
+        });
+        await tx.subaccountCreateOperation.update({
+          where:{id:operation.id},data:{status:'COMPLETED',localSubaccountId:saved.id},
+        });
+        return saved;
+      });
+      return this.sanitize(local);
+    } catch {
+      await this.prisma.subaccountCreateOperation.update({
+        where:{id:operation.id},data:{status:'NEEDS_RECONCILIATION',errorCode:'LOCAL_PERSIST_FAILED'},
+      });
+      throw new HttpException({
+        message:'Asaas respondeu, mas o vínculo local requer reconciliação manual.',
+        operationId:operation.id,
+      },409);
+    }
   }
 
   async linkExisting(dto: LinkExistingSubaccountDto) {
