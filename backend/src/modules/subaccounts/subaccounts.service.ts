@@ -303,7 +303,8 @@ export class SubaccountsService {
     type ParentAccount = { id: string; walletId: string; name: string; cpfCnpj: string; email?: string };
     let account: ParentAccount | undefined;
     try {
-      account = await this.asaas.get<ParentAccount>('/accounts/' + encodeURIComponent(id));
+      const fetched = await this.asaas.get<ParentAccount>('/accounts/' + encodeURIComponent(id));
+      account = fetched && (fetched.id === id || fetched.walletId === id) ? fetched : undefined;
     } catch (error) {
       if (!(error instanceof AsaasApiException) || ![400,404].includes(error.providerStatus ?? 0)) throw error;
     }
