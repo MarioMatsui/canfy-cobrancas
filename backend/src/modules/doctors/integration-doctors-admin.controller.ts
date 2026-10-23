@@ -5,7 +5,7 @@ import { IntegrationScopesGuard } from '../integrations/integration-scopes.guard
 import { RequireIntegrationScopes } from '../integrations/integration-scopes.decorator';
 import { DoctorsService } from './doctors.service';
 import { DoctorIntegrationOrganizationGuard } from './doctor-integration-organization.guard';
-import { CreateDoctorDto, DoctorFinancialLinkDto, DoctorLicenseInputDto, ConfirmDoctorProvisioningDto, DoctorListDto, UpdateDoctorDto } from './doctors.dto';
+import { CreateDoctorDto, DoctorFinancialLinkDto, DoctorLicenseInputDto, ConfirmDoctorProvisioningDto, ConfirmClinicalAccessDto, DoctorListDto, UpdateDoctorDto } from './doctors.dto';
 
 @ApiTags('Integração médica administrativa — v2')
 @ApiSecurity('canfy-integration-key')
@@ -35,6 +35,12 @@ export class IntegrationDoctorsAdminController {
   confirm(@Param('id',ParseUUIDPipe) id:string,@Body() dto:ConfirmDoctorProvisioningDto,
     @Headers('idempotency-key') key:string,@Request() req:{integration:{doctorOrganizationId:string}}){
     return this.doctors.confirmProvisioning(id,dto.authUserId,key,req.integration.doctorOrganizationId);
+  }
+
+  @Post(':id/provisioning/activate-clinical') @RequireIntegrationScopes('doctors:admin:write')
+  activateClinical(@Param('id',ParseUUIDPipe) id:string,@Body() dto:ConfirmClinicalAccessDto,
+    @Headers('idempotency-key') key:string,@Request() req:{integration:{doctorOrganizationId:string}}){
+    return this.doctors.activateClinicalAccess(id,dto.authUserId,key,req.integration.doctorOrganizationId);
   }
 
 }
