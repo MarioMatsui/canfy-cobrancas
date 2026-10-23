@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, ToggleLeft, ToggleRight, History, Stethoscope, Package, Users as UsersIcon, X, Link2, Trash2, MailCheck, Pencil } from 'lucide-react';
 import { useState, useRef } from 'react';
+import Link from 'next/link';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 
@@ -98,7 +99,7 @@ export default function SubaccountsPage() {
   const [formName, setFormName] = useState('');
   const [formCpfCnpj, setFormCpfCnpj] = useState('');
   const [formEmail, setFormEmail] = useState('');
-  const [formType, setFormType] = useState<SubaccountType>('DOCTOR');
+  const [formType, setFormType] = useState<SubaccountType>('SUPPLIER');
   const [formFulfillmentType, setFormFulfillmentType] = useState<FulfillmentType | ''>('');
   const [formPhone, setFormPhone] = useState('');
   const [formMobilePhone, setFormMobilePhone] = useState('');
@@ -223,7 +224,7 @@ export default function SubaccountsPage() {
     setFormName('');
     setFormCpfCnpj('');
     setFormEmail('');
-    setFormType('DOCTOR');
+    setFormType('SUPPLIER');
     setFormFulfillmentType('');
     setFormPhone('');
     setFormMobilePhone('');
@@ -239,6 +240,7 @@ export default function SubaccountsPage() {
   };
 
   const handleCreate = () => {
+    if (formType === 'DOCTOR') {toast.error('Utilize Adicionar médico para cadastrar profissionais');return;}
     if (!formName.trim() || !formCpfCnpj.trim() || !formEmail.trim()) {
       toast.error('Preencha nome, CPF/CNPJ e email');
       return;
@@ -303,6 +305,7 @@ export default function SubaccountsPage() {
   };
 
   const handleLink = () => {
+    if (formType === 'DOCTOR') {toast.error('Utilize Adicionar médico para vincular a conta financeira do profissional');return;}
     if (!formWalletId.trim()) {
       toast.error('Preencha o Wallet ID');
       return;
@@ -388,9 +391,12 @@ export default function SubaccountsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Subcontas</h1>
-          <p className="text-gray-500 mt-1">Gerencie contas de recebimento e carteiras Asaas de médicos, fornecedores e outros parceiros. Cadastros profissionais ficam na área Médicos.</p>
+          <p className="text-gray-500 mt-1">Gerencie carteiras Asaas e inclua médicos pelo cadastro profissional e financeiro unificado.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Link href="/subaccounts/medical/new" className="flex items-center gap-2 bg-emerald-700 text-white px-4 py-2 rounded-lg hover:bg-emerald-800 transition-colors">
+            <Stethoscope size={19} /> Adicionar médico
+          </Link>
           <button onClick={() => { creationKey.current = null; setShowForm(true); setFormMode('link'); }} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
             <Link2 size={20} />
             Vincular Existente
@@ -402,12 +408,19 @@ export default function SubaccountsPage() {
         </div>
       </div>
 
+      <nav className="flex flex-wrap gap-2" aria-label="Filtrar subcontas por tipo">
+        {([['','Todas'],['DOCTOR','Médicos'],['SUPPLIER','Fornecedores'],['OTHER','Outros']] as const).map(([value,label])=>
+          <button key={value} type="button" onClick={()=>{setTypeFilter(value);setPage(1);}}
+            aria-current={typeFilter===value?'page':undefined}
+            className={`rounded-lg border px-4 py-2 text-sm font-medium ${typeFilter===value?'border-emerald-600 bg-emerald-50 text-emerald-800':'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'}`}>{label}</button>)}
+      </nav>
+
       {/* Formulário de criação / vinculação */}
       {showForm && (
         <div className="bg-white rounded-xl border p-6 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">{formMode === 'create' ? 'Nova conta de recebimento' : 'Vincular Conta Existente'}</h2>
-          <p className="text-xs text-gray-600 mt-1">Esta operação administra apenas o recebimento financeiro. Não cadastra médicos profissionais nem habilita acesso clínico.</p>
+          <p className="text-xs text-gray-600 mt-1">Para médicos, utilize Adicionar médico. Este formulário permanece para fornecedores e outros recebedores.</p>
             <button onClick={resetForm} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
           </div>
 
@@ -425,7 +438,7 @@ export default function SubaccountsPage() {
 
           {/* Tipo */}
           <div className="flex gap-3">
-            {(['DOCTOR', 'SUPPLIER', 'OTHER'] as SubaccountType[]).map((t) => {
+            {(['SUPPLIER', 'OTHER'] as SubaccountType[]).map((t) => {
               const cfg = typeConfig[t];
               const Icon = cfg.icon;
               return (
