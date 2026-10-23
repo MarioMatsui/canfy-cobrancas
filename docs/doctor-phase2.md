@@ -45,3 +45,6 @@ Não se deve rodar migrate deploy contra a base de produção sem aprovação.
 
 ## Novos candidatos legados
 `GET /api/doctors/legacy-candidates` e o equivalente integrado `/api/integrations/v2/admin/doctors/legacy-candidates` devolvem APENAS candidatos DOCTOR sem vínculo ativo, sem CPF/Wallet/API Key. Os registros OTHER não são classificados automaticamente; precisam de revisão manual em processo futuro. Nenhum backfill executado.
+
+## Restrição organizacional da integração v2
+A chave de integração médica exige `doctorOrganizationId` admin-configurado e scopes específicos; chaves antigas têm organização NULL e são NEGADAS na API v2. O serviço filtra `Doctor.msgdeskOrganizationId` nas listagens, detalhes e mutações. A criação v2 atribui a organização confiável da chave, nunca do payload do browser. A lista de candidatos financeiros legados e o vínculo financeiro direto permanecem apenas no painel JWT ADMIN Canfy até haver mapeamento de subcontas por organização. A criação de integração com scopes de admin médica sem `doctorOrganizationId` é rejeitada.

@@ -59,11 +59,12 @@ function stableStringify(value:unknown):string {
 export class DoctorsService {
   constructor(private readonly db:PrismaService) {}
 
-  async list(query:DoctorListDto) {
+  async list(query:DoctorListDto,organizationId?:string) {
     const page=query.page??1, limit=query.limit??20;
     const search=query.search?.trim()||undefined;
     const digits=search?.replace(/\D/g,'');
     const where:Prisma.DoctorWhereInput = {
+      ...(organizationId?{msgdeskOrganizationId:organizationId}:{}),
       ...(query.registrationStatus?{registrationStatus:query.registrationStatus}:{}),
       ...(search?{OR:[
         {fullName:{contains:search,mode:Prisma.QueryMode.insensitive}},
@@ -108,29 +109,29 @@ export class DoctorsService {
     })),pagination:{page,limit,total,totalPages:Math.ceil(total/limit)}};
   }
 
-  async detail(id:string) {
+  async detail(id:string,organizationId?:string) {
     const doctor=await this.db.doctor.findUnique({where:{id},include:{
       licenses:true,financialLinks:{include:{subaccount:{
         select:{id:true,name:true,type:true,active:true,walletId:true,asaasId:true,deletedAt:true}
       }}},operations:{select:{id:true,kind:true,status:true,safeErrorCode:true,createdAt:true},
         orderBy:{createdAt:'desc'},take:15}
     }});
-    if(!doctor) throw new NotFoundException('Médico não encontrado');
+    if(!doctor || (organizationId && doctor.msgdeskOrganizationId !== organizationId)) throw new NotFoundException('Médico não encontrado');
     return doctor;
   }
 
-  async create(dto:CreateDoctorDto,rawKey?:string) {
+  async create(dto:CreateDoctorDto,rawKey?:string,organizationId?:string) {
     const key=idempotency(rawKey);
     assertCpf(dto.cpfNormalized);
     const data=sensitiveData(dto);
     const licenses=dto.licenses??[];
-    const requestHash=createHash('sha256').update(stableStringify({data,licenses})).digest('hex');
+    const requestHash=createHash('sha256').update(stableStringify({data,licenses,organizationId})).digest('hex');
     const previous=await this.db.doctorProvisioningOperation.findUnique({where:{idempotencyKey:key}});
     if(previous){
       if(previous.kind!=='DOCTOR_CREATE' || previous.requestHash!==requestHash)
         throw new ConflictException('Idempotency-Key reutilizada com payload diferente');
       if(!previous.resultDoctorId) throw new ConflictException('Cadastro pendente de reconciliação');
-      return this.detail(previous.resultDoctorId);
+      return this.detail(previous.resultDoctorId,organizationId);
     }
     try {
       const created=await this.db.$transaction(async tx=>{
@@ -138,41 +139,42 @@ export class DoctorsService {
           data:{kind:'DOCTOR_CREATE',idempotencyKey:key,requestHash,status:'PENDING'}});
         const doctor=await tx.doctor.create({
           data:{...data,fullName:dto.fullName,
+            ...(organizationId?{msgdeskOrganizationId:organizationId}:{}),
             licenses:{create:licenses.map(l=>({crmNormalized:l.crmNormalized,state:l.state}))}
           }});
         await tx.doctorProvisioningOperation.update({
           where:{id:op.id},data:{doctorId:doctor.id,resultDoctorId:doctor.id,status:'COMPLETED'}});
         return doctor;
       });
-      return this.detail(created.id);
+      return this.detail(created.id,organizationId);
     } catch(err) {
       if(err instanceof Prisma.PrismaClientKnownRequestError && err.code==='P2002'){
         const replay=await this.db.doctorProvisioningOperation.findUnique({where:{idempotencyKey:key}});
         if(replay?.kind==='DOCTOR_CREATE' && replay.requestHash===requestHash && replay.resultDoctorId)
-          return this.detail(replay.resultDoctorId);
+          return this.detail(replay.resultDoctorId,organizationId);
       }
       return conflict(err);
     }
   }
 
-  async update(id:string,dto:UpdateDoctorDto) {
-    await this.detail(id);
+  async update(id:string,dto:UpdateDoctorDto,organizationId?:string) {
+    await this.detail(id,organizationId);
     if(dto.cpfNormalized) assertCpf(dto.cpfNormalized);
     if(dto.licenses!==undefined) throw new BadRequestException('Use endpoint dedicado para adicionar CRM');
     try {await this.db.doctor.update({where:{id},data:sensitiveData(dto)});
     }catch(err){return conflict(err);}
-    return this.detail(id);
+    return this.detail(id,organizationId);
   }
 
-  async addLicense(id:string,dto:DoctorLicenseInputDto) {
-    await this.detail(id);
+  async addLicense(id:string,dto:DoctorLicenseInputDto,organizationId?:string) {
+    await this.detail(id,organizationId);
     try { await this.db.doctorLicense.create({data:{doctorId:id,crmNormalized:dto.crmNormalized,state:dto.state}});
     }catch(err){return conflict(err);}
-    return this.detail(id);
+    return this.detail(id,organizationId);
   }
 
-  async regularize(id:string) {
-    const doctor=await this.detail(id);
+  async regularize(id:string,organizationId?:string) {
+    const doctor=await this.detail(id,organizationId);
     const required:Record<string,unknown>={
       cpfNormalized:doctor.cpfNormalized,rg:doctor.rg,rgIssuer:doctor.rgIssuer,
       rgState:doctor.rgState,birthDate:doctor.birthDate,email:doctor.email,
@@ -184,11 +186,11 @@ export class DoctorsService {
     if(missing.length) throw new ConflictException({message:'Cadastro incompleto',missingFields:missing});
     if(doctor.registrationStatus===DoctorRegistrationStatus.VERIFIED) return doctor;
     await this.db.doctor.update({where:{id},data:{registrationStatus:'PENDING_REVIEW'}});
-    return this.detail(id);
+    return this.detail(id,organizationId);
   }
 
-  async linkExisting(id:string,dto:DoctorFinancialLinkDto) {
-    await this.detail(id);
+  async linkExisting(id:string,dto:DoctorFinancialLinkDto,organizationId?:string) {
+    await this.detail(id,organizationId);
     const sub=await this.db.subaccount.findUnique({where:{id:dto.subaccountId}});
     if(!sub || sub.type!==SubaccountType.DOCTOR || sub.deletedAt || !sub.walletId)
       throw new BadRequestException('Subconta não elegível; vínculo requer revisão financeira');
@@ -199,19 +201,21 @@ export class DoctorsService {
         doctorId:id,subaccountId:sub.id,status:'PENDING_REVIEW',active:true
       }});
     }catch(err){return conflict(err);}
-    return this.detail(id);
+    return this.detail(id,organizationId);
   }
 
-  async provisioning(id:string) {
+  async provisioning(id:string,organizationId?:string) {
     const d=await this.db.doctor.findUnique({where:{id},select:{
+      msgdeskOrganizationId:true,
       id:true,msgdeskAuthUserId:true,provisioningStatus:true,accessActive:true
     }});
-    if(!d) throw new NotFoundException('Médico não encontrado');
-    return {...d,provisioned:d.msgdeskAuthUserId!==null};
+    if(!d || (organizationId && d.msgdeskOrganizationId !== organizationId)) throw new NotFoundException('Médico não encontrado');
+    const {msgdeskOrganizationId:_organizationId,...safe}=d;
+    return {...safe,provisioned:d.msgdeskAuthUserId!==null};
   }
 
-  async prepareProvisioning(id:string) {
-    await this.detail(id);
+  async prepareProvisioning(id:string,organizationId?:string) {
+    await this.detail(id,organizationId);
     // Fail closed. The authenticated Auth-create protocol is implemented in Prompt 3.
     return {doctorId:id,provisioned:false,status:'AWAITING_MSGDESK',
       message:'Provisionamento Auth não habilitado nesta etapa; nenhuma credencial criada'};
