@@ -305,7 +305,7 @@ export class SubaccountsService {
     try {
       account = await this.asaas.get<ParentAccount>('/accounts/' + encodeURIComponent(id));
     } catch (error) {
-      if (!(error instanceof AsaasApiException) || error.providerStatus !== 404) throw error;
+      if (!(error instanceof AsaasApiException) || ![400,404].includes(error.providerStatus ?? 0)) throw error;
     }
     if (!account) {
       const limit = 100;
