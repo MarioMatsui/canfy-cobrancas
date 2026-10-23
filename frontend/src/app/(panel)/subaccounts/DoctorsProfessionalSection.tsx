@@ -18,6 +18,16 @@ const fields:[string,string,string][]=[
 const UFS=['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
 const labels:Record<string,string>={DRAFT:'Incompleto',PENDING_REVIEW:'Em revisão',VERIFIED:'Verificado',REJECTED:'Rejeitado',AWAITING_MSGDESK:'Aguardando organização/acesso',LINKED:'Vinculado',BLOCKED:'Bloqueado',NEEDS_RECONCILIATION:'Requer reconciliação',UNLINKED:'Sem carteira'};
 const blank=Object.fromEntries(fields.map(([k])=>[k,''])) as Record<string,string>;
+const fieldGroups=[
+ {title:'Identificação pessoal',help:'Dados básicos do profissional. A documentação pode ser completada durante a regularização.',keys:['fullName','cpfNormalized','rg','rgIssuer','rgState','birthDate','email','mobilePhone']},
+ {title:'Endereço',help:'Informações de localização do profissional, utilizadas para a conferência cadastral.',keys:['postalCode','street','streetNumber','addressComplement','neighborhood','city','state','country']},
+];
+function formattedDocument(field:string,raw:string){
+ const digits=raw.replace(/\D/g,'');
+ if(field==='cpfNormalized')return digits.slice(0,11).replace(/^(\d{3})(\d)/,'$1.$2').replace(/^(\d{3})\.(\d{3})(\d)/,'$1.$2.$3').replace(/(\d{3})(\d{1,2})$/,'$1-$2');
+ if(field==='postalCode')return digits.slice(0,8).replace(/^(\d{5})(\d)/,'$1-$2');
+ return raw;
+}
 function message(error:unknown){
  const e=error as {response?:{data?:{message?:string|string[]}}};
  const m=e.response?.data?.message;
@@ -115,9 +125,9 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  {(detailId||edit)&&<div className="border border-emerald-200 rounded-xl p-5 space-y-4">
  <div className="flex justify-between"><h3 className="font-semibold">{edit?(detailId?'Editar cadastro':'Cadastrar profissional'):'Detalhe profissional'}</h3><button className="text-sm underline" onClick={()=>{setEdit(false);setDetailId(null);}}>Fechar</button></div>
  {edit?<form className="space-y-4" onSubmit={submit}>
- <fieldset className="space-y-3"><legend className="font-semibold text-gray-800 mb-3">Identificação, endereço e informações profissionais</legend><div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{fields.map(([k,n,t])=><label className="text-sm" key={k}>{n}{['rgState','state'].includes(k)?<select className="border rounded-lg block w-full p-2 mt-1" value={form[k]||''} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))}><option value="">Selecionar UF</option>{UFS.map(uf=><option value={uf} key={uf}>{uf}</option>)}</select>:<input className="border rounded-lg block w-full p-2 mt-1" type={t} value={form[k]||''} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))} required={k==='fullName'} maxLength={254}/>}</label>)}</div></fieldset>
- {!detailId&&<div className="grid grid-cols-2 gap-3"><label className="text-sm">CRM<input className="border rounded-lg p-2 block w-full mt-1" value={crm} onChange={e=>setCrm(e.target.value)}/></label>
- <label className="text-sm">UF CRM<select className="border rounded-lg p-2 block w-full mt-1" value={uf} onChange={e=>setUf(e.target.value)}>{UFS.map(value=><option value={value} key={value}>{value}</option>)}</select></label></div>}
+ {fieldGroups.map(group=><fieldset className="rounded-lg border border-gray-200 p-4 sm:p-5 space-y-3" key={group.title}><legend className="font-semibold text-gray-800 px-2">{group.title}</legend><p className="text-xs text-gray-500">{group.help}</p><div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{fields.filter(([k])=>group.keys.includes(k)).map(([k,n,t])=><label className="text-sm" key={k}>{n}{['rgState','state'].includes(k)?<select className="border rounded-lg block w-full p-2 mt-1" value={form[k]||''} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))}><option value="">Selecionar UF</option>{UFS.map(uf=><option value={uf} key={uf}>{uf}</option>)}</select>:<input className="border rounded-lg block w-full p-2 mt-1" type={t} value={formattedDocument(k,form[k]||'')} onChange={e=>setForm(f=>({...f,[k]:['cpfNormalized','postalCode'].includes(k)?e.target.value.replace(/\D/g,''):e.target.value}))} required={k==='fullName'} maxLength={k==='cpfNormalized'?14:k==='postalCode'?9:254}/>}</label>)}</div></fieldset>)}
+ {!detailId&&<fieldset className="border border-gray-200 rounded-lg p-4 sm:p-5 space-y-3"><legend className="font-semibold text-gray-800 px-2">Registro profissional</legend><p className="text-xs text-gray-500">Informe o CRM para revisão. O registro ainda não será considerado verificado.</p><div className="grid grid-cols-2 gap-3"><label className="text-sm">CRM<input className="border rounded-lg p-2 block w-full mt-1" value={crm} onChange={e=>setCrm(e.target.value)}/></label>
+ <label className="text-sm">UF CRM<select className="border rounded-lg p-2 block w-full mt-1" value={uf} onChange={e=>setUf(e.target.value)}>{UFS.map(value=><option value={value} key={value}>{value}</option>)}</select></label></div></fieldset>}
  <p className="text-xs text-gray-600">Salvar cria apenas o cadastro profissional. A organização será vinculada posteriormente a uma integração pareada; CRM, login clínico e carteira financeira exigem processos separados.</p>
  <button className="bg-emerald-700 text-white px-4 py-2 rounded-lg disabled:opacity-60" disabled={working}>{working?'Salvando…':'Salvar profissional'}</button>
  </form>:selected.isLoading?<p>Carregando…</p>:selected.data?<div className="space-y-4">
