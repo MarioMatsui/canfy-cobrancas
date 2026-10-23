@@ -312,6 +312,18 @@ export class DoctorsService {
       doctor.registrationStatus!=='VERIFIED'||doctor.provisioningStatus!=='LINKED'||
       !doctor.licenses.some(l=>l.verificationStatus==='VERIFIED'))
       throw new ConflictException('Médico não elegível para acesso clínico');
+    // Financial eligibility is separate from CRM review. Never activate clinical
+    // access when the wallet is absent, synthetic, disabled or awaiting review.
+    const activeFinance = await this.db.doctorFinancialLink.findFirst({
+      where:{
+        doctorId:id,active:true,status:'VERIFIED',
+        subaccount:{type:'DOCTOR',active:true,deletedAt:null,walletId:{not:null}},
+      },
+      include:{subaccount:{select:{asaasId:true}}},
+    });
+    if (!activeFinance || activeFinance.subaccount.asaasId.startsWith('external_')) {
+      throw new ConflictException('Conta Asaas médica validada é necessária para habilitação clínica');
+    }
     const requestHash=createHash('sha256').update(stableStringify({id,authUserId,organizationId})).digest('hex');
     const previous=await this.db.doctorProvisioningOperation.findUnique({where:{idempotencyKey:key}});
     if(previous) {
