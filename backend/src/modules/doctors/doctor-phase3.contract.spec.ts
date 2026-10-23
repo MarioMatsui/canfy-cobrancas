@@ -14,6 +14,7 @@ describe('stage 3 clinical provisioning contract',()=>{
   return {
     doctor:{findUnique:jest.fn().mockResolvedValue(doctor)},
     doctorProvisioningOperation:{findUnique:jest.fn().mockResolvedValue(null)},
+    doctorFinancialLink:{findFirst:jest.fn().mockResolvedValue({subaccount:{asaasId:'acc_valid_123'}})},
     $transaction:jest.fn(async (callback:(transaction:typeof tx)=>Promise<unknown>)=>callback(tx)),
   };
  };
