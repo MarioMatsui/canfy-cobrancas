@@ -155,7 +155,10 @@ export class SubaccountsService {
     };
 
     if (dto.birthDate) asaasPayload.birthDate = dto.birthDate;
-    if (dto.incomeValue) asaasPayload.incomeValue = dto.incomeValue;
+    if (!Number.isFinite(dto.incomeValue) || dto.incomeValue <= 0) {
+      throw new BadRequestException('incomeValue é obrigatório e deve ser positivo');
+    }
+    asaasPayload.incomeValue = dto.incomeValue;
 
     let asaasAccount: { id: string; walletId: string; apiKey?: string };
 
@@ -238,7 +241,7 @@ export class SubaccountsService {
     let accountWalletId = dto.walletId;
 
     try {
-      const accounts = await this.asaas.get<{ data: Array<{ id: string; walletId: string; name: string; cpfCnpj: string; email: string }> }>('/accounts');
+      const accounts = await this.asaas.get<{ data: Array<{ id: string; walletId: string; name: string; cpfCnpj: string; email: string }> }>(`/accounts?walletId=${encodeURIComponent(dto.walletId)}&limit=100`);
       const account = accounts.data.find((a) => a.walletId === dto.walletId || a.id === dto.walletId);
 
       if (account) {
@@ -468,22 +471,45 @@ export class SubaccountsService {
   }
 
   async syncFromAsaas() {
-    const response = await this.asaas.get<{ data: Array<{ id: string; walletId: string; name: string; cpfCnpj: string; email: string }> }>('/accounts');
-
-    for (const account of response.data) {
-      await this.prisma.subaccount.upsert({
-        where: { asaasId: account.id },
-        update: { name: account.name, email: account.email },
-        create: {
-          asaasId: account.id,
-          walletId: account.walletId,
-          name: account.name,
-          cpfCnpj: account.cpfCnpj,
-          email: account.email,
-        },
-      });
+    // All pages are read. External synthetic IDs are never overwritten silently:
+    // a wallet already represented locally is sent to manual reconciliation.
+    let offset = 0;
+    const limit = 100;
+    let count = 0;
+    let review = 0;
+    for (let page = 0; page < 1000; page++) {
+      const response = await this.asaas.get<{
+        data: Array<{ id: string; walletId: string; name: string; cpfCnpj: string; email: string }>;
+        hasMore?: boolean;
+      }>(`/accounts?offset=${offset}&limit=${limit}`);
+      if (!Array.isArray(response.data)) throw new Error('Resposta Asaas inválida na sincronização');
+      for (const account of response.data) {
+        const duplicateWallet = account.walletId
+          ? await this.prisma.subaccount.findFirst({ where: { walletId: account.walletId } })
+          : null;
+        if (duplicateWallet && duplicateWallet.asaasId !== account.id) {
+          review++;
+          continue;
+        }
+        await this.prisma.subaccount.upsert({
+          where: { asaasId: account.id },
+          update: { name: account.name, email: account.email },
+          create: {
+            asaasId: account.id,
+            walletId: account.walletId,
+            name: account.name,
+            cpfCnpj: account.cpfCnpj,
+            email: account.email,
+          },
+        });
+        count++;
+      }
+      offset += response.data.length;
+      if (response.hasMore === false || response.data.length < limit) {
+        this.logger.log(`Sincronização Asaas concluída: ${count} processadas, ${review} carteiras em revisão`);
+        return {processed:count,needsReview:review};
+      }
     }
-
-    this.logger.log(`Sincronizadas ${response.data.length} subcontas do Asaas`);
+    throw new Error('Paginação Asaas excedeu limite de segurança; revisar manualmente');
   }
 }

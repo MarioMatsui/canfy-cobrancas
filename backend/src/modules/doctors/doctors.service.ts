@@ -55,7 +55,7 @@ export class DoctorsService {
     const where:Prisma.DoctorWhereInput = {
       ...(query.registrationStatus?{registrationStatus:query.registrationStatus}:{}),
       ...(search?{OR:[
-        {fullName:{contains:search,mode:'insensitive'}},
+        {fullName:{contains:search,mode:Prisma.QueryMode.insensitive}},
         ...(digits?[{licenses:{some:{crmNormalized:{contains:digits}}}}]:[]),
       ]}:{}),
     };
