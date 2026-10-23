@@ -135,7 +135,7 @@ export function IntegrationsSettings() {
   });
 
   const pairingMutation=useMutation({
-    mutationFn:async(i:Integration)=>{const {data}=await api.post<{pairingCode:string;expiresAt:string}>(`/integrations/${i.id}/doctor-pairing`);return {...data,integrationName:i.name};},
+    mutationFn:async(i:Integration)=>{const {data}=await api.post<{pairingCode:string;expiresAt:string}>(`/integrations/${i.id}/doctor-pairing`);return {code:data.pairingCode,expiresAt:data.expiresAt,integrationName:i.name};},
     onSuccess:setPairing,
     onError:()=>toast.error('Não foi possível iniciar o pareamento desta integração'),
   });
