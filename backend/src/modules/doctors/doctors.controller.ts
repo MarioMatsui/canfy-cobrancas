@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Patch, Post, Query, Request, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
 import { DoctorsService } from './doctors.service';
-import { CreateDoctorDto, DoctorFinancialLinkDto, DoctorLicenseInputDto, DoctorListDto, UpdateDoctorDto } from './doctors.dto';
+import { CreateDoctorDto, DoctorFinancialLinkDto, DoctorLicenseInputDto, DoctorListDto, ReviewDoctorLicenseDto, UpdateDoctorDto } from './doctors.dto';
 
 @ApiTags('Médicos profissionais (admin)')
 @ApiBearerAuth()
@@ -22,6 +22,11 @@ export class DoctorsController {
   @Post(':id/licenses') license(@Param('id',ParseUUIDPipe) id:string,@Body() dto:DoctorLicenseInputDto){return this.doctors.addLicense(id,dto);}
   @Post(':id/regularize') regularize(@Param('id',ParseUUIDPipe) id:string){return this.doctors.regularize(id);}
   @Post(':id/financial-links') link(@Param('id',ParseUUIDPipe) id:string,@Body() dto:DoctorFinancialLinkDto){return this.doctors.linkExisting(id,dto);}
+  @Post(':id/licenses/review') review(
+    @Param('id',ParseUUIDPipe) id:string,
+    @Body() dto:ReviewDoctorLicenseDto,
+    @Request() req:{user:{id:string}}
+  ){return this.doctors.reviewLicense(id,dto,req.user.id);}
   @Get(':id/provisioning') provisioning(@Param('id',ParseUUIDPipe) id:string){return this.doctors.provisioning(id);}
   @Post(':id/provisioning/prepare') prepare(@Param('id',ParseUUIDPipe) id:string){return this.doctors.prepareProvisioning(id);}
 }
