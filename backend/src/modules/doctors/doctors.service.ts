@@ -120,6 +120,14 @@ export class DoctorsService {
     return doctor;
   }
 
+  /** Integration details never expose Asaas wallet/account identifiers or financial PII. */
+  async detailForIntegration(id:string,organizationId:string) {
+    const {financialLinks,...doctor}=await this.detail(id,organizationId);
+    return {...doctor,financialLinks:financialLinks.map(link=>({
+      status:link.status,active:link.active,createdAt:link.createdAt
+    }))};
+  }
+
   async create(dto:CreateDoctorDto,rawKey?:string,organizationId?:string) {
     const key=idempotency(rawKey);
     assertCpf(dto.cpfNormalized);
