@@ -268,6 +268,43 @@ export class DoctorsService {
    * Confirm an Auth UID only from the organization-scoped integration v2.
    * Never changes subaccounts, balances, historical charges or CRM verification.
    */
+  /** Clinic authorization is separate from financial eligibility, identity and license review. */
+  async activateClinicalAccess(id:string,authUserId:string,rawKey:string,organizationId:string){
+    const key=idempotency(rawKey);
+    const doctor=await this.db.doctor.findUnique({where:{id},
+      include:{licenses:{select:{verificationStatus:true}}}});
+    if(!doctor || !organizationId || doctor.msgdeskOrganizationId!==organizationId)
+      throw new NotFoundException('Médico não encontrado');
+    if(doctor.msgdeskAuthUserId!==authUserId ||
+      doctor.registrationStatus!=='VERIFIED'||doctor.provisioningStatus!=='LINKED'||
+      !doctor.licenses.some(l=>l.verificationStatus==='VERIFIED'))
+      throw new ConflictException('Médico não elegível para acesso clínico');
+    const requestHash=createHash('sha256').update(stableStringify({id,authUserId,organizationId})).digest('hex');
+    const previous=await this.db.doctorProvisioningOperation.findUnique({where:{idempotencyKey:key}});
+    if(previous) {
+      if(previous.kind!=='CLINICAL_ACTIVATE'||previous.requestHash!==requestHash)
+        throw new ConflictException('Idempotency-Key reutilizada com outra solicitação');
+      if(previous.status!=='COMPLETED') throw new ConflictException('Ativação requer reconciliação');
+      return this.provisioning(id,organizationId);
+    }
+    try {
+      await this.db.$transaction(async tx=>{
+        const op=await tx.doctorProvisioningOperation.create({data:{
+          doctorId:id,kind:'CLINICAL_ACTIVATE',idempotencyKey:key,requestHash,status:'PENDING'
+        }});
+        const updated=await tx.doctor.updateMany({where:{
+          id,msgdeskOrganizationId:organizationId,msgdeskAuthUserId:authUserId,
+          registrationStatus:'VERIFIED',provisioningStatus:'LINKED'
+        },data:{accessActive:true}});
+        if(updated.count!==1)throw new ConflictException('Revalidação de acesso falhou');
+        await tx.doctorProvisioningOperation.update({where:{id:op.id},data:{
+          status:'COMPLETED',resultDoctorId:id
+        }});
+      });
+    }catch(err){return conflict(err);}
+    return this.provisioning(id,organizationId);
+  }
+
   async confirmProvisioning(id:string, authUserId:string, rawKey:string, organizationId:string) {
     const key=idempotency(rawKey);
     const doctor=await this.db.doctor.findUnique({where:{id},select:{
