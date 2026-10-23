@@ -11,6 +11,7 @@ describe('SubaccountsService metadata local', () => {
 
   beforeEach(() => {
     prisma = {
+      doctorFinancialLink:{count:jest.fn().mockResolvedValue(0)},
       subaccount: {
         findFirst: jest.fn(),
         update: jest.fn(),
