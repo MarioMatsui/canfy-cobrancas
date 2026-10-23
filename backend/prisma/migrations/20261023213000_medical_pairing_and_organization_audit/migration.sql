@@ -12,7 +12,7 @@ CREATE TABLE "integration_doctor_pairing_events" (
   "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "integration_doctor_pairing_events_pkey" PRIMARY KEY ("id")
 );
-CREATE INDEX "integration_doctor_pairing_events_integration_key_id_created_at_idx"
+CREATE INDEX "integration_doctor_pairing_key_created_idx"
   ON "integration_doctor_pairing_events" ("integration_key_id","created_at");
 CREATE TABLE "doctor_organization_link_events" (
   "id" TEXT NOT NULL,

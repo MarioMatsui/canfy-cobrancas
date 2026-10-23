@@ -892,7 +892,7 @@ model IntegrationDoctorPairingEvent {
   organizationId String @map("organization_id") @db.Uuid
   initiatedByCanfyUserId String? @map("initiated_by_canfy_user_id")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  @@index([integrationKeyId,createdAt])
+  @@index([integrationKeyId,createdAt], map: "integration_doctor_pairing_key_created_idx")
   @@map("integration_doctor_pairing_events")
 }
 
