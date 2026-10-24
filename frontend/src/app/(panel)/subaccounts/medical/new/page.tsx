@@ -19,7 +19,7 @@ type FormValues = {
 };
 type IdentityCandidate={id:string;fullName:string;maskedCpf:string|null;cpfMatched:boolean;crmMatched:boolean;registrationStatus:string;organizationLinked:boolean;financiallyLinked:boolean;licenses:Array<{crmNormalized:string;state:string}>};
 type Onboarded = {
-  doctor:{id:string;fullName:string;registrationStatus:string;provisioningStatus:string;accessActive:boolean;financialLinks?:Array<{id:string;status:string;subaccountId:string}>};
+  doctor:{id:string;fullName:string;registrationStatus:string;provisioningStatus:string;financialStatus:string;accessActive:boolean;financialLinks?:Array<{id:string;status:string;subaccountId:string}>};
   financialOwnershipVerified:boolean; asaasStatus:string|null;
   clinicalAccessActive:boolean;msgdeskProvisioningStatus:string;message:string;
   financialAccountReused?:boolean;existingProfessionalReused?:boolean;
