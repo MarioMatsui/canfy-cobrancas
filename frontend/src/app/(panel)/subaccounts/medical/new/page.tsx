@@ -17,6 +17,7 @@ type FormValues = {
   incomeValue:string; companyType:string; accountIdentifier:string;
   integrationId:string; evidenceReference:string; identityEvidenceReference:string;
 };
+type IdentityCandidate={id:string;fullName:string;maskedCpf:string|null;cpfMatched:boolean;crmMatched:boolean;registrationStatus:string;organizationLinked:boolean;financiallyLinked:boolean;licenses:Array<{crmNormalized:string;state:string}>};
 type Onboarded = {
   doctor:{id:string;fullName:string;registrationStatus:string;provisioningStatus:string;accessActive:boolean;financialLinks?:Array<{id:string;status:string;subaccountId:string}>};
   financialOwnershipVerified:boolean; asaasStatus:string|null;
@@ -70,6 +71,8 @@ export default function NewMedicalSubaccountPage(){
   const [sourceReady,setSourceReady]=useState(false);
   const [sourceError,setSourceError]=useState('');
   const [sourceName,setSourceName]=useState('');
+  const [identityCandidates,setIdentityCandidates]=useState<IdentityCandidate[]>([]);
+  const [identityBusy,setIdentityBusy]=useState(false);
   const [legacyChoices,setLegacyChoices]=useState<Array<{subaccountId:string;name:string;financialIdentifierVerified:boolean}>>([]);
   React.useEffect(()=>{
     let current=true;
@@ -141,7 +144,7 @@ export default function NewMedicalSubaccountPage(){
       </select>
     </label>
   );
-  function continueProfessional(){
+  async function continueProfessional(){
     const required:(keyof FormValues)[]=['fullName','cpfNormalized','birthDate','email','mobilePhone','postalCode','street','streetNumber','neighborhood','city','state','crm','crmUf'];
     const missing=required.filter(k=>!form[k].trim());
     if(missing.length){toast.error('Complete os dados pessoais, endereço e CRM obrigatórios');return}
@@ -149,9 +152,24 @@ export default function NewMedicalSubaccountPage(){
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)){
       toast.error('Confira CPF, CEP e e-mail');return;
     }
-    setStep(2);window.scrollTo({top:0,behavior:'smooth'});
+    setIdentityBusy(true);
+    try {
+      const response=await api.post('/doctors/identity-candidates',{
+        cpfNormalized:form.cpfNormalized,crmNormalized:form.crm,state:form.crmUf,
+      });
+      const matches:IdentityCandidate[]=response.data.candidates||[];
+      setIdentityCandidates(matches);
+      if(existingDoctorId && !matches.some(x=>x.id===existingDoctorId)){
+        toast.error('A identidade selecionada não coincide com o CPF/CRM informado. Revise antes de continuar.');return;
+      }
+      if(matches.length>1){toast.error('CPF e CRM correspondem a cadastros diferentes. Revisão administrativa necessária antes de associar.');return;}
+      setStep(2);window.scrollTo({top:0,behavior:'smooth'});
+    } catch(e){toast.error(errorMessage(e)+' Não será criado outro profissional sem verificar duplicidades.');}
+    finally{setIdentityBusy(false);}
   }
   function continueFinancial(){
+    if(identityCandidates.length>1){toast.error('Identidade em conflito. Volte e revise CPF/CRM.');return;}
+    if(identityCandidates.length===1&&!existingDoctorId){toast.error('Selecione e confirme o cadastro profissional existente antes de continuar.');return;}
     if(mode==='LINK'&&!localSubaccountId&&!form.accountIdentifier.trim()){
       toast.error('Informe o ID da conta ou Wallet ID Asaas');return;
     }
@@ -247,10 +265,17 @@ export default function NewMedicalSubaccountPage(){
           <p className="text-sm text-slate-600">O CRM será registrado como pendente até a conferência humana no conselho.</p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">{field('crm','CRM', 'text',true)}{ufField('crmUf','UF do CRM',true)}</div>
         </fieldset>
-        <div className="flex justify-end"><button type="button" onClick={continueProfessional} className="flex items-center gap-2 rounded-lg bg-emerald-700 px-5 py-2.5 text-white hover:bg-emerald-800">Continuar <ArrowRight size={16}/></button></div>
+        <div className="flex justify-end"><button type="button" onClick={()=>void continueProfessional()} disabled={identityBusy} className="flex items-center gap-2 rounded-lg bg-emerald-700 px-5 py-2.5 text-white hover:bg-emerald-800 disabled:opacity-50">{identityBusy?'Conferindo registros existentes…':'Continuar'} <ArrowRight size={16}/></button></div>
       </div>}
       {sourceReady&&!sourceError&&step===2&&<div className="space-y-6">
         <div className="flex items-center gap-2"><Wallet className="text-emerald-700" size={20}/><h2 className="text-lg font-semibold">Conta de recebimento Asaas</h2></div>
+        {identityCandidates.length===1&&<section className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4" aria-label="Profissional já cadastrado">
+          <h3 className="font-semibold text-amber-950">Profissional existente localizado</h3>
+          <p className="text-sm text-amber-900">O CPF ou CRM informado corresponde a <strong>{identityCandidates[0].fullName}</strong> ({identityCandidates[0].maskedCpf||'CPF restrito'}). Isso não comprova titularidade financeira. Não será criado um segundo cadastro profissional.</p>
+          <label className="flex items-start gap-3 text-sm text-amber-950"><input type="checkbox" className="mt-1" checked={existingDoctorId===identityCandidates[0].id} onChange={e=>{setExistingDoctorId(e.target.checked?identityCandidates[0].id:'');setMode('LINK');}} disabled={!!sourceName&&!!existingDoctorId&&existingDoctorId===identityCandidates[0].id&&!!new URLSearchParams(typeof window==='undefined'?'':window.location.search).get('doctorId')}/>
+            <span>Conferi a identidade e quero retomar este perfil profissional, preservando o histórico anterior.</span></label>
+          <p className="text-xs">Estado: {identityCandidates[0].registrationStatus}. {identityCandidates[0].financiallyLinked?'Já há carteira vinculada; revise antes de associar outra.':'Sem carteira profissional ativa identificada.'}</p>
+        </section>}
         <div role="radiogroup" aria-label="Operação financeira" className="grid gap-3 sm:grid-cols-2">
           {([['CREATE','Criar nova subconta','Utiliza os dados já informados e cria uma conta filha no Asaas.'],['LINK','Vincular existente','Reaproveita uma subconta cadastrada ou uma conta existente na conta-pai.']] as const).filter(([value])=>!(existingDoctorId||localSubaccountId)||value==='LINK').map(([value,title,help])=>
             <label key={value} className={`cursor-pointer rounded-xl border p-4 ${mode===value?'border-emerald-600 bg-emerald-50':'border-slate-200'}`}>
