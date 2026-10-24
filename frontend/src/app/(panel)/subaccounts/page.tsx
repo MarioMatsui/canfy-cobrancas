@@ -412,7 +412,7 @@ export default function SubaccountsPage() {
           {typeFilter!=='DOCTOR'&&<><button onClick={() => { creationKey.current = null; setShowForm(true); setFormMode('link'); }} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
             <Link2 size={20} />
             Vincular Existente
-          </button>}
+          </button>
           <button onClick={() => { creationKey.current = null; setShowForm(true); setFormMode('create'); }} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
             <Plus size={20} />
             Nova Subconta
