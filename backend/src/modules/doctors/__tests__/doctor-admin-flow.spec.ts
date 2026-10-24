@@ -72,3 +72,18 @@ describe('Financial status parity',()=>{
     }));
   });
 });
+
+describe('Legacy professional regularization',()=>{
+  it('does not require unrelated Asaas-only fields to request an exceptional review',async()=>{
+    const db:any={doctor:{update:jest.fn().mockResolvedValue({})}};
+    const service=new DoctorsService(db);
+    jest.spyOn(service,'detail').mockResolvedValue({
+      id:'doc',fullName:'Dra. Teste',cpfNormalized:cpf,
+      licenses:[{crmNormalized:'1234',state:'SP'}],registrationStatus:'DRAFT',
+    } as never);
+    await service.regularize('doc');
+    expect(db.doctor.update).toHaveBeenCalledWith({
+      where:{id:'doc'},data:{registrationStatus:'PENDING_REVIEW'},
+    });
+  });
+});
