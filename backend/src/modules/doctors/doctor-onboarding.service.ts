@@ -55,14 +55,12 @@ export class DoctorOnboardingService {
   async onboard(dto: DoctorOnboardingDto, key: string | undefined, actorId: string) {
     if (!key || !uuidPattern.test(key)) throw new BadRequestException('Idempotency-Key UUID obrigatório');
     if (!dto.doctor || !dto.mode) throw new BadRequestException('Dados profissionais e modo financeiro são obrigatórios');
+    if (dto.administrativeConfirmed !== true) throw new BadRequestException('Confirme a conferência profissional realizada pela administração');
     const doctorCpf = digits(dto.doctor.cpfNormalized || '');
     if (doctorCpf.length !== 11) throw new BadRequestException('CPF do médico é obrigatório');
     assertCpf(doctorCpf);
-    if (!dto.doctor.licenses?.length) throw new BadRequestException('Informe ao menos um CRM/UF para revisão');
+    if (!dto.doctor.licenses?.length) throw new BadRequestException('Informe ao menos um CRM/UF válido');
     if (!actorId) throw new BadRequestException('Operador autenticado obrigatório');
-    if ((dto.localSubaccountId || dto.existingDoctorId) &&
-        (!dto.identityEvidenceReference || dto.identityEvidenceReference.trim().length < 8))
-      throw new BadRequestException('Comprovação de identidade exigida para regularizar conta existente');
     if (dto.localSubaccountId && dto.accountIdentifier)
       throw new BadRequestException('Escolha apenas uma conta financeira existente');
     if (dto.existingDoctorId && dto.mode !== DoctorOnboardingFinancialMode.LINK)
@@ -152,8 +150,6 @@ export class DoctorOnboardingService {
           current.birthDate.toISOString().slice(0,10) !== dto.doctor.birthDate.slice(0,10))
         throw new ConflictException('Nascimento divergente; revise a identidade do profissional');
       if (dto.doctor.birthDate && !current.birthDate) missing.birthDate=dto.doctor.birthDate;
-      if (Object.keys(missing).length && current.registrationStatus === 'VERIFIED')
-        throw new ConflictException('Identidade já verificada; atualizações exigem revisão profissional específica');
       if (Object.keys(missing).length) await this.doctors.update(current.id,missing);
       if (!current.licenses.length) for (const input of dto.doctor.licenses)
         await this.doctors.addLicense(current.id,input);
@@ -174,11 +170,11 @@ export class DoctorOnboardingService {
         !account.asaasId || account.asaasId.startsWith('external_') || account.deletedAt || !account.active) {
       throw new ConflictException('Conta financeira não elegível; reconciliação administrativa necessária');
     }
-    // Ownership of the Asaas wallet is verified by the provider; linking a
-    // corporate account to the individual doctor still requires human review.
-    // Equality to a legacy local CPF is not proof of verified financial ownership.
-    // Every legacy association is reviewed with documented evidence.
-    const sameCpf = !localAccount && digits(account.cpfCnpj) === doctorCpf;
+    // The internal administrator confirmed identity; a validated CPF-matching
+    // individual wallet needs no second review. A PJ or mismatch stays exceptional.
+    const sameCpf = digits(account.cpfCnpj) === doctorCpf;
+    if (!sameCpf && digits(account.cpfCnpj).length === 11)
+      throw new ConflictException('CPF do titular da carteira incompatível com o profissional');
     try {
       await this.db.$transaction(async tx => {
         const active = await tx.doctorFinancialLink.findMany({
@@ -186,7 +182,15 @@ export class DoctorOnboardingService {
         });
         if (active.some(link => link.doctorId !== doctor.id || link.subaccountId !== account.id))
           throw new ConflictException('Profissional ou carteira já tem outro vínculo financeiro ativo');
-        if (active.length) return;
+        if (active.length) {
+          if(active[0].status==='REJECTED') throw new ConflictException('Vínculo rejeitado exige regularização excepcional');
+          if(sameCpf && active[0].status==='PENDING_REVIEW')
+            await tx.doctorFinancialLink.updateMany({
+              where:{id:active[0].id,active:true,status:'PENDING_REVIEW'},
+              data:{status:'VERIFIED',verifiedAt:new Date()},
+            });
+          return;
+        }
         await tx.doctorFinancialLink.create({data:{
           doctorId:doctor.id,subaccountId:account.id,active:true,
           status:sameCpf?'VERIFIED':'PENDING_REVIEW',
@@ -199,10 +203,11 @@ export class DoctorOnboardingService {
       throw error;
     }
 
-    if (dto.integrationId) {
-      // Only an already paired integration can associate an organization.
-      await this.doctors.associateOrganization(doctor.id,dto.integrationId,actorId,dto.evidenceReference!);
-    }
+    // Confirm the decision taken before creating the professional, with authenticated actor and time.
+    await this.doctors.confirmAdministrativeRegistration(doctor.id,actorId);
+    const integrationId=await this.doctors.resolveOnboardingIntegration(dto.integrationId);
+    if(integrationId)
+      await this.doctors.associateOrganization(doctor.id,integrationId,actorId,dto.evidenceReference);
 
     await this.db.doctorProvisioningOperation.update({where:{idempotencyKey:key},data:{status:'COMPLETED',resultDoctorId:doctor.id}});
     const canonical = await this.doctors.detail(doctor.id);
@@ -215,10 +220,10 @@ export class DoctorOnboardingService {
       clinicalAccessActive:canonical.accessActive,
       msgdeskProvisioningStatus:canonical.provisioningStatus,
       message:!sameCpf
-        ? 'Conta Asaas vinculada, mas a titularidade PJ exige revisão financeira antes de operar.'
+        ? 'Cadastro profissional confirmado. Titularidade financeira PJ ainda exige revisão excepcional.'
         : !canonical.msgdeskOrganizationId
-          ? 'Vínculo financeiro registrado. Vincule uma organização pareada e revise o CRM para disponibilizar no MsgDesk.'
-          : 'Vínculo financeiro registrado. A habilitação profissional e o login MsgDesk seguem suas aprovações específicas.',
+          ? 'Cadastro e carteira confirmados. Associação MsgDesk pendente; acesso clínico ainda não habilitado.'
+          : 'Cadastro, carteira e organização associados. A habilitação clínica continua separada no MsgDesk.',
     };
   }
 }
