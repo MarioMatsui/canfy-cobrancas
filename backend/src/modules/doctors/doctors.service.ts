@@ -368,7 +368,7 @@ export class DoctorsService {
     }
     try {
       await this.db.$transaction(async tx=>{
-        const doctor=await tx.doctor.findUnique({where:{id:doctorId},select:{accessActive:true}});
+        const doctor=await tx.doctor.findUnique({where:{id:doctorId},select:{id:true}});
         if(!doctor)throw new NotFoundException('Médico não encontrado');
         const link=await tx.doctorFinancialLink.findUnique({
           where:{id:linkId},include:{subaccount:true}
@@ -383,8 +383,8 @@ export class DoctorsService {
           where:{subaccountId:sub.id,active:true,id:{not:linkId}}
         });
         if(concurrent)throw new ConflictException('Conta financeira já vinculada a outro profissional');
-        if(dto.decision==='REJECTED'&&doctor.accessActive)
-          throw new ConflictException('Desative o acesso clínico nos dois sistemas antes de rejeitar uma carteira em operação');
+        // Financial-link review must not revoke or require revocation of
+        // independent patient-care authorization.
         await tx.doctorProvisioningOperation.create({data:{
           doctorId,kind:'FINANCIAL_REVIEW',idempotencyKey:key,requestHash,status:'PENDING',
           actorUserId:actorId,evidenceReference:dto.evidenceReference.trim(),
