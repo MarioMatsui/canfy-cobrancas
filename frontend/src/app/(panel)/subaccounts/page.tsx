@@ -409,7 +409,7 @@ export default function SubaccountsPage() {
           <Link href="/subaccounts/medical/new" className="flex items-center gap-2 bg-emerald-700 text-white px-4 py-2 rounded-lg hover:bg-emerald-800 transition-colors">
             <Stethoscope size={19} /> Adicionar médico
           </Link>
-          {typeFilter!=='DOCTOR'&&<button onClick={() => { creationKey.current = null; setShowForm(true); setFormMode('link'); }} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
+          {typeFilter!=='DOCTOR'&&<><button onClick={() => { creationKey.current = null; setShowForm(true); setFormMode('link'); }} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
             <Link2 size={20} />
             Vincular Existente
           </button>}
