@@ -201,7 +201,7 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  {!selected.data.financialLinks?.some(l=>l.active)&&<div className="border-t pt-4 space-y-2"><h4 className="font-medium text-sm">Resolver conta financeira ausente</h4>
  <p className="text-xs text-gray-500">Opcional: requer carteira DOCTOR verificada e revisão de titularidade. Não cria Asaas nem modifica splits ou histórico.</p>
  <input className="border rounded-lg p-2 text-sm w-full max-w-md" aria-label="ID da subconta" placeholder="UUID da subconta existente" value={walletToLink} onChange={e=>setWalletToLink(e.target.value)}/>
- <button disabled={working||!walletToLink.trim()} onClick={()=>void link()} className="block border rounded-lg px-3 py-2 text-sm">Solicitar vínculo para revisão</button></div>}}
+ <button disabled={working||!walletToLink.trim()} onClick={()=>void link()} className="block border rounded-lg px-3 py-2 text-sm">Solicitar vínculo para revisão</button></div>}}}
  </div>:<p className="text-sm">Cadastro indisponível.</p>}
  </div></div>}
  </div>}
