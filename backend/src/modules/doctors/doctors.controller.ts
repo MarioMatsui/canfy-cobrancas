@@ -6,7 +6,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
 import { DoctorsService } from './doctors.service';
-import { DoctorFinancialLinkDto, DoctorLicenseInputDto, DoctorListDto, ReviewDoctorLicenseDto, ReviewDoctorFinancialLinkDto, UpdateDoctorDto } from './doctors.dto';
+import { DoctorFinancialLinkDto, DoctorLicenseInputDto, DoctorListDto, ReviewDoctorLicenseDto, ReviewDoctorFinancialLinkDto, UpdateDoctorDto, DoctorIdentityCandidatesDto } from './doctors.dto';
 import { IsUUID,IsString,MinLength,MaxLength } from 'class-validator';
 export class AssociateDoctorOrganizationDto { @IsUUID() integrationId!: string; @IsString() @MinLength(8) @MaxLength(250) evidenceReference!:string; }
 
@@ -20,6 +20,7 @@ export class DoctorsController {
   @Get() list(@Query() q:DoctorListDto){return this.doctors.list(q);}
   @Post() create(){throw new GoneException('Cadastro médico transferido para Subcontas > Adicionar médico.');}
   @Post('onboard') onboard(@Body() dto:DoctorOnboardingDto,@Headers('idempotency-key') key:string,@Request() req:{user:{id:string}}){return this.onboarding.onboard(dto,key,req.user.id);}
+  @Post('identity-candidates') identityCandidates(@Body() dto:DoctorIdentityCandidatesDto){return this.doctors.identityCandidates(dto);}
   @Get('legacy-candidates') legacy(@Query() q:DoctorListDto) {
     return this.doctors.legacyCandidates(q);
   }

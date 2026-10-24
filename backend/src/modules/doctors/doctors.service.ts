@@ -97,6 +97,26 @@ export class DoctorsService {
     })),pagination:{page,limit,total,totalPages:Math.ceil(total/limit)}};
   }
 
+  /** Candidate discovery is read-only; selection and evidence remain separate. */
+  async identityCandidates(dto:{cpfNormalized:string;crmNormalized?:string;state?:string}) {
+    assertCpf(dto.cpfNormalized);
+    if (dto.crmNormalized && !dto.state)
+      throw new BadRequestException('UF do CRM necessária para comparação');
+    const doctors = await this.db.doctor.findMany({where:{OR:[
+      {cpfNormalized:dto.cpfNormalized},
+      ...(dto.crmNormalized && dto.state?[{licenses:{some:{crmNormalized:dto.crmNormalized,state:dto.state}}}]:[]),
+    ]},take:4,include:{licenses:{select:{crmNormalized:true,state:true,verificationStatus:true}},
+      financialLinks:{where:{active:true},select:{subaccountId:true,status:true}}}});
+    return {conflict:doctors.length>1,candidates:doctors.map(d=>({
+      id:d.id,fullName:d.fullName,maskedCpf:maskCpf(d.cpfNormalized),
+      cpfMatched:d.cpfNormalized===dto.cpfNormalized,
+      crmMatched:!!dto.crmNormalized&&d.licenses.some(l=>l.crmNormalized===dto.crmNormalized&&l.state===dto.state),
+      registrationStatus:d.registrationStatus,organizationLinked:!!d.msgdeskOrganizationId,
+      financiallyLinked:d.financialLinks.length>0,
+      licenses:d.licenses,
+    }))};
+  }
+
   async legacyCandidates(query:DoctorListDto,includeOther=false) {
     const page=query.page??1, limit=query.limit??20;
     // Classifying OTHER as physician is never automatic; show it only on

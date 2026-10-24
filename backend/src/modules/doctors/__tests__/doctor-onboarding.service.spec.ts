@@ -23,6 +23,10 @@ describe('Unified medical onboarding',()=>{
         update:jest.fn().mockResolvedValue({id:'op'}),
       },
       $transaction:jest.fn(),
+      subaccount:{findUnique:jest.fn().mockResolvedValue({
+        id:'sub-1',type:'DOCTOR',asaasId:'acc_1234',walletId:'wallet1234567890',
+        cpfCnpj:validCpf,deletedAt:null,active:true,
+      })},
     };
     doctors={
       create:jest.fn().mockResolvedValue({id:'doctor-1'}),
@@ -96,4 +100,40 @@ describe('Unified medical onboarding',()=>{
     });
     await expect(service.onboard(input() as any,key,'admin-id')).rejects.toThrow(ConflictException);
   });
+  it('reuses a local legacy wallet without any Asaas POST, leaving ownership for review',async()=>{
+    const req={...input(),accountIdentifier:undefined,localSubaccountId:'sub-1',identityEvidenceReference:'ticket-identity-2026'};
+    const result=await service.onboard(req as any,key,'admin-id');
+    expect(db.subaccount.findUnique).toHaveBeenCalledWith({where:{id:'sub-1'}});
+    expect(subaccounts.linkManagedDoctorAccount).not.toHaveBeenCalled();
+    expect(subaccounts.create).not.toHaveBeenCalled();
+    expect(result.financialAccountReused).toBe(true);
+    expect(result.financialOwnershipVerified).toBe(false);
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+  });
+  it('continues the selected Doctor instead of creating a duplicate professional',async()=>{
+    doctors.detail.mockResolvedValue({id:'doctor-1',fullName:'Dra. Teste',cpfNormalized:validCpf,
+      licenses:[{crmNormalized:'98765',state:'SP'}],registrationStatus:'DRAFT',
+      msgdeskOrganizationId:null,birthDate:null,accessActive:false,provisioningStatus:'AWAITING_MSGDESK'});
+    const req={...input(),accountIdentifier:undefined,localSubaccountId:'sub-1',
+      existingDoctorId:'doctor-1',identityEvidenceReference:'ticket-identity-2026'};
+    const result=await service.onboard(req as any,key,'admin-id');
+    expect(doctors.create).not.toHaveBeenCalled();
+    expect(subaccounts.create).not.toHaveBeenCalled();
+    expect(result.existingProfessionalReused).toBe(true);
+  });
+  it('rejects a legacy account without a validated wallet before creating a Doctor',async()=>{
+    db.subaccount.findUnique.mockResolvedValue({...await db.subaccount.findUnique(),walletId:null});
+    const req={...input(),accountIdentifier:undefined,localSubaccountId:'sub-1',identityEvidenceReference:'ticket-identity-2026'};
+    await expect(service.onboard(req as any,key,'admin-id')).rejects.toThrow(ConflictException);
+    expect(doctors.create).not.toHaveBeenCalled();
+    expect(subaccounts.create).not.toHaveBeenCalled();
+  });
+  it('refuses mismatch when administrator selects a different existing professional',async()=>{
+    doctors.detail.mockResolvedValue({id:'doctor-1',cpfNormalized:'16899535009',licenses:[],msgdeskOrganizationId:null});
+    const req={...input(),accountIdentifier:undefined,localSubaccountId:'sub-1',
+      existingDoctorId:'doctor-1',identityEvidenceReference:'ticket-identity-2026'};
+    await expect(service.onboard(req as any,key,'admin-id')).rejects.toThrow(ConflictException);
+    expect(doctors.create).not.toHaveBeenCalled();
+  });
+
 });

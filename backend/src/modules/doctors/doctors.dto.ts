@@ -71,3 +71,10 @@ export class ReviewDoctorFinancialLinkDto {
 export class ConfirmClinicalAccessDto {
   @IsUUID() authUserId!:string;
 }
+
+/** ADMIN-only exact lookup; neither financial identity nor CRM is proof of ownership. */
+export class DoctorIdentityCandidatesDto {
+  @Transform(digits) @IsString() @Matches(/^[0-9]{11}$/) cpfNormalized!:string;
+  @IsOptional() @Transform(digits) @Matches(/^[0-9]{1,20}$/) crmNormalized?:string;
+  @IsOptional() @Transform(upper) @IsIn(BRAZIL_UFS) state?:string;
+}

@@ -2,7 +2,8 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, ToggleLeft, ToggleRight, History, Stethoscope, Package, Users as UsersIcon, X, Link2, Trash2, MailCheck, Pencil } from 'lucide-react';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import DoctorsProfessionalSection from './DoctorsProfessionalSection';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
@@ -87,6 +88,16 @@ export default function SubaccountsPage() {
   const creationKey = useRef<string | null>(null);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<SubaccountType | ''>('');
+  useEffect(()=>{
+    if(new URLSearchParams(window.location.search).get('type')==='DOCTOR')setTypeFilter('DOCTOR');
+  },[]);
+  const selectType=(value:SubaccountType|'')=>{
+    setTypeFilter(value);setPage(1);setShowForm(false);
+    const url=new URL(window.location.href);
+    if(value==='DOCTOR')url.searchParams.set('type','DOCTOR');
+    else url.searchParams.delete('type');
+    window.history.replaceState(null,'',url.toString());
+  };
   const [page, setPage] = useState(1);
   const [historyId, setHistoryId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
@@ -117,6 +128,7 @@ export default function SubaccountsPage() {
 
   const { data, isLoading, refetch } = useQuery<PaginatedResponse>({
     queryKey: ['subaccounts', page, search, typeFilter],
+    enabled:typeFilter!=='DOCTOR',
     queryFn: () =>
       api.get('/subaccounts', { params: { page, limit: 20, search, ...(typeFilter && { type: typeFilter }) } }).then((r) => r.data),
   });
@@ -397,24 +409,27 @@ export default function SubaccountsPage() {
           <Link href="/subaccounts/medical/new" className="flex items-center gap-2 bg-emerald-700 text-white px-4 py-2 rounded-lg hover:bg-emerald-800 transition-colors">
             <Stethoscope size={19} /> Adicionar médico
           </Link>
-          <button onClick={() => { creationKey.current = null; setShowForm(true); setFormMode('link'); }} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
+          {typeFilter!=='DOCTOR'&&<><button onClick={() => { creationKey.current = null; setShowForm(true); setFormMode('link'); }} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
             <Link2 size={20} />
             Vincular Existente
           </button>
           <button onClick={() => { creationKey.current = null; setShowForm(true); setFormMode('create'); }} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
             <Plus size={20} />
             Nova Subconta
-          </button>
+          </button></>}
         </div>
       </div>
 
       <nav className="flex flex-wrap gap-2" aria-label="Filtrar subcontas por tipo">
         {([['','Todas'],['DOCTOR','Médicos'],['SUPPLIER','Fornecedores'],['OTHER','Outros']] as const).map(([value,label])=>
-          <button key={value} type="button" onClick={()=>{setTypeFilter(value);setPage(1);}}
+          <button key={value} type="button" onClick={()=>selectType(value)}
             aria-current={typeFilter===value?'page':undefined}
             className={`rounded-lg border px-4 py-2 text-sm font-medium ${typeFilter===value?'border-emerald-600 bg-emerald-50 text-emerald-800':'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'}`}>{label}</button>)}
       </nav>
 
+      {typeFilter==='DOCTOR'&&<DoctorsProfessionalSection initiallyExpanded />}
+
+      {typeFilter!=='DOCTOR'&&<>
       {/* Formulário de criação / vinculação */}
       {showForm && (
         <div className="bg-white rounded-xl border p-6 space-y-4">
@@ -781,6 +796,8 @@ export default function SubaccountsPage() {
           </div>
         )}
       </div>
+
+      </>}
 
       {/* Modal de edição segura de metadados internos */}
       {editId && (

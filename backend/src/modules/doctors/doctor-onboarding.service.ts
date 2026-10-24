@@ -60,6 +60,25 @@ export class DoctorOnboardingService {
     assertCpf(doctorCpf);
     if (!dto.doctor.licenses?.length) throw new BadRequestException('Informe ao menos um CRM/UF para revisão');
     if (!actorId) throw new BadRequestException('Operador autenticado obrigatório');
+    if ((dto.localSubaccountId || dto.existingDoctorId) &&
+        (!dto.identityEvidenceReference || dto.identityEvidenceReference.trim().length < 8))
+      throw new BadRequestException('Comprovação de identidade exigida para regularizar conta existente');
+    if (dto.localSubaccountId && dto.accountIdentifier)
+      throw new BadRequestException('Escolha apenas uma conta financeira existente');
+    if (dto.existingDoctorId && dto.mode !== DoctorOnboardingFinancialMode.LINK)
+      throw new BadRequestException('Cadastro profissional existente só pode reutilizar conta financeira');
+    if (dto.localSubaccountId && dto.mode !== DoctorOnboardingFinancialMode.LINK)
+      throw new BadRequestException('Subconta local somente no modo de vínculo');
+
+    // Verify local eligibility BEFORE recording or creating a professional. A local
+    // wallet is never silently re-imported, re-created, or approved as ownership.
+    const localAccount = dto.localSubaccountId
+      ? await this.db.subaccount.findUnique({where:{id:dto.localSubaccountId}})
+      : null;
+    if (dto.localSubaccountId && (!localAccount || localAccount.type !== SubaccountType.DOCTOR ||
+        !localAccount.active || localAccount.deletedAt || !localAccount.walletId ||
+        !localAccount.asaasId || localAccount.asaasId.startsWith('external_')))
+      throw new ConflictException('Subconta local indisponível ou sem carteira Asaas validada; revisão manual necessária');
 
     if (dto.mode === DoctorOnboardingFinancialMode.CREATE) {
       const account = dto.newAccount;
@@ -76,7 +95,7 @@ export class DoctorOnboardingService {
         if (!validCnpj(owner)) throw new BadRequestException('CNPJ do titular inválido');
       } else throw new BadRequestException('CPF/CNPJ do titular inválido');
     } else if (dto.mode === DoctorOnboardingFinancialMode.LINK) {
-      if (!dto.accountIdentifier?.trim()) throw new BadRequestException('Identificador de subconta Asaas obrigatório');
+      if (!dto.localSubaccountId && !dto.accountIdentifier?.trim()) throw new BadRequestException('Identificador de subconta Asaas obrigatório');
     } else {
       throw new BadRequestException('Modo financeiro inválido');
     }
@@ -92,6 +111,7 @@ export class DoctorOnboardingService {
       try {
         await this.db.doctorProvisioningOperation.create({data:{
           kind:'DOCTOR_ONBOARD',idempotencyKey:key,requestHash,status:'PENDING',actorUserId:actorId,
+          ...(dto.identityEvidenceReference?{evidenceReference:dto.identityEvidenceReference.trim()}:{}),
         }});
       } catch (error) {
         if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code!=='P2002') throw error;
@@ -101,18 +121,54 @@ export class DoctorOnboardingService {
       }
     }
 
-    // Doctor.create records a persistent DOCTOR_CREATE idempotency operation,
-    // and rejects CPF/CRM duplicates before any remote financial side effect.
-    const doctor = await this.doctors.create(
-      {...dto.doctor, cpfNormalized:doctorCpf},
-      derivedKey(key,'professional'),
-    );
+    // Continue the explicitly selected identity; never silently infer a Doctor
+    // from financial name/e-mail or create a duplicate when CPF/CRM already exists.
+    let doctor;
+    if (dto.existingDoctorId) {
+      const current = await this.doctors.detail(dto.existingDoctorId);
+      if (current.cpfNormalized !== doctorCpf)
+        throw new ConflictException('CPF não corresponde ao profissional selecionado; confira identidade');
+      if (current.msgdeskOrganizationId && dto.integrationId) {
+        const integration = await this.db.integrationApiKey.findUnique({where:{id:dto.integrationId}});
+        if (!integration || integration.doctorOrganizationId !== current.msgdeskOrganizationId)
+          throw new ConflictException('Profissional já pertence a outra organização');
+      }
+      const sameLicense = dto.doctor.licenses.every(input => current.licenses.some(
+        license => license.crmNormalized === input.crmNormalized && license.state === input.state));
+      if (current.licenses.length && !sameLicense)
+        throw new ConflictException('CRM/UF divergente do profissional existente; revisão de identidade necessária');
+      const missing: Record<string,string> = {};
+      const fields = ['fullName','rg','rgIssuer','rgState','email','mobilePhone','postalCode',
+        'street','streetNumber','addressComplement','neighborhood','city','state','country'] as const;
+      for (const field of fields) {
+        const provided = dto.doctor[field];
+        if (!provided) continue;
+        const original = current[field];
+        if (original && original !== provided)
+          throw new ConflictException('Dados profissionais divergentes; edite o cadastro existente após revisão');
+        if (!original) missing[field] = provided;
+      }
+      if (dto.doctor.birthDate && current.birthDate &&
+          current.birthDate.toISOString().slice(0,10) !== dto.doctor.birthDate.slice(0,10))
+        throw new ConflictException('Nascimento divergente; revise a identidade do profissional');
+      if (dto.doctor.birthDate && !current.birthDate) missing.birthDate=dto.doctor.birthDate;
+      if (Object.keys(missing).length && current.registrationStatus === 'VERIFIED')
+        throw new ConflictException('Identidade já verificada; atualizações exigem revisão profissional específica');
+      if (Object.keys(missing).length) await this.doctors.update(current.id,missing);
+      if (!current.licenses.length) for (const input of dto.doctor.licenses)
+        await this.doctors.addLicense(current.id,input);
+      doctor = await this.doctors.detail(current.id);
+    } else {
+      // DOCTOR_CREATE is independently idempotent and rejects CPF/CRM duplicates.
+      doctor = await this.doctors.create(
+        {...dto.doctor, cpfNormalized:doctorCpf}, derivedKey(key,'professional'));
+    }
 
     await this.db.doctorProvisioningOperation.update({where:{idempotencyKey:key},data:{doctorId:doctor.id}});
 
-    const account = dto.mode === DoctorOnboardingFinancialMode.CREATE
+    const account = localAccount ?? (dto.mode === DoctorOnboardingFinancialMode.CREATE
       ? await this.subaccounts.create(dto.newAccount!, financialKey(key), true)
-      : await this.subaccounts.linkManagedDoctorAccount(dto.accountIdentifier!);
+      : await this.subaccounts.linkManagedDoctorAccount(dto.accountIdentifier!));
 
     if (account.type !== SubaccountType.DOCTOR || !account.walletId ||
         !account.asaasId || account.asaasId.startsWith('external_') || account.deletedAt || !account.active) {
@@ -120,7 +176,9 @@ export class DoctorOnboardingService {
     }
     // Ownership of the Asaas wallet is verified by the provider; linking a
     // corporate account to the individual doctor still requires human review.
-    const sameCpf = digits(account.cpfCnpj) === doctorCpf;
+    // Equality to a legacy local CPF is not proof of verified financial ownership.
+    // Every legacy association is reviewed with documented evidence.
+    const sameCpf = !localAccount && digits(account.cpfCnpj) === doctorCpf;
     try {
       await this.db.$transaction(async tx => {
         const active = await tx.doctorFinancialLink.findMany({
@@ -151,6 +209,8 @@ export class DoctorOnboardingService {
     return {
       doctor:canonical,
       financialOwnershipVerified:sameCpf,
+      financialAccountReused:dto.mode===DoctorOnboardingFinancialMode.LINK,
+      existingProfessionalReused:!!dto.existingDoctorId,
       asaasStatus:account.asaasGeneralStatus ?? null,
       clinicalAccessActive:canonical.accessActive,
       msgdeskProvisioningStatus:canonical.provisioningStatus,

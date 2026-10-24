@@ -15,12 +15,14 @@ type FormValues = {
   city:string; state:string; country:string; crm:string; crmUf:string;
   ownerName:string; ownerDocument:string; ownerEmail:string; ownerMobile:string;
   incomeValue:string; companyType:string; accountIdentifier:string;
-  integrationId:string; evidenceReference:string;
+  integrationId:string; evidenceReference:string; identityEvidenceReference:string;
 };
+type IdentityCandidate={id:string;fullName:string;maskedCpf:string|null;cpfMatched:boolean;crmMatched:boolean;registrationStatus:string;organizationLinked:boolean;financiallyLinked:boolean;licenses:Array<{crmNormalized:string;state:string}>};
 type Onboarded = {
   doctor:{id:string;fullName:string;registrationStatus:string;provisioningStatus:string;accessActive:boolean;financialLinks?:Array<{id:string;status:string;subaccountId:string}>};
   financialOwnershipVerified:boolean; asaasStatus:string|null;
   clinicalAccessActive:boolean;msgdeskProvisioningStatus:string;message:string;
+  financialAccountReused?:boolean;existingProfessionalReused?:boolean;
 };
 const UFS=['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
 const companyTypes=[['MEI','MEI'],['LIMITED','Limitada (LTDA)'],['INDIVIDUAL','Empresário individual'],['ASSOCIATION','Associação']];
@@ -28,7 +30,7 @@ const initial:FormValues={
   fullName:'',cpfNormalized:'',rg:'',rgIssuer:'',rgState:'',birthDate:'',email:'',mobilePhone:'',
   postalCode:'',street:'',streetNumber:'',addressComplement:'',neighborhood:'',city:'',state:'',
   country:'BR',crm:'',crmUf:'',ownerName:'',ownerDocument:'',ownerEmail:'',ownerMobile:'',
-  incomeValue:'',companyType:'',accountIdentifier:'',integrationId:'',evidenceReference:'',
+  incomeValue:'',companyType:'',accountIdentifier:'',integrationId:'',evidenceReference:'',identityEvidenceReference:'',
 };
 const personalFields:Array<[keyof FormValues,string,string,boolean]>=[
   ['fullName','Nome completo','text',true],['cpfNormalized','CPF','text',true],
@@ -64,6 +66,59 @@ export default function NewMedicalSubaccountPage(){
   const [attempted,setAttempted]=useState(false);
   const [integrations,setIntegrations]=useState<Array<{id:string;name:string;status:string;doctorOrganizationId?:string|null;scopes:string[]}>>([]);
   const [integrationError,setIntegrationError]=useState(false);
+  const [localSubaccountId,setLocalSubaccountId]=useState('');
+  const [existingDoctorId,setExistingDoctorId]=useState('');
+  const [sourceReady,setSourceReady]=useState(false);
+  const [sourceError,setSourceError]=useState('');
+  const [sourceName,setSourceName]=useState('');
+  const [identityCandidates,setIdentityCandidates]=useState<IdentityCandidate[]>([]);
+  const [identityBusy,setIdentityBusy]=useState(false);
+  const [legacyChoices,setLegacyChoices]=useState<Array<{subaccountId:string;name:string;financialIdentifierVerified:boolean}>>([]);
+  React.useEffect(()=>{
+    let current=true;
+    api.get('/doctors/legacy-candidates',{params:{page:1,limit:100}})
+      .then(r=>{if(current)setLegacyChoices(r.data.data||[]);}).catch(()=>{});
+    return()=>{current=false};
+  },[]);
+  React.useEffect(()=>{
+    let current=true;
+    const params=new URLSearchParams(window.location.search);
+    const subaccountId=params.get('subaccountId')||'';
+    const doctorId=params.get('doctorId')||'';
+    if (!subaccountId && !doctorId){setSourceReady(true);return;}
+    if ((subaccountId && !/^[a-f0-9-]{36}$/i.test(subaccountId)) ||
+        (doctorId && !/^[a-f0-9-]{36}$/i.test(doctorId))) {
+      setSourceError('Identificador do cadastro inválido. Volte a Subcontas.');return;
+    }
+    Promise.all([
+      subaccountId?api.get('/subaccounts/'+encodeURIComponent(subaccountId)).then(r=>r.data):Promise.resolve(null),
+      doctorId?api.get('/doctors/'+encodeURIComponent(doctorId)).then(r=>r.data):Promise.resolve(null),
+    ]).then(([account,professional])=>{
+      if(!current)return;
+      if(account && (account.type!=='DOCTOR'||!account.active||account.deletedAt))
+        throw new Error('Conta financeira não elegível para regularização');
+      setMode('LINK');setLocalSubaccountId(subaccountId);setExistingDoctorId(doctorId);
+      setSourceName(account?.name||professional?.fullName||'');
+      setForm(old=>{
+        const next={...old};
+        if(account){
+          next.fullName=account.name||'';
+          next.cpfNormalized=onlyDigits(account.cpfCnpj||'').length===11?onlyDigits(account.cpfCnpj):'';
+          next.email=account.email||'';next.mobilePhone=account.mobilePhone||account.phone||'';
+        }
+        if(professional){
+          for(const k of ['fullName','cpfNormalized','rg','rgIssuer','rgState','email','mobilePhone','postalCode','street','streetNumber','addressComplement','neighborhood','city','state','country'] as const)
+            next[k]=String(professional[k]||'');
+          next.birthDate=professional.birthDate?String(professional.birthDate).slice(0,10):'';
+          next.crm=professional.licenses?.[0]?.crmNormalized||'';
+          next.crmUf=professional.licenses?.[0]?.state||'';
+        }
+        return next;
+      });
+      setSourceReady(true);
+    }).catch(e=>{if(current)setSourceError(e instanceof Error?e.message:'Não foi possível abrir o cadastro existente');});
+    return()=>{current=false};
+  },[]);
   React.useEffect(()=>{
     let current=true;
     api.get('/integrations').then(r=>{
@@ -89,7 +144,7 @@ export default function NewMedicalSubaccountPage(){
       </select>
     </label>
   );
-  function continueProfessional(){
+  async function continueProfessional(){
     const required:(keyof FormValues)[]=['fullName','cpfNormalized','birthDate','email','mobilePhone','postalCode','street','streetNumber','neighborhood','city','state','crm','crmUf'];
     const missing=required.filter(k=>!form[k].trim());
     if(missing.length){toast.error('Complete os dados pessoais, endereço e CRM obrigatórios');return}
@@ -97,10 +152,25 @@ export default function NewMedicalSubaccountPage(){
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)){
       toast.error('Confira CPF, CEP e e-mail');return;
     }
-    setStep(2);window.scrollTo({top:0,behavior:'smooth'});
+    setIdentityBusy(true);
+    try {
+      const response=await api.post('/doctors/identity-candidates',{
+        cpfNormalized:form.cpfNormalized,crmNormalized:form.crm,state:form.crmUf,
+      });
+      const matches:IdentityCandidate[]=response.data.candidates||[];
+      setIdentityCandidates(matches);
+      if(existingDoctorId && !matches.some(x=>x.id===existingDoctorId)){
+        toast.error('A identidade selecionada não coincide com o CPF/CRM informado. Revise antes de continuar.');return;
+      }
+      if(matches.length>1){toast.error('CPF e CRM correspondem a cadastros diferentes. Revisão administrativa necessária antes de associar.');return;}
+      setStep(2);window.scrollTo({top:0,behavior:'smooth'});
+    } catch(e){toast.error(errorMessage(e)+' Não será criado outro profissional sem verificar duplicidades.');}
+    finally{setIdentityBusy(false);}
   }
   function continueFinancial(){
-    if(mode==='LINK'&&!form.accountIdentifier.trim()){
+    if(identityCandidates.length>1){toast.error('Identidade em conflito. Volte e revise CPF/CRM.');return;}
+    if(identityCandidates.length===1&&!existingDoctorId){toast.error('Selecione e confirme o cadastro profissional existente antes de continuar.');return;}
+    if(mode==='LINK'&&!localSubaccountId&&!form.accountIdentifier.trim()){
       toast.error('Informe o ID da conta ou Wallet ID Asaas');return;
     }
     if(mode==='CREATE'){
@@ -112,13 +182,16 @@ export default function NewMedicalSubaccountPage(){
       if(![11,14].includes(doc.length)){toast.error('CPF ou CNPJ do titular inválido');return}
       if(doc.length===14&&!form.companyType){toast.error('Selecione o tipo societário');return}
     }
+    if((localSubaccountId||existingDoctorId)&&form.identityEvidenceReference.trim().length<8){
+      toast.error('Informe uma referência de conferência da identidade do médico e do recebedor');return;
+    }
     if(form.integrationId&&form.evidenceReference.trim().length<8){
       toast.error('Informe uma referência verificável da associação à organização');return;
     }
     setStep(3);window.scrollTo({top:0,behavior:'smooth'});
   }
   async function submit(){
-    if(busy||result)return;
+    if(busy||result||!sourceReady||sourceError)return;
     if(!window.confirm('Confirmar cadastro profissional e operação financeira Asaas? A criação pode ter custos.'))return;
     setBusy(true);setError('');setAttempted(true);
     key.current??=crypto.randomUUID();
@@ -139,7 +212,9 @@ export default function NewMedicalSubaccountPage(){
     };
     const payload={
       doctor,mode,
-      ...(mode==='CREATE'?{newAccount}:{accountIdentifier:form.accountIdentifier.trim()}),
+      ...(mode==='CREATE'?{newAccount}:localSubaccountId?{localSubaccountId}:{accountIdentifier:form.accountIdentifier.trim()}),
+      ...(existingDoctorId?{existingDoctorId}:{}),
+      ...((localSubaccountId||existingDoctorId)?{identityEvidenceReference:form.identityEvidenceReference.trim()}:{}),
       ...(form.integrationId?{integrationId:form.integrationId,evidenceReference:form.evidenceReference.trim()}:{}),
     };
     try{
@@ -155,10 +230,16 @@ export default function NewMedicalSubaccountPage(){
       <Link href="/subaccounts" aria-label="Voltar para Subcontas" className="rounded-xl border border-slate-200 p-2.5 hover:bg-slate-50"><ArrowLeft size={20}/></Link>
       <div className="flex-1">
         <p className="text-sm font-medium text-emerald-700">Subcontas / Médicos</p>
-        <h1 className="mt-1 text-2xl font-semibold text-slate-900">Adicionar médico</h1>
+        <h1 className="mt-1 text-2xl font-semibold text-slate-900">{localSubaccountId||existingDoctorId?'Completar cadastro médico':'Adicionar médico'}</h1>
         <p className="mt-1 text-sm text-slate-600">Um cadastro profissional e uma conta de recebimento, sem formulários duplicados.</p>
       </div>
     </div>
+    {!sourceReady&&<p role="status" className="rounded-xl border p-4 text-sm">Carregando dados já cadastrados…</p>}
+    {sourceError&&<div role="alert" className="rounded-xl border border-red-300 p-4 text-sm text-red-700">{sourceError} <Link href="/subaccounts?type=DOCTOR" className="underline">Voltar à lista</Link></div>}
+    {sourceReady&&(localSubaccountId||existingDoctorId)&&<div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+      <strong>Regularização de cadastro existente: {sourceName}</strong>
+      <p className="mt-1">Os dados disponíveis foram pré-preenchidos para conferência, mas não comprovam que o profissional é o titular da conta. A carteira original será mantida, sem criar outra conta Asaas. Identidade, CRM, vínculo financeiro e acesso clínico exigem validações independentes.</p>
+    </div>}
     <nav aria-label="Etapas do cadastro" className="grid grid-cols-2 gap-2 md:grid-cols-4">
       {['Dados profissionais','Conta Asaas','Revisão','Resultado'].map((title,i)=>
         <div key={title} aria-current={step===i+1?'step':undefined}
@@ -167,7 +248,7 @@ export default function NewMedicalSubaccountPage(){
         </div>)}
     </nav>
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-8" aria-live={step===4?'polite':undefined}>
-      {step===1&&<div className="space-y-8">
+      {sourceReady&&!sourceError&&step===1&&<div className="space-y-8">
         <div className="flex items-center gap-2"><Stethoscope className="text-emerald-700" size={20}/><h2 className="text-lg font-semibold">Identificação profissional</h2></div>
         <fieldset className="space-y-4"><legend className="mb-3 font-semibold text-slate-800">Dados pessoais</legend>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -184,12 +265,19 @@ export default function NewMedicalSubaccountPage(){
           <p className="text-sm text-slate-600">O CRM será registrado como pendente até a conferência humana no conselho.</p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">{field('crm','CRM', 'text',true)}{ufField('crmUf','UF do CRM',true)}</div>
         </fieldset>
-        <div className="flex justify-end"><button type="button" onClick={continueProfessional} className="flex items-center gap-2 rounded-lg bg-emerald-700 px-5 py-2.5 text-white hover:bg-emerald-800">Continuar <ArrowRight size={16}/></button></div>
+        <div className="flex justify-end"><button type="button" onClick={()=>void continueProfessional()} disabled={identityBusy} className="flex items-center gap-2 rounded-lg bg-emerald-700 px-5 py-2.5 text-white hover:bg-emerald-800 disabled:opacity-50">{identityBusy?'Conferindo registros existentes…':'Continuar'} <ArrowRight size={16}/></button></div>
       </div>}
-      {step===2&&<div className="space-y-6">
+      {sourceReady&&!sourceError&&step===2&&<div className="space-y-6">
         <div className="flex items-center gap-2"><Wallet className="text-emerald-700" size={20}/><h2 className="text-lg font-semibold">Conta de recebimento Asaas</h2></div>
+        {identityCandidates.length===1&&<section className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4" aria-label="Profissional já cadastrado">
+          <h3 className="font-semibold text-amber-950">Profissional existente localizado</h3>
+          <p className="text-sm text-amber-900">O CPF ou CRM informado corresponde a <strong>{identityCandidates[0].fullName}</strong> ({identityCandidates[0].maskedCpf||'CPF restrito'}). Isso não comprova titularidade financeira. Não será criado um segundo cadastro profissional.</p>
+          <label className="flex items-start gap-3 text-sm text-amber-950"><input type="checkbox" className="mt-1" checked={existingDoctorId===identityCandidates[0].id} onChange={e=>{setExistingDoctorId(e.target.checked?identityCandidates[0].id:'');setMode('LINK');}} disabled={!!sourceName&&!!existingDoctorId&&existingDoctorId===identityCandidates[0].id&&!!new URLSearchParams(typeof window==='undefined'?'':window.location.search).get('doctorId')}/>
+            <span>Conferi a identidade e quero retomar este perfil profissional, preservando o histórico anterior.</span></label>
+          <p className="text-xs">Estado: {identityCandidates[0].registrationStatus}. {identityCandidates[0].financiallyLinked?'Já há carteira vinculada; revise antes de associar outra.':'Sem carteira profissional ativa identificada.'}</p>
+        </section>}
         <div role="radiogroup" aria-label="Operação financeira" className="grid gap-3 sm:grid-cols-2">
-          {([['CREATE','Criar nova subconta','Utiliza os dados já informados e cria uma conta filha no Asaas.'],['LINK','Vincular existente','Valida a conta diretamente na lista de subcontas da conta-pai.']] as const).map(([value,title,help])=>
+          {([['CREATE','Criar nova subconta','Utiliza os dados já informados e cria uma conta filha no Asaas.'],['LINK','Vincular existente','Reaproveita uma subconta cadastrada ou uma conta existente na conta-pai.']] as const).filter(([value])=>!(existingDoctorId||localSubaccountId)||value==='LINK').map(([value,title,help])=>
             <label key={value} className={`cursor-pointer rounded-xl border p-4 ${mode===value?'border-emerald-600 bg-emerald-50':'border-slate-200'}`}>
               <span className="flex gap-2 font-semibold"><input type="radio" name="financialMode" checked={mode===value} onChange={()=>setMode(value)} disabled={attempted}/>{title}</span>
               <span className="mt-1 block text-sm text-slate-600">{help}</span>
@@ -212,8 +300,15 @@ export default function NewMedicalSubaccountPage(){
           <p className="text-xs text-amber-800">Criar uma subconta pode gerar tarifas da Asaas. A ativação financeira e a revisão do CRM são processos distintos.</p>
         </fieldset>:<fieldset className="space-y-3">
           <legend className="font-semibold">Subconta existente</legend>
-          {field('accountIdentifier','Account ID ou Wallet ID', 'text',true)}
-          <p className="text-sm text-slate-600">Somente contas verificáveis pela API da conta-pai podem ser associadas. Carteiras externas não são aceitas apenas por informar um identificador.</p>
+          {localSubaccountId?<p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">Subconta local selecionada: <strong>{sourceName}</strong>. O sistema reutilizará o vínculo financeiro existente e exigirá revisão de titularidade.</p>:<>
+            {legacyChoices.length>0&&<label className="block"><span className={labelClass}>Reutilizar subconta financeira pendente no Canfy</span>
+              <select className={inputClass} value={localSubaccountId} onChange={e=>{setLocalSubaccountId(e.target.value);setSourceName(legacyChoices.find(x=>x.subaccountId===e.target.value)?.name||'');}}>
+                <option value="">Usar identificador Asaas abaixo</option>{legacyChoices.filter(x=>x.financialIdentifierVerified).map(x=><option key={x.subaccountId} value={x.subaccountId}>{x.name}</option>)}
+              </select></label>}
+            {!localSubaccountId&&field('accountIdentifier','Account ID ou Wallet ID', 'text',true)}
+          </>}
+          <p className="text-sm text-slate-600">Contas locais mantêm o ID e a carteira originais. Não é criada outra conta Asaas. A comprovação de titularidade é obrigatória antes da aprovação financeira.</p>
+          {(localSubaccountId||existingDoctorId)&&field('identityEvidenceReference','Referência da conferência da identidade e titularidade','text',true)}
         </fieldset>}
         <fieldset className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
           <legend className="px-2 font-semibold">Organização MsgDesk (opcional)</legend>
@@ -231,7 +326,7 @@ export default function NewMedicalSubaccountPage(){
           <button className="flex items-center gap-2 rounded-lg bg-emerald-700 px-5 py-2.5 text-white" onClick={continueFinancial}>Revisar <ArrowRight size={16}/></button>
         </div>
       </div>}
-      {step===3&&<div className="space-y-6">
+      {sourceReady&&!sourceError&&step===3&&<div className="space-y-6">
         <div className="flex items-center gap-2"><ShieldCheck className="text-emerald-700" size={20}/><h2 className="text-lg font-semibold">Revisar e confirmar</h2></div>
         <div className="grid gap-4 md:grid-cols-2">
           <div className="rounded-xl border p-5 space-y-2 text-sm">
@@ -241,7 +336,8 @@ export default function NewMedicalSubaccountPage(){
           </div>
           <div className="rounded-xl border p-5 space-y-2 text-sm">
             <h3 className="font-semibold text-slate-900">Financeiro</h3><p>{mode==='CREATE'?'Criar nova subconta Asaas':'Vincular subconta Asaas existente'}</p>
-            <p>{mode==='CREATE'?(form.ownerName||form.fullName):form.accountIdentifier}</p>
+            <p>{mode==='CREATE'?(form.ownerName||form.fullName):localSubaccountId?'Subconta local: '+(sourceName||localSubaccountId):form.accountIdentifier}</p>
+            {existingDoctorId&&<p className="text-slate-600">Reutilizar perfil profissional já cadastrado</p>}
             <p className="text-slate-600">Aprovação da conta: depende do estado retornado pela Asaas</p>
           </div>
         </div>
@@ -252,7 +348,7 @@ export default function NewMedicalSubaccountPage(){
           <button className="rounded-lg bg-emerald-700 px-5 py-2.5 text-white disabled:opacity-50" disabled={busy} onClick={()=>void submit()}>{busy?'Registrando com segurança…':attempted?'Verificar/retomar mesma operação':'Confirmar cadastro'}</button>
         </div>
       </div>}
-      {step===4&&result&&<div className="space-y-5">
+      {sourceReady&&!sourceError&&step===4&&result&&<div className="space-y-5">
         <div className="flex items-center gap-3 text-emerald-700"><CheckCircle2 size={30}/><h2 className="text-xl font-semibold">Cadastro unificado registrado</h2></div>
         <p className="text-sm text-slate-600">{result.message}</p>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -268,7 +364,7 @@ export default function NewMedicalSubaccountPage(){
           </div>)}
         </div>
         <div className="flex flex-wrap gap-3">
-          <button className="rounded-lg bg-emerald-700 px-5 py-2.5 text-white" onClick={()=>router.push('/doctors')}>Gerenciar médicos</button>
+          <button className="rounded-lg bg-emerald-700 px-5 py-2.5 text-white" onClick={()=>router.push('/subaccounts?type=DOCTOR')}>Gerenciar médicos</button>
           <Link className="rounded-lg border px-5 py-2.5" href="/subaccounts">Voltar a Subcontas</Link>
         </div>
       </div>}

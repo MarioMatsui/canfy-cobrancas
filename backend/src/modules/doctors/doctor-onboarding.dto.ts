@@ -26,11 +26,28 @@ export class DoctorOnboardingDto {
   @Type(() => CreateSubaccountDto)
   newAccount?: CreateSubaccountDto;
 
-  @ValidateIf(o => o.mode === DoctorOnboardingFinancialMode.LINK)
+  @ValidateIf(o => o.mode === DoctorOnboardingFinancialMode.LINK && !o.localSubaccountId)
   @IsDefined()
   @IsString()
   @Matches(/^[a-zA-Z0-9_-]{8,100}$/)
   accountIdentifier?: string;
+
+  /** Reuse an already imported DOCTOR subaccount; no Asaas POST or import. */
+  @IsOptional()
+  @IsUUID()
+  localSubaccountId?: string;
+
+  /** Resume the verified identity chosen by the administrator instead of duplicating it. */
+  @IsOptional()
+  @IsUUID()
+  existingDoctorId?: string;
+
+  @ValidateIf(o => Boolean(o.localSubaccountId || o.existingDoctorId))
+  @IsDefined()
+  @IsString()
+  @MinLength(8)
+  @MaxLength(250)
+  identityEvidenceReference?: string;
 
   @IsOptional()
   @IsUUID()
