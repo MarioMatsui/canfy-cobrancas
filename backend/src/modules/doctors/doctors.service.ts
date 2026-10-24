@@ -94,7 +94,7 @@ export class DoctorsService {
     const organizationWhere:Prisma.DoctorWhereInput = organizationId?{msgdeskOrganizationId:organizationId}:{};
     const [statuses,activeForCare,financiallyLinked,withoutOrganization,enabledCount,disabledCount,accessPending]=await Promise.all([
       this.db.doctor.groupBy({by:['registrationStatus'],where:organizationWhere,_count:{_all:true}}),
-      this.db.doctor.count({where:{...organizationWhere,accessActive:true,registrationStatus:'VERIFIED',provisioningStatus:'LINKED'}}),
+      this.db.doctor.count({where:{...organizationWhere,enabled:true,accessActive:true,registrationStatus:'VERIFIED',provisioningStatus:'LINKED'}}),
       this.db.doctor.count({where:{...organizationWhere,financialLinks:{some:{active:true}}}}),
       organizationId?Promise.resolve(0):this.db.doctor.count({where:{msgdeskOrganizationId:null}}),
       this.db.doctor.count({where:{...organizationWhere,enabled:true}}),
