@@ -41,7 +41,7 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  const [search,setSearch]=useState(''),[page,setPage]=useState(1),[expanded,setExpanded]=useState(initiallyExpanded);
  const [detailId,setDetailId]=useState<string|null>(null),[edit,setEdit]=useState(false),[working,setWorking]=useState(false);
  const [form,setForm]=useState<Record<string,string>>({...blank,country:'BR'});
- const [walletToLink,setWalletToLink]=useState(''),[showLegacy,setShowLegacy]=useState(false);
+ const [walletToLink,setWalletToLink]=useState(''),[showLegacy,setShowLegacy]=useState(true),[legacyPage,setLegacyPage]=useState(1);
  const [organizationIntegrationId,setOrganizationIntegrationId]=useState(''),[organizationEvidence,setOrganizationEvidence]=useState('');
  const [statusFilter,setStatusFilter]=useState('');
  const medicalIntegrations=useQuery<{id:string;name:string;status:string;doctorOrganizationId?:string|null;scopes:string[]}[]>({queryKey:['medical-integrations'],queryFn:()=>api.get('/integrations').then(r=>r.data),enabled:!!detailId});
@@ -50,11 +50,11 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  const [reviewReference,setReviewReference]=useState(''),[reviewLicenseId,setReviewLicenseId]=useState('');
  const result=useQuery<Result>({queryKey:['professional-doctors',page,search,statusFilter],queryFn:()=>api.get('/doctors',{params:{page,limit:20,search,registrationStatus:statusFilter||undefined}}).then(r=>r.data),enabled:expanded});
  const selected=useQuery<Doctor>({queryKey:['professional-doctor',detailId],queryFn:()=>api.get('/doctors/'+detailId).then(r=>r.data),enabled:!!detailId});
- const legacy=useQuery<{data:{subaccountId:string;name:string;reviewRequired:boolean;financialIdentifierVerified:boolean}[]}>({
-  queryKey:['doctor-legacy-candidates'],queryFn:()=>api.get('/doctors/legacy-candidates',{params:{page:1,limit:20}}).then(r=>r.data),
+ const legacy=useQuery<{data:{subaccountId:string;name:string;classification:string;active:boolean;softDeleted:boolean;reviewRequired:boolean;financialIdentifierVerified:boolean}[];pagination:{page:number;limit:number;total:number;totalPages:number}}>({
+  queryKey:['doctor-legacy-candidates',legacyPage,search],queryFn:()=>api.get('/doctors/legacy-candidates',{params:{page:legacyPage,limit:20,search:search||undefined}}).then(r=>r.data),
   enabled:expanded&&showLegacy,
  });
- function refresh(){void qc.invalidateQueries({queryKey:['professional-doctors']});if(detailId)void qc.invalidateQueries({queryKey:['professional-doctor',detailId]});}
+ function refresh(){void qc.invalidateQueries({queryKey:['professional-doctors']});void qc.invalidateQueries({queryKey:['doctor-legacy-candidates']});if(detailId)void qc.invalidateQueries({queryKey:['professional-doctor',detailId]});}
  
  function editDoctor(){const d=selected.data;if(!d)return;setEdit(true);setForm(Object.fromEntries(fields.map(([k])=>[k,String(d[k as keyof Doctor]??'')])));}
  async function submit(e:React.FormEvent){
@@ -116,13 +116,13 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  <div className="flex gap-3 items-start"><div className="bg-emerald-50 text-emerald-700 rounded-lg p-2"><Stethoscope size={19}/></div>
  <div><h2 className="text-lg font-semibold text-gray-900">Médicos profissionais</h2>
  <p className="text-xs text-gray-500 mt-1">Identidade profissional única, verificação de CRM e organização. Todo médico operacional deve possuir conta Asaas vinculada. Aprovação profissional e acesso clínico têm estados próprios.</p></div></div>
- <button type="button" className="rounded-lg border px-4 py-2 text-sm hover:bg-gray-50" onClick={()=>setExpanded(v=>!v)} aria-expanded={expanded}>{expanded?'Recolher área':'Gerenciar médicos'}</button></div>
+ <button type="button" className="rounded-lg border px-4 py-2 text-sm hover:bg-gray-50" onClick={()=>setExpanded(v=>!v)} aria-expanded={expanded}>{expanded?'Recolher gestão':'Gerenciar médicos'}</button></div>
  {expanded&&<div className="p-5 border-t space-y-5">
- <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" aria-label="Indicadores do cadastro médico">{([['Profissionais',result.data?.summary?.total],['Verificados',result.data?.summary?.verified],['Em revisão',result.data?.summary?.awaitingReview],['Acesso clínico ativo',result.data?.summary?.clinicalActive],['Incompletos',result.data?.summary?.incomplete],['Sem organização',result.data?.summary?.withoutOrganization],['Com vínculo financeiro',result.data?.summary?.withFinancialLink]] as const).map(([title,count])=><div key={title} className="border border-gray-200 rounded-lg p-4 bg-gray-50"><p className="text-xs text-gray-600">{title}</p><strong className="text-xl text-gray-900">{result.isError||result.isLoading?'—':count??'—'}</strong></div>)}</div>
+ <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" aria-label="Indicadores do cadastro médico">{([['Profissionais',result.data?.summary?.total],['Verificados',result.data?.summary?.verified],['Em revisão',result.data?.summary?.awaitingReview],['Acesso clínico ativo',result.data?.summary?.clinicalActive],['Incompletos',result.data?.summary?.incomplete],['Sem organização',result.data?.summary?.withoutOrganization],['Com vínculo financeiro',result.data?.summary?.withFinancialLink],['Legados sem perfil vinculado',legacy.data?.pagination.total]] as const).map(([title,count])=><div key={title} className="border border-gray-200 rounded-lg p-4 bg-gray-50"><p className="text-xs text-gray-600">{title}</p><strong className="text-xl text-gray-900">{result.isError||result.isLoading?'—':count??'—'}</strong></div>)}</div>
  <div className="flex flex-wrap gap-2 items-center justify-between"><p className="text-sm text-gray-600">Resultados da pesquisa: <strong>{result.isError?'—':result.data?.pagination.total??'—'}</strong></p>
- <div className="flex gap-2"><button className="border rounded-lg px-3 py-2 text-sm" onClick={()=>setShowLegacy(v=>!v)}>Revisar legados</button>
+ <div className="flex gap-2"><button className="border rounded-lg px-3 py-2 text-sm" onClick={()=>setShowLegacy(v=>!v)} aria-expanded={showLegacy}>{showLegacy?'Ocultar pendências':'Ver pendências'}</button>
  <Link href="/subaccounts/medical/new" className="bg-emerald-700 text-white rounded-lg px-3 py-2 text-sm flex gap-2"><Plus size={16}/>Adicionar médico</Link></div></div>
- <div className="flex flex-wrap gap-3 items-end"><label className="text-xs font-medium text-gray-700">Busca por nome ou CRM<input aria-label="Buscar médico" className="block w-full sm:w-80 border rounded-lg p-2 text-sm mt-1" value={search} placeholder="Nome ou CRM" onChange={e=>{setPage(1);setSearch(e.target.value);}}/></label><label className="text-xs font-medium text-gray-700">Estado do cadastro<select aria-label="Filtrar cadastro" className="block border rounded-lg p-2 text-sm mt-1" value={statusFilter} onChange={e=>{setPage(1);setStatusFilter(e.target.value);}}><option value="">Todos</option>{[['DRAFT','Incompletos'],['PENDING_REVIEW','Em revisão'],['VERIFIED','Verificados'],['REJECTED','Rejeitados']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label></div>
+ <div className="flex flex-wrap gap-3 items-end"><label className="text-xs font-medium text-gray-700">Busca por nome ou CRM<input aria-label="Buscar médico" className="block w-full sm:w-80 border rounded-lg p-2 text-sm mt-1" value={search} placeholder="Nome ou CRM" onChange={e=>{setPage(1);setLegacyPage(1);setSearch(e.target.value);}}/></label><label className="text-xs font-medium text-gray-700">Estado do cadastro<select aria-label="Filtrar cadastro" className="block border rounded-lg p-2 text-sm mt-1" value={statusFilter} onChange={e=>{setPage(1);setStatusFilter(e.target.value);}}><option value="">Todos</option>{[['DRAFT','Incompletos'],['PENDING_REVIEW','Em revisão'],['VERIFIED','Verificados'],['REJECTED','Rejeitados']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label></div>
  {result.isLoading?<p role="status">Consultando cadastros…</p>:result.isError?<p role="alert" className="text-sm text-red-700">Não foi possível consultar médicos profissionais. Confirme a aplicação das migrations no banco Canfy e sua permissão ADMIN.</p>:
  !result.data?.data.length?<p className="text-sm text-gray-500">Nenhum cadastro encontrado.</p>:
  <div className="overflow-x-auto border rounded-lg"><table className="min-w-[630px] w-full text-sm">
@@ -131,15 +131,23 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  <td className="p-3">{d.licenses.map(l=>l.crmNormalized+'/'+l.state).join(', ')||'—'}</td><td className="p-3">{labels[d.registrationStatus]||d.registrationStatus}</td>
  <td className="p-3">{d.organizationLinked?'Associada':'Pendente'}</td><td className="p-3">{labels[d.provisioningStatus]||d.provisioningStatus}</td>
  <td className="p-3">{labels[d.financialStatus||'UNLINKED']||d.financialStatus}</td>
- <td className="p-3"><button className="text-emerald-700 underline" onClick={()=>{setDetailId(d.id);setEdit(false);}}>Detalhes</button></td></tr>)}</tbody></table></div>}
+ <td className="p-3">{d.financialStatus==='UNLINKED'?<Link className="text-emerald-700 underline font-medium" href={'/subaccounts/medical/new?doctorId='+encodeURIComponent(d.id)}>Concluir vínculo</Link>:<button className="text-emerald-700 underline" onClick={()=>{setDetailId(d.id);setEdit(false);}}>Detalhes</button>}</td></tr>)}</tbody></table></div>}
  <div className="flex gap-3 items-center justify-end text-sm"><span>Página {page}</span><button className="border rounded px-3 py-1" disabled={page===1||result.isFetching} onClick={()=>setPage(p=>p-1)}>Anterior</button>
  <button className="border rounded px-3 py-1" disabled={!result.data||page>=result.data.pagination.totalPages||result.isFetching} onClick={()=>setPage(p=>p+1)}>Próxima</button></div>
- {showLegacy&&<div className="border rounded-lg p-4 space-y-3"><h3 className="font-semibold">Subcontas financeiras legadas: revisão manual</h3>
- <p className="text-xs text-gray-500">Não associamos automaticamente por CPF, nome ou tipo OTHER. O vínculo requer confirmação administrativa de titularidade.</p>
- {legacy.isLoading?<p className="text-sm">Carregando candidatos…</p>:legacy.isError?<p role="alert" className="text-sm text-red-700">Candidatos indisponíveis</p>:
- legacy.data?.data.map(l=><div className="text-sm border-t pt-2" key={l.subaccountId}><strong>{l.name}</strong> • {l.financialIdentifierVerified?'Identificador financeiro existente':'Identificador não validado'}
- <p className="text-xs text-gray-500">ID: {l.subaccountId}. Use somente após revisão no cadastro do médico.</p>{detailId&&<button type="button" className="text-xs text-emerald-700 underline" onClick={()=>setWalletToLink(l.subaccountId)}>Selecionar para vínculo manual</button>}</div>)}</div>}
- {detailId&&<div className="border border-emerald-200 rounded-xl p-5 space-y-4">
+ {showLegacy&&<section className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 sm:p-5 space-y-3" aria-label="Regularização de subcontas médicas existentes">
+ <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-900">Regularização de contas médicas existentes</h3>
+ <p className="text-sm text-slate-700 mt-1">Subcontas Asaas sem vínculo profissional ativo. Não são médicos verificados nem aparecem no MsgDesk até cadastro e associação à organização autorizada.</p></div>
+ {!legacy.isLoading&&!legacy.isError&&<span className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-900">{legacy.data?.pagination.total??0} pendente(s)</span>}</div>
+ {legacy.isLoading?<p role="status" className="text-sm">Consultando contas financeiras legadas…</p>:legacy.isError?<div role="alert" className="text-sm text-red-700">Não foi possível consultar as pendências financeiras. <button type="button" className="underline" onClick={()=>void legacy.refetch()}>Tentar novamente</button></div>:
+ !legacy.data?.data.length?<p className="text-sm text-slate-600">Nenhuma subconta pendente encontrada neste filtro. Isso não confirma que todos os profissionais estejam habilitados.</p>:
+ <div className="divide-y divide-amber-200">{legacy.data.data.map(l=><div className="flex flex-wrap items-center justify-between gap-3 py-3" key={l.subaccountId}>
+ <div className="min-w-0"><p className="font-medium text-sm text-slate-900">{l.name}</p><p className="text-xs text-slate-600 mt-1">{l.softDeleted?'Conta removida':!l.active?'Conta inativa':!l.financialIdentifierVerified?'Identificador financeiro não validado':'Cadastro profissional pendente'} · Identidade e titularidade devem ser conferidas</p></div>
+ {l.active&&!l.softDeleted&&l.financialIdentifierVerified?<Link className="rounded-lg border border-emerald-700 bg-white px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-50" href={'/subaccounts/medical/new?subaccountId='+encodeURIComponent(l.subaccountId)}>Completar cadastro</Link>:
+ <span className="text-xs font-medium text-amber-950">Revisar conta financeira primeiro</span>}
+ </div>)}</div>}
+ {!!legacy.data&&legacy.data.pagination.totalPages>1&&<div className="flex justify-end items-center gap-2 text-xs text-slate-700"><button className="border rounded px-3 py-2 disabled:opacity-50" disabled={legacyPage<=1||legacy.isFetching} onClick={()=>setLegacyPage(p=>p-1)}>Anterior</button><span>{legacyPage} / {legacy.data.pagination.totalPages}</span><button className="border rounded px-3 py-2 disabled:opacity-50" disabled={legacyPage>=legacy.data.pagination.totalPages||legacy.isFetching} onClick={()=>setLegacyPage(p=>p+1)}>Próxima</button></div>}
+ </section>}
+ {detailId&&<div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/60 p-3 sm:p-8" role="dialog" aria-modal="true" aria-label="Gerenciar profissional médico"><div className="mx-auto max-w-4xl rounded-2xl bg-white border p-5 sm:p-7 space-y-4 shadow-xl">
  <div className="flex justify-between"><h3 className="font-semibold">{edit?'Editar cadastro':'Detalhe profissional'}</h3><button className="text-sm underline" onClick={()=>{setEdit(false);setDetailId(null);}}>Fechar</button></div>
  {edit?<form className="space-y-4" onSubmit={submit}>
  {fieldGroups.map(group=><fieldset className="rounded-lg border border-gray-200 p-4 sm:p-5 space-y-3" key={group.title}><legend className="font-semibold text-gray-800 px-2">{group.title}</legend><p className="text-xs text-gray-500">{group.help}</p><div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{fields.filter(([k])=>group.keys.includes(k)).map(([k,n,t])=><label className="text-sm" key={k}>{n}{['rgState','state'].includes(k)?<select className="border rounded-lg block w-full p-2 mt-1" value={form[k]||''} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))}><option value="">Selecionar UF</option>{UFS.map(uf=><option value={uf} key={uf}>{uf}</option>)}</select>:<input className="border rounded-lg block w-full p-2 mt-1" type={t} value={formattedDocument(k,form[k]||'')} onChange={e=>setForm(f=>({...f,[k]:['cpfNormalized','postalCode'].includes(k)?e.target.value.replace(/\D/g,''):e.target.value}))} required={k==='fullName'} maxLength={k==='cpfNormalized'?14:k==='postalCode'?9:254}/>}</label>)}</div></fieldset>)}
@@ -194,7 +202,7 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  <input className="border rounded-lg p-2 text-sm w-full max-w-md" aria-label="ID da subconta" placeholder="UUID da subconta existente" value={walletToLink} onChange={e=>setWalletToLink(e.target.value)}/>
  <button disabled={working||!walletToLink.trim()} onClick={()=>void link()} className="block border rounded-lg px-3 py-2 text-sm">Solicitar vínculo para revisão</button></div>
  </div>:<p className="text-sm">Cadastro indisponível.</p>}
- </div>}
+ </div></div>}
  </div>}
  </section>;
 }
