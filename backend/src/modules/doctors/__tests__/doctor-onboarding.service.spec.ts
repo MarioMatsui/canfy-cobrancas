@@ -6,7 +6,7 @@ const key = 'a1111111-1111-4111-8111-111111111111';
 const validCpf = '52998224725';
 const input = (mode:DoctorOnboardingFinancialMode = DoctorOnboardingFinancialMode.LINK) => ({
   doctor:{fullName:'Dra. Teste',cpfNormalized:validCpf,licenses:[{crmNormalized:'98765',state:'SP'}]},
-  mode,
+  mode,administrativeConfirmed:true,
   ...(mode==='LINK'?{accountIdentifier:'wallet1234567890'}:{newAccount:{
     type:'DOCTOR',name:'Dra. Teste',cpfCnpj:validCpf,email:'medico@example.com',
     mobilePhone:'11999999999',postalCode:'01310100',address:'Avenida Paulista',
@@ -35,6 +35,8 @@ describe('Unified medical onboarding',()=>{
         provisioningStatus:'AWAITING_MSGDESK',msgdeskOrganizationId:null,
       }),
       associateOrganization:jest.fn(),
+      confirmAdministrativeRegistration:jest.fn().mockResolvedValue({id:'doctor-1'}),
+      resolveOnboardingIntegration:jest.fn().mockResolvedValue(null),
     };
     subaccounts={
       linkManagedDoctorAccount:jest.fn().mockResolvedValue({
@@ -100,15 +102,16 @@ describe('Unified medical onboarding',()=>{
     });
     await expect(service.onboard(input() as any,key,'admin-id')).rejects.toThrow(ConflictException);
   });
-  it('reuses a local legacy wallet without any Asaas POST, leaving ownership for review',async()=>{
+  it('reuses a verified matching local wallet without any extra Asaas POST or manual review',async()=>{
     const req={...input(),accountIdentifier:undefined,localSubaccountId:'sub-1',identityEvidenceReference:'ticket-identity-2026'};
     const result=await service.onboard(req as any,key,'admin-id');
     expect(db.subaccount.findUnique).toHaveBeenCalledWith({where:{id:'sub-1'}});
     expect(subaccounts.linkManagedDoctorAccount).not.toHaveBeenCalled();
     expect(subaccounts.create).not.toHaveBeenCalled();
     expect(result.financialAccountReused).toBe(true);
-    expect(result.financialOwnershipVerified).toBe(false);
+    expect(result.financialOwnershipVerified).toBe(true);
     expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(doctors.confirmAdministrativeRegistration).toHaveBeenCalledWith('doctor-1','admin-id');
   });
   it('continues the selected Doctor instead of creating a duplicate professional',async()=>{
     doctors.detail.mockResolvedValue({id:'doctor-1',fullName:'Dra. Teste',cpfNormalized:validCpf,
