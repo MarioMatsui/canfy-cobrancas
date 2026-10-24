@@ -16,6 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { AsaasService } from '../../asaas/asaas.service';
 import { cancelUnpaidInstallmentGroup } from '../public-checkout/installment-reconciliation';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import {DOCTOR_FINANCIAL_ELIGIBILITY} from '../doctors/doctor-financial-eligibility';
 import { ExchangeRateService } from '../../common/exchange-rate/exchange-rate.service';
 import {
   ChargeSplitRuleDto,
@@ -103,7 +104,7 @@ export class ChargesService {
     let doctor: { id: string; name: string; walletId: string | null } | null = null;
     if (dto.doctorSubaccountId) {
       doctor = await this.prisma.subaccount.findFirst({
-        where: { id: dto.doctorSubaccountId, type: 'DOCTOR', active: true, deletedAt: null },
+        where: { id: dto.doctorSubaccountId, ...DOCTOR_FINANCIAL_ELIGIBILITY },
         select: { id: true, name: true, walletId: true },
       });
       if (!doctor) throw new BadRequestException('Médico não encontrado, inativo ou com tipo inválido');
@@ -168,6 +169,12 @@ export class ChargesService {
       dto.description?.trim() || items.map((item) => item.productName).slice(0, 3).join(', ');
 
     const created = await this.prisma.$transaction(async (tx) => {
+      // A selector loaded previously cannot authorize payment creation.
+      if(dto.doctorSubaccountId){
+        const eligible=await tx.subaccount.findFirst({where:{
+          id:dto.doctorSubaccountId,...DOCTOR_FINANCIAL_ELIGIBILITY},select:{id:true}});
+        if(!eligible)throw new BadRequestException('Médico indisponível para novas cobranças');
+      }
       const customer = await this.upsertCustomer(tx, {
         name: dto.customerName.trim(),
         email: dto.customerEmail?.trim() || null,
@@ -271,7 +278,7 @@ export class ChargesService {
         where: { id: chargeId },
         include: this.include(),
       });
-    });
+    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
 
     if (!created) throw new NotFoundException('Cobrança criada, mas não foi possível recarregá-la');
 
