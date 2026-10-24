@@ -302,12 +302,11 @@ export class DoctorsService {
 
   async regularize(id:string,organizationId?:string) {
     const doctor=await this.detail(id,organizationId);
+    // Professional identity is distinct from the Asaas financial data required
+    // when creating a NEW subaccount. Optional RG/address must never block LINK.
     const required:Record<string,unknown>={
-      cpfNormalized:doctor.cpfNormalized,rg:doctor.rg,rgIssuer:doctor.rgIssuer,
-      rgState:doctor.rgState,birthDate:doctor.birthDate,email:doctor.email,
-      mobilePhone:doctor.mobilePhone,postalCode:doctor.postalCode,street:doctor.street,
-      streetNumber:doctor.streetNumber,neighborhood:doctor.neighborhood,
-      city:doctor.city,state:doctor.state,license:doctor.licenses[0]?.crmNormalized
+      fullName:doctor.fullName,cpfNormalized:doctor.cpfNormalized,
+      license:doctor.licenses.some(l=>l.crmNormalized && l.state),
     };
     const missing=Object.keys(required).filter(k=>!required[k]);
     if(missing.length) throw new ConflictException({message:'Cadastro incompleto',missingFields:missing});
