@@ -87,3 +87,24 @@ describe('Legacy professional regularization',()=>{
     });
   });
 });
+
+describe('MsgDesk scoped doctor detail contract',()=>{
+  it('retains the paired tenant ID for secure login creation without revealing financial secrets',async()=>{
+    const service=new DoctorsService({} as never);
+    jest.spyOn(service,'detail').mockResolvedValue({
+      id:'doc',fullName:'Dra. Teste',cpfNormalized:cpf,financialStatus:'VERIFIED',
+      msgdeskOrganizationId:'org-one',msgdeskAuthUserId:null,
+      registrationStatus:'VERIFIED',provisioningStatus:'AWAITING_MSGDESK',accessActive:false,
+      email:'doctor@example.com',mobilePhone:null,
+      licenses:[{crmNormalized:'12345',state:'SP',verificationStatus:'VERIFIED'}],
+      createdAt:new Date(),updatedAt:new Date(),
+      financialLinks:[{subaccount:{walletId:'secret-wallet',asaasId:'secret-account'}}],
+    } as never);
+    const result=await service.detailForIntegration('doc','org-one');
+    expect(result.msgdeskOrganizationId).toBe('org-one');
+    expect(result.financialStatus).toBe('VERIFIED');
+    expect(result.licenses[0].verificationStatus).toBe('VERIFIED');
+    expect(result).not.toHaveProperty('cpfNormalized');
+    expect(result).not.toHaveProperty('financialLinks');
+  });
+});
