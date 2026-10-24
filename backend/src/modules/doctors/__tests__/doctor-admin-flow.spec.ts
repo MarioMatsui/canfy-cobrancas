@@ -108,3 +108,22 @@ describe('MsgDesk scoped doctor detail contract',()=>{
     expect(result).not.toHaveProperty('financialLinks');
   });
 });
+
+describe('Existing verified doctor with a new CRM',()=>{
+  it('audits the administrator for a newly added pending license without duplicating the doctor',async()=>{
+    const tx:any={
+      doctor:{findUnique:jest.fn().mockResolvedValue({id:'doc',cpfNormalized:cpf,fullName:'Dra. Teste',
+        registrationStatus:'VERIFIED',licenses:[{id:'lic-new',verificationStatus:'PENDING'}]}),
+        updateMany:jest.fn().mockResolvedValue({count:1})},
+      doctorLicense:{updateMany:jest.fn().mockResolvedValue({count:1})},
+      doctorReviewEvent:{create:jest.fn().mockResolvedValue({id:'review'})},
+    };
+    const service=new DoctorsService({$transaction:jest.fn(async(fn:(t:any)=>Promise<unknown>)=>fn(tx))} as never);
+    jest.spyOn(service,'detail').mockResolvedValue({id:'doc',registrationStatus:'VERIFIED'} as never);
+    await service.confirmAdministrativeRegistration('doc','canfy-admin');
+    expect(tx.doctorReviewEvent.create).toHaveBeenCalledWith({data:{
+      doctorId:'doc',licenseId:'lic-new',actorUserId:'canfy-admin',decision:'VERIFIED',
+    }});
+    expect(tx.doctor.updateMany).toHaveBeenCalledTimes(1);
+  });
+});
