@@ -249,11 +249,12 @@ export class DoctorsService {
       if(!doctor.cpfNormalized || !doctor.fullName.trim() || !doctor.licenses.length)
         throw new ConflictException('Informe nome, CPF e CRM/UF antes de concluir');
       assertCpf(doctor.cpfNormalized);
-      if(doctor.registrationStatus==='VERIFIED') return;
+      if(doctor.licenses.some(license=>license.verificationStatus==='REJECTED'))
+        throw new ConflictException('CRM rejeitado exige regularização específica');
+      if(doctor.registrationStatus==='VERIFIED' &&
+        doctor.licenses.every(license=>license.verificationStatus==='VERIFIED')) return;
       const now=new Date();
       for(const license of doctor.licenses){
-        if(license.verificationStatus==='REJECTED')
-          throw new ConflictException('CRM rejeitado exige regularização específica');
         const changed=await tx.doctorLicense.updateMany({
           where:{id:license.id,doctorId:id,verificationStatus:'PENDING'},
           data:{verificationStatus:'VERIFIED',verifiedAt:now},
@@ -263,7 +264,7 @@ export class DoctorsService {
         }});
       }
       const updated=await tx.doctor.updateMany({
-        where:{id,registrationStatus:{in:['DRAFT','PENDING_REVIEW']}},
+        where:{id,registrationStatus:{in:['DRAFT','PENDING_REVIEW','VERIFIED']}},
         data:{registrationStatus:'VERIFIED',verifiedAt:now},
       });
       if(updated.count!==1) throw new ConflictException('Cadastro alterado simultaneamente; recarregue');
