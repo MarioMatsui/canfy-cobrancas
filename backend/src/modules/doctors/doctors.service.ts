@@ -173,6 +173,7 @@ export class DoctorsService {
       financialStatus:doctor.financialStatus,accessActive:doctor.accessActive,
       licenses:doctor.licenses.map(l=>({crmNormalized:l.crmNormalized,state:l.state,verificationStatus:l.verificationStatus})),
       email:doctor.email,mobilePhone:doctor.mobilePhone,msgdeskAuthUserId:doctor.msgdeskAuthUserId,
+      msgdeskOrganizationId:doctor.msgdeskOrganizationId,
       createdAt:doctor.createdAt,updatedAt:doctor.updatedAt,
     };
   }
