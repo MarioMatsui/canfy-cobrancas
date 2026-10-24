@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 import {Stethoscope,Plus} from 'lucide-react';
 
 type License={id?:string;crmNormalized:string;state:string;verificationStatus:string};
-type Doctor={msgdeskOrganizationId?:string|null;organizationLinked?:boolean;id:string;fullName:string;registrationStatus:string;provisioningStatus:string;accessActive:boolean;maskedCpf?:string|null;financialStatus?:string;licenses:License[];updatedAt:string;email?:string;cpfNormalized?:string;rg?:string;rgIssuer?:string;rgState?:string;birthDate?:string;mobilePhone?:string;postalCode?:string;street?:string;streetNumber?:string;addressComplement?:string;neighborhood?:string;city?:string;state?:string;country?:string;financialLinks?:Array<{id:string;status:string;active:boolean;subaccount:{id:string;name:string;asaasId:string;walletId?:string|null;active:boolean;deletedAt?:string|null}}>;};
+type Doctor={msgdeskOrganizationId?:string|null;organizationLinked?:boolean;id:string;fullName:string;registrationStatus:string;provisioningStatus:string;accessActive:boolean;maskedCpf?:string|null;financialStatus?:string;financialProviderStatus?:string|null;financialStatusCheckedAt?:string|null;licenses:License[];updatedAt:string;email?:string;cpfNormalized?:string;rg?:string;rgIssuer?:string;rgState?:string;birthDate?:string;mobilePhone?:string;postalCode?:string;street?:string;streetNumber?:string;addressComplement?:string;neighborhood?:string;city?:string;state?:string;country?:string;financialLinks?:Array<{id:string;status:string;active:boolean;subaccount:{id:string;name:string;asaasId:string;walletId?:string|null;active:boolean;deletedAt?:string|null}}>;};
 type Result={summary?:{total:number;verified:number;awaitingReview:number;incomplete:number;rejected:number;clinicalActive:number;withFinancialLink:number;withoutOrganization:number};data:Doctor[];pagination:{page:number;limit:number;total:number;totalPages:number}};
 const fields:[string,string,string][]=[
  ['fullName','Nome completo','text'],['cpfNormalized','CPF','text'],['rg','RG','text'],
@@ -17,7 +17,7 @@ const fields:[string,string,string][]=[
  ['city','Cidade','text'],['state','UF','text'],['country','País (ISO 2)','text']
 ];
 const UFS=['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
-const labels:Record<string,string>={DRAFT:'Incompleto',PENDING_REVIEW:'Em revisão',VERIFIED:'Verificado',REJECTED:'Rejeitado',AWAITING_MSGDESK:'Aguardando organização/acesso',LINKED:'Vinculado',BLOCKED:'Bloqueado',NEEDS_RECONCILIATION:'Requer reconciliação',UNLINKED:'Sem carteira'};
+const labels:Record<string,string>={DRAFT:'Incompleto',PENDING_REVIEW:'Em revisão',VERIFIED:'Verificado',REJECTED:'Rejeitado',AWAITING_MSGDESK:'Aguardando organização/acesso',LINKED:'Vinculado',BLOCKED:'Bloqueado',NEEDS_RECONCILIATION:'Requer reconciliação',UNLINKED:'Sem conta financeira',UNAVAILABLE:'Conta indisponível',CONFLICT:'Vínculos conflitantes'};
 const blank=Object.fromEntries(fields.map(([k])=>[k,''])) as Record<string,string>;
 const fieldGroups=[
  {title:'Identificação pessoal',help:'Dados básicos do profissional. A documentação pode ser completada durante a regularização.',keys:['fullName','cpfNormalized','rg','rgIssuer','rgState','birthDate','email','mobilePhone']},
@@ -42,7 +42,7 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  const [detailId,setDetailId]=useState<string|null>(null),[edit,setEdit]=useState(false),[working,setWorking]=useState(false);
  const [form,setForm]=useState<Record<string,string>>({...blank,country:'BR'});
  const [walletToLink,setWalletToLink]=useState(''),[showLegacy,setShowLegacy]=useState(true),[legacyPage,setLegacyPage]=useState(1);
- const [organizationIntegrationId,setOrganizationIntegrationId]=useState(''),[organizationEvidence,setOrganizationEvidence]=useState('');
+ const [organizationIntegrationId,setOrganizationIntegrationId]=useState('');
  const [statusFilter,setStatusFilter]=useState('');
  const medicalIntegrations=useQuery<{id:string;name:string;status:string;doctorOrganizationId?:string|null;scopes:string[]}[]>({queryKey:['medical-integrations'],queryFn:()=>api.get('/integrations').then(r=>r.data),enabled:!!detailId});
  const pairedIntegrations=(medicalIntegrations.data||[]).filter(i=>i.status==='ACTIVE'&&i.doctorOrganizationId&&i.scopes.includes('doctors:admin:read')&&i.scopes.includes('doctors:admin:write'));
@@ -94,11 +94,11 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
   finally{setWorking(false);}
  }
  async function associateOrganization(){
-  if(!detailId||working||!organizationIntegrationId||organizationEvidence.trim().length<8||selected.data?.msgdeskOrganizationId)return;
+  if(!detailId||working||!organizationIntegrationId||selected.data?.msgdeskOrganizationId)return;
   if(!confirm('Associar este médico à organização comprovadamente pareada com a integração selecionada? Esta ação será auditada e não poderá ser usada para transferência entre organizações.'))return;
   setWorking(true);
-  try{await api.post('/doctors/'+detailId+'/organization',{integrationId:organizationIntegrationId,evidenceReference:organizationEvidence.trim()});
-    toast.success('Médico associado à organização autorizada');setOrganizationIntegrationId('');setOrganizationEvidence('');refresh();}
+  try{await api.post('/doctors/'+detailId+'/organization',{integrationId:organizationIntegrationId});
+    toast.success('Médico associado à organização autorizada');setOrganizationIntegrationId('');refresh();}
   catch(e){toast.error(message(e));}finally{setWorking(false);}
  }
  async function review(decision:'VERIFIED'|'REJECTED'){
@@ -118,7 +118,7 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  <p className="text-xs text-gray-500 mt-1">Identidade profissional única, verificação de CRM e organização. Todo médico operacional deve possuir conta Asaas vinculada. Aprovação profissional e acesso clínico têm estados próprios.</p></div></div>
  <button type="button" className="rounded-lg border px-4 py-2 text-sm hover:bg-gray-50" onClick={()=>setExpanded(v=>!v)} aria-expanded={expanded}>{expanded?'Recolher gestão':'Gerenciar médicos'}</button></div>
  {expanded&&<div className="p-5 border-t space-y-5">
- <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" aria-label="Indicadores do cadastro médico">{([['Profissionais',result.data?.summary?.total],['Verificados',result.data?.summary?.verified],['Em revisão',result.data?.summary?.awaitingReview],['Acesso clínico ativo',result.data?.summary?.clinicalActive],['Incompletos',result.data?.summary?.incomplete],['Sem organização',result.data?.summary?.withoutOrganization],['Com vínculo financeiro',result.data?.summary?.withFinancialLink],['Legados sem perfil vinculado',legacy.data?.pagination.total]] as const).map(([title,count])=><div key={title} className="border border-gray-200 rounded-lg p-4 bg-gray-50"><p className="text-xs text-gray-600">{title}</p><strong className="text-xl text-gray-900">{result.isError||result.isLoading?'—':count??'—'}</strong></div>)}</div>
+ <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" aria-label="Indicadores do cadastro médico">{([['Profissionais cadastrados',result.data?.summary?.total],['Acesso clínico ativo',result.data?.summary?.clinicalActive],['Aguardando acesso',result.data?.summary?Math.max(0,result.data.summary.verified-result.data.summary.clinicalActive):undefined],['Cadastros incompletos',result.data?.summary?.incomplete]] as const).map(([title,count])=><div key={title} className="border border-gray-200 rounded-lg p-4 bg-gray-50"><p className="text-xs text-gray-600">{title}</p><strong className="text-xl text-gray-900">{result.isError||result.isLoading?'—':count??'—'}</strong></div>)}</div>
  <div className="flex flex-wrap gap-2 items-center justify-between"><p className="text-sm text-gray-600">Resultados da pesquisa: <strong>{result.isError?'—':result.data?.pagination.total??'—'}</strong></p>
  <div className="flex gap-2"><button className="border rounded-lg px-3 py-2 text-sm" onClick={()=>setShowLegacy(v=>!v)} aria-expanded={showLegacy}>{showLegacy?'Ocultar pendências':'Ver pendências'}</button>
  <Link href="/subaccounts/medical/new" className="bg-emerald-700 text-white rounded-lg px-3 py-2 text-sm flex gap-2"><Plus size={16}/>Adicionar médico</Link></div></div>
@@ -130,7 +130,7 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  <tbody>{result.data.data.map(d=><tr className="border-t" key={d.id}><td className="p-3 font-medium">{d.fullName}<div className="text-xs text-gray-500">{d.maskedCpf||'CPF não informado'}</div></td>
  <td className="p-3">{d.licenses.map(l=>l.crmNormalized+'/'+l.state).join(', ')||'—'}</td><td className="p-3">{labels[d.registrationStatus]||d.registrationStatus}</td>
  <td className="p-3">{d.organizationLinked?'Associada':'Pendente'}</td><td className="p-3">{labels[d.provisioningStatus]||d.provisioningStatus}</td>
- <td className="p-3">{labels[d.financialStatus||'UNLINKED']||d.financialStatus}</td>
+ <td className="p-3">{d.financialStatus?labels[d.financialStatus]||d.financialStatus:'Estado indisponível'}</td>
  <td className="p-3">{d.financialStatus==='UNLINKED'?<Link className="text-emerald-700 underline font-medium" href={'/subaccounts/medical/new?doctorId='+encodeURIComponent(d.id)}>Concluir vínculo</Link>:<button className="text-emerald-700 underline" onClick={()=>{setDetailId(d.id);setEdit(false);}}>Detalhes</button>}</td></tr>)}</tbody></table></div>}
  <div className="flex gap-3 items-center justify-end text-sm"><span>Página {page}</span><button className="border rounded px-3 py-1" disabled={page===1||result.isFetching} onClick={()=>setPage(p=>p-1)}>Anterior</button>
  <button className="border rounded px-3 py-1" disabled={!result.data||page>=result.data.pagination.totalPages||result.isFetching} onClick={()=>setPage(p=>p+1)}>Próxima</button></div>
@@ -148,22 +148,23 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
  {!!legacy.data&&legacy.data.pagination.totalPages>1&&<div className="flex justify-end items-center gap-2 text-xs text-slate-700"><button className="border rounded px-3 py-2 disabled:opacity-50" disabled={legacyPage<=1||legacy.isFetching} onClick={()=>setLegacyPage(p=>p-1)}>Anterior</button><span>{legacyPage} / {legacy.data.pagination.totalPages}</span><button className="border rounded px-3 py-2 disabled:opacity-50" disabled={legacyPage>=legacy.data.pagination.totalPages||legacy.isFetching} onClick={()=>setLegacyPage(p=>p+1)}>Próxima</button></div>}
  </section>}
  {detailId&&<div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/60 p-3 sm:p-8" role="dialog" aria-modal="true" aria-label="Gerenciar profissional médico"><div className="mx-auto max-w-4xl rounded-2xl bg-white border p-5 sm:p-7 space-y-4 shadow-xl">
- <div className="flex justify-between"><h3 className="font-semibold">{edit?'Editar cadastro':'Detalhe profissional'}</h3><button className="text-sm underline" onClick={()=>{setEdit(false);setDetailId(null);}}>Fechar</button></div>
+ <div className="flex justify-between"><h3 className="font-semibold">{edit?'Editar cadastro':selected.data?.fullName||'Carregando profissional…'}</h3><button className="text-sm underline" onClick={()=>{setEdit(false);setDetailId(null);}}>Fechar</button></div>
  {edit?<form className="space-y-4" onSubmit={submit}>
  {fieldGroups.map(group=><fieldset className="rounded-lg border border-gray-200 p-4 sm:p-5 space-y-3" key={group.title}><legend className="font-semibold text-gray-800 px-2">{group.title}</legend><p className="text-xs text-gray-500">{group.help}</p><div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{fields.filter(([k])=>group.keys.includes(k)).map(([k,n,t])=><label className="text-sm" key={k}>{n}{['rgState','state'].includes(k)?<select className="border rounded-lg block w-full p-2 mt-1" value={form[k]||''} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))}><option value="">Selecionar UF</option>{UFS.map(uf=><option value={uf} key={uf}>{uf}</option>)}</select>:<input className="border rounded-lg block w-full p-2 mt-1" type={t} value={formattedDocument(k,form[k]||'')} onChange={e=>setForm(f=>({...f,[k]:['cpfNormalized','postalCode'].includes(k)?e.target.value.replace(/\D/g,''):e.target.value}))} required={k==='fullName'} maxLength={k==='cpfNormalized'?14:k==='postalCode'?9:254}/>}</label>)}</div></fieldset>)}
  
  <p className="text-xs text-gray-600">A edição atualiza o perfil existente sem criar outra carteira. CRM e vínculo financeiro exigem ações específicas.</p>
  <button className="bg-emerald-700 text-white px-4 py-2 rounded-lg disabled:opacity-60" disabled={working}>{working?'Salvando…':'Salvar profissional'}</button>
  </form>:selected.isLoading?<p>Carregando…</p>:selected.data?<div className="space-y-4">
- <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">{[['Cadastro',selected.data.registrationStatus],['Acesso',selected.data.provisioningStatus],['Financeiro',selected.data.financialStatus||'UNLINKED']].map(([k,v])=><div className="border rounded p-3" key={k}><p className="text-xs text-gray-500">{k}</p><strong>{labels[v]||v}</strong></div>)}</div>
- <p className="text-sm">E-mail: {selected.data.email||'Não informado'} • CRM: {selected.data.licenses.map(l=>l.crmNormalized+'/'+l.state).join(', ')||'Não informado'}</p>
+ <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">{[['Cadastro',selected.data.registrationStatus],['Conta financeira',selected.data.financialStatus||'UNAVAILABLE'],['Acesso MsgDesk',selected.data.accessActive?'Acesso clínico ativo':selected.data.provisioningStatus]].map(([k,v])=><div className="border rounded p-3" key={k}><p className="text-xs text-gray-500">{k}</p><strong>{labels[v]||v}</strong></div>)}</div>
+ <section className="border-t pt-4 space-y-2"><h4 className="font-semibold text-sm">Dados profissionais</h4><p className="text-sm">CRM/UF: {selected.data.licenses.map(l=>l.crmNormalized+'/'+l.state).join(', ')||'Não informado'}</p><p className="text-sm">Contato: {selected.data.email||'Não informado'} · {selected.data.mobilePhone||'Celular não informado'}</p></section>
+ <section className="border-t pt-4 space-y-2"><h4 className="font-semibold text-sm">Conta financeira</h4><p className="text-sm text-slate-600">Situação Asaas: {selected.data.financialProviderStatus||'Não consultada'}{selected.data.financialStatusCheckedAt?' · Última consulta '+new Date(selected.data.financialStatusCheckedAt).toLocaleDateString('pt-BR'):''}</p>{selected.data.financialLinks?.filter(l=>l.active).map(l=><p className="text-sm" key={l.id}>{l.subaccount.name} · {labels[l.status]||l.status}</p>)}{!selected.data.financialLinks?.some(l=>l.active)&&<p className="text-sm">Nenhuma conta vinculada.</p>}</section>
  <p className="text-xs text-gray-500">Cadastro em revisão não equivale à verificação oficial do CRM. Provisionamento MsgDesk depende de vínculo seguro com a organização.</p>
  <section className="border-t pt-4 space-y-3"><h4 className="font-semibold text-sm">Organização e acesso MsgDesk</h4>
  <p className="text-sm">{selected.data.msgdeskOrganizationId?'Organização associada por integração validada':'Ainda sem organização; este profissional não aparece no MsgDesk até revisão e associação.'}</p>
- {!selected.data.msgdeskOrganizationId&&<><label className="block text-xs font-medium">Integração pareada com a organização<select className="border rounded-lg p-2 w-full mt-1 text-sm" value={organizationIntegrationId} onChange={e=>setOrganizationIntegrationId(e.target.value)}><option value="">Selecione uma integração autorizada</option>{pairedIntegrations.map(i=><option key={i.id} value={i.id}>{i.name}</option>)}</select></label><label className="block text-xs font-medium">Referência da comprovação de vínculo<input className="border rounded-lg p-2 w-full mt-1 text-sm" minLength={8} maxLength={250} placeholder="Protocolo interno ou evidência verificável" value={organizationEvidence} onChange={e=>setOrganizationEvidence(e.target.value)}/></label><p className="text-xs text-gray-600">A associação será auditada. Somente integrações já pareadas aparecem aqui; nenhum UUID de organização pode ser enviado pelo navegador.</p><button type="button" className="rounded border px-3 py-2 text-sm disabled:opacity-50" disabled={working||!organizationIntegrationId||organizationEvidence.trim().length<8} onClick={()=>void associateOrganization()}>Associar profissional à organização</button></>}
+ {!selected.data.msgdeskOrganizationId&&<><label className="block text-xs font-medium">Integração pareada com a organização<select className="border rounded-lg p-2 w-full mt-1 text-sm" value={organizationIntegrationId} onChange={e=>setOrganizationIntegrationId(e.target.value)}><option value="">Selecione uma integração autorizada</option>{pairedIntegrations.map(i=><option key={i.id} value={i.id}>{i.name}</option>)}</select></label><p className="text-xs text-gray-600">A associação será auditada automaticamente com o administrador autenticado.</p><p className="text-xs text-gray-600">A associação será auditada. Somente integrações já pareadas aparecem aqui; nenhum UUID de organização pode ser enviado pelo navegador.</p><button type="button" className="rounded border px-3 py-2 text-sm disabled:opacity-50" disabled={working||!organizationIntegrationId} onClick={()=>void associateOrganization()}>Associar profissional à organização</button></>}
  </section>
  <div className="flex flex-wrap gap-2"><button className="border rounded px-3 py-2 text-sm" onClick={editDoctor}>Editar</button>
- <button className="bg-emerald-700 text-white rounded px-3 py-2 text-sm" disabled={working||selected.data.registrationStatus==='VERIFIED'} onClick={()=>void regularize()}>Encaminhar para revisão</button></div>
+ {selected.data.registrationStatus==='DRAFT'&&<button className="bg-emerald-700 text-white rounded px-3 py-2 text-sm" disabled={working} onClick={()=>void regularize()}>Regularizar cadastro incompleto</button>}</div>
  {selected.data.registrationStatus==='PENDING_REVIEW' && selected.data.licenses.some(l=>l.verificationStatus==='PENDING')&&
  <section className="border-t pt-4 space-y-3" aria-label="Revisão documental do CRM">
   <h4 className="font-semibold text-sm">Revisão humana do CRM</h4>
@@ -197,10 +198,10 @@ export default function DoctorsProfessionalSection({initiallyExpanded=false}:{in
   {financialReviewKey.current&&<p className="text-xs text-amber-900">Houve tentativa anterior. Confirme o estado do vínculo antes de iniciar uma nova revisão.</p>}
  </section>
  )}
- <div className="border-t pt-4 space-y-2"><h4 className="font-medium text-sm">Vincular subconta existente</h4>
+ {!selected.data.financialLinks?.some(l=>l.active)&&<div className="border-t pt-4 space-y-2"><h4 className="font-medium text-sm">Resolver conta financeira ausente</h4>
  <p className="text-xs text-gray-500">Opcional: requer carteira DOCTOR verificada e revisão de titularidade. Não cria Asaas nem modifica splits ou histórico.</p>
  <input className="border rounded-lg p-2 text-sm w-full max-w-md" aria-label="ID da subconta" placeholder="UUID da subconta existente" value={walletToLink} onChange={e=>setWalletToLink(e.target.value)}/>
- <button disabled={working||!walletToLink.trim()} onClick={()=>void link()} className="block border rounded-lg px-3 py-2 text-sm">Solicitar vínculo para revisão</button></div>
+ <button disabled={working||!walletToLink.trim()} onClick={()=>void link()} className="block border rounded-lg px-3 py-2 text-sm">Solicitar vínculo para revisão</button></div>}
  </div>:<p className="text-sm">Cadastro indisponível.</p>}
  </div></div>}
  </div>}

@@ -7,8 +7,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, RolesGuard } from '../auth/roles.guard';
 import { DoctorsService } from './doctors.service';
 import { DoctorFinancialLinkDto, DoctorLicenseInputDto, DoctorListDto, ReviewDoctorLicenseDto, ReviewDoctorFinancialLinkDto, UpdateDoctorDto, DoctorIdentityCandidatesDto } from './doctors.dto';
-import { IsUUID,IsString,MinLength,MaxLength } from 'class-validator';
-export class AssociateDoctorOrganizationDto { @IsUUID() integrationId!: string; @IsString() @MinLength(8) @MaxLength(250) evidenceReference!:string; }
+import { IsUUID,IsString,IsOptional,MinLength,MaxLength } from 'class-validator';
+export class AssociateDoctorOrganizationDto { @IsUUID() integrationId!: string; @IsOptional() @IsString() @MinLength(8) @MaxLength(250) evidenceReference?:string; }
 
 @ApiTags('Médicos profissionais (admin)')
 @ApiBearerAuth()

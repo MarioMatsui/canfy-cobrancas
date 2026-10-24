@@ -55,6 +55,19 @@ function stableStringify(value:unknown):string {
   return JSON.stringify(value);
 }
 
+/** Shared canonical financial state; missing data is never mistaken for an absent wallet. */
+function financialStatus(links:Array<{active:boolean;status:string;subaccount?:{
+  active:boolean;deletedAt:Date|null;walletId:string|null;asaasId:string;
+}|null}>):string {
+  const active=links.filter(link=>link.active);
+  if(!active.length) return 'UNLINKED';
+  if(active.length!==1) return 'CONFLICT';
+  const {status,subaccount}=active[0];
+  if(!subaccount || !subaccount.active || subaccount.deletedAt || !subaccount.walletId ||
+    !subaccount.asaasId || subaccount.asaasId.startsWith('external_')) return 'UNAVAILABLE';
+  return status;
+}
+
 @Injectable()
 export class DoctorsService {
   constructor(private readonly db:PrismaService) {}
@@ -74,7 +87,7 @@ export class DoctorsService {
     const [rows,total]=await Promise.all([
       this.db.doctor.findMany({where,skip:(page-1)*limit,take:limit,
         orderBy:{createdAt:'desc'},include:{licenses:{select:{crmNormalized:true,state:true,verificationStatus:true}},
-        financialLinks:{where:{active:true},select:{status:true,subaccountId:true}}}}),
+        financialLinks:{where:{active:true},select:{active:true,status:true,subaccountId:true,subaccount:{select:{active:true,deletedAt:true,walletId:true,asaasId:true,asaasGeneralStatus:true,asaasStatusCheckedAt:true}}}}}}),
       this.db.doctor.count({where})
     ]);
     const organizationWhere:Prisma.DoctorWhereInput = organizationId?{msgdeskOrganizationId:organizationId}:{};
@@ -92,7 +105,9 @@ export class DoctorsService {
       id:d.id,fullName:d.fullName,maskedCpf:maskCpf(d.cpfNormalized),
       registrationStatus:d.registrationStatus,provisioningStatus:d.provisioningStatus,
       accessActive:d.accessActive,organizationLinked:!!d.msgdeskOrganizationId,licenses:d.licenses,
-      financialStatus:d.financialLinks[0]?.status??'UNLINKED',
+      financialStatus:financialStatus(d.financialLinks),
+      financialProviderStatus:d.financialLinks.length===1?d.financialLinks[0].subaccount.asaasGeneralStatus:null,
+      financialStatusCheckedAt:d.financialLinks.length===1?d.financialLinks[0].subaccount.asaasStatusCheckedAt:null,
       createdAt:d.createdAt,updatedAt:d.updatedAt,
     })),pagination:{page,limit,total,totalPages:Math.ceil(total/limit)}};
   }
@@ -143,20 +158,33 @@ export class DoctorsService {
   async detail(id:string,organizationId?:string) {
     const doctor=await this.db.doctor.findUnique({where:{id},include:{
       licenses:true,financialLinks:{include:{subaccount:{
-        select:{id:true,name:true,type:true,active:true,walletId:true,asaasId:true,deletedAt:true}
+        select:{id:true,name:true,type:true,active:true,walletId:true,asaasId:true,asaasGeneralStatus:true,asaasStatusCheckedAt:true,deletedAt:true}
       }}},operations:{select:{id:true,kind:true,status:true,safeErrorCode:true,createdAt:true},
         orderBy:{createdAt:'desc'},take:15}
     }});
     if(!doctor || (organizationId && doctor.msgdeskOrganizationId !== organizationId)) throw new NotFoundException('Médico não encontrado');
-    return doctor;
+    return {...doctor,financialStatus:financialStatus(doctor.financialLinks),
+      financialProviderStatus:doctor.financialLinks.filter(l=>l.active).length===1
+        ?doctor.financialLinks.find(l=>l.active)?.subaccount.asaasGeneralStatus??null:null,
+      financialStatusCheckedAt:doctor.financialLinks.filter(l=>l.active).length===1
+        ?doctor.financialLinks.find(l=>l.active)?.subaccount.asaasStatusCheckedAt??null:null,
+    };
   }
 
-  /** Integration details never expose Asaas wallet/account identifiers or financial PII. */
+  /** Only clinical-access administration fields cross the organization boundary. */
   async detailForIntegration(id:string,organizationId:string) {
-    const {financialLinks,...doctor}=await this.detail(id,organizationId);
-    return {...doctor,financialLinks:financialLinks.map(link=>({
-      status:link.status,active:link.active,createdAt:link.createdAt
-    }))};
+    const doctor=await this.detail(id,organizationId);
+    return {
+      id:doctor.id,fullName:doctor.fullName,maskedCpf:maskCpf(doctor.cpfNormalized),
+      registrationStatus:doctor.registrationStatus,provisioningStatus:doctor.provisioningStatus,
+      financialStatus:doctor.financialStatus,
+      financialProviderStatus:doctor.financialProviderStatus,financialStatusCheckedAt:doctor.financialStatusCheckedAt,
+      accessActive:doctor.accessActive,
+      licenses:doctor.licenses.map(l=>({crmNormalized:l.crmNormalized,state:l.state,verificationStatus:l.verificationStatus})),
+      email:doctor.email,mobilePhone:doctor.mobilePhone,msgdeskAuthUserId:doctor.msgdeskAuthUserId,
+      msgdeskOrganizationId:doctor.msgdeskOrganizationId,
+      createdAt:doctor.createdAt,updatedAt:doctor.updatedAt,
+    };
   }
 
   async create(dto:CreateDoctorDto,rawKey?:string,organizationId?:string) {
@@ -196,9 +224,57 @@ export class DoctorsService {
     }
   }
 
+  /** Resolve one authorized organization, even when several keys belong to it. */
+  async resolveOnboardingIntegration(requestedId?:string):Promise<string|null> {
+    const keys=await this.db.integrationApiKey.findMany({
+      where:{status:'ACTIVE',revokedAt:null,doctorOrganizationId:{not:null},
+        scopes:{hasEvery:['doctors:admin:read','doctors:admin:write']}},
+      select:{id:true,doctorOrganizationId:true},orderBy:{createdAt:'asc'},
+    });
+    if(requestedId){
+      if(!keys.some(k=>k.id===requestedId)) throw new ConflictException('Integração MsgDesk não pareada ou sem permissão');
+      return requestedId;
+    }
+    return new Set(keys.map(k=>k.doctorOrganizationId)).size===1?keys[0].id:null;
+  }
+
+  /** Explicit, authenticated administrative attestation; no fabricated evidence reference. */
+  async confirmAdministrativeRegistration(id:string,actorUserId:string) {
+    if(!actorUserId) throw new BadRequestException('Administrador autenticado obrigatório');
+    await this.db.$transaction(async tx=>{
+      const doctor=await tx.doctor.findUnique({where:{id},include:{licenses:true}});
+      if(!doctor) throw new NotFoundException('Médico não encontrado');
+      if(doctor.registrationStatus==='REJECTED')
+        throw new ConflictException('Cadastro rejeitado requer regularização excepcional');
+      if(!doctor.cpfNormalized || !doctor.fullName.trim() || !doctor.licenses.length)
+        throw new ConflictException('Informe nome, CPF e CRM/UF antes de concluir');
+      assertCpf(doctor.cpfNormalized);
+      if(doctor.licenses.some(license=>license.verificationStatus==='REJECTED'))
+        throw new ConflictException('CRM rejeitado exige regularização específica');
+      if(doctor.registrationStatus==='VERIFIED' &&
+        doctor.licenses.every(license=>license.verificationStatus==='VERIFIED')) return;
+      const now=new Date();
+      for(const license of doctor.licenses){
+        const changed=await tx.doctorLicense.updateMany({
+          where:{id:license.id,doctorId:id,verificationStatus:'PENDING'},
+          data:{verificationStatus:'VERIFIED',verifiedAt:now},
+        });
+        if(changed.count) await tx.doctorReviewEvent.create({data:{
+          doctorId:id,licenseId:license.id,actorUserId,decision:'VERIFIED',
+        }});
+      }
+      const updated=await tx.doctor.updateMany({
+        where:{id,registrationStatus:{in:['DRAFT','PENDING_REVIEW','VERIFIED']}},
+        data:{registrationStatus:'VERIFIED',verifiedAt:now},
+      });
+      if(updated.count!==1) throw new ConflictException('Cadastro alterado simultaneamente; recarregue');
+    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+    return this.detail(id);
+  }
+
   /** Canfy ADMIN may link an unowned professional only to an already paired, active integration.
    * The browser provides an integration identifier, never a self-asserted tenant UUID. */
-  async associateOrganization(id:string,integrationId:string,actorId:string,evidenceReference:string) {
+  async associateOrganization(id:string,integrationId:string,actorId:string,evidenceReference?:string) {
     const integration=await this.db.integrationApiKey.findUnique({where:{id:integrationId}});
     if (!integration || integration.status!=='ACTIVE' || integration.revokedAt || !integration.doctorOrganizationId ||
         !integration.scopes.includes('doctors:admin:read') || !integration.scopes.includes('doctors:admin:write'))
@@ -213,7 +289,8 @@ export class DoctorsService {
         data:{msgdeskOrganizationId:integration.doctorOrganizationId}});
       if (updated.count!==1) throw new ConflictException('Vínculo alterado durante revisão; recarregue');
       await tx.doctorOrganizationLinkEvent.create({data:{doctorId:id,organizationId:integration.doctorOrganizationId!,
-        integrationKeyId:integration.id,actorUserId:actorId,evidenceReference:evidenceReference.trim()}});
+        integrationKeyId:integration.id,actorUserId:actorId,
+        ...(evidenceReference?.trim()?{evidenceReference:evidenceReference.trim()}:{}),}});
     });
     return this.detail(id);
   }
@@ -236,12 +313,11 @@ export class DoctorsService {
 
   async regularize(id:string,organizationId?:string) {
     const doctor=await this.detail(id,organizationId);
+    // Professional identity is distinct from the Asaas financial data required
+    // when creating a NEW subaccount. Optional RG/address must never block LINK.
     const required:Record<string,unknown>={
-      cpfNormalized:doctor.cpfNormalized,rg:doctor.rg,rgIssuer:doctor.rgIssuer,
-      rgState:doctor.rgState,birthDate:doctor.birthDate,email:doctor.email,
-      mobilePhone:doctor.mobilePhone,postalCode:doctor.postalCode,street:doctor.street,
-      streetNumber:doctor.streetNumber,neighborhood:doctor.neighborhood,
-      city:doctor.city,state:doctor.state,license:doctor.licenses[0]?.crmNormalized
+      fullName:doctor.fullName,cpfNormalized:doctor.cpfNormalized,
+      license:doctor.licenses.some(l=>l.crmNormalized && l.state),
     };
     const missing=Object.keys(required).filter(k=>!required[k]);
     if(missing.length) throw new ConflictException({message:'Cadastro incompleto',missingFields:missing});

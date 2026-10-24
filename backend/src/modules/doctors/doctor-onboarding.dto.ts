@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsDefined, IsEnum, IsOptional, IsString, IsUUID, Matches, MinLength, MaxLength, ValidateIf, ValidateNested } from 'class-validator';
+import { Equals, IsDefined, IsEnum, IsOptional, IsString, IsUUID, Matches, MinLength, MaxLength, ValidateIf, ValidateNested } from 'class-validator';
 import { CreateDoctorDto } from './doctors.dto';
 import { CreateSubaccountDto } from '../subaccounts/subaccounts.dto';
 
@@ -19,6 +19,10 @@ export class DoctorOnboardingDto {
 
   @IsEnum(DoctorOnboardingFinancialMode)
   mode!: DoctorOnboardingFinancialMode;
+
+  /** Canfy ADMIN confirms the human checks made before internal registration. */
+  @Equals(true)
+  administrativeConfirmed!: true;
 
   @ValidateIf(o => o.mode === DoctorOnboardingFinancialMode.CREATE)
   @IsDefined()
@@ -42,8 +46,7 @@ export class DoctorOnboardingDto {
   @IsUUID()
   existingDoctorId?: string;
 
-  @ValidateIf(o => Boolean(o.localSubaccountId || o.existingDoctorId))
-  @IsDefined()
+  @IsOptional()
   @IsString()
   @MinLength(8)
   @MaxLength(250)
@@ -53,8 +56,7 @@ export class DoctorOnboardingDto {
   @IsUUID()
   integrationId?: string;
 
-  @ValidateIf(o => Boolean(o.integrationId))
-  @IsDefined()
+  @IsOptional()
   @IsString()
   @MinLength(8)
   @MaxLength(250)

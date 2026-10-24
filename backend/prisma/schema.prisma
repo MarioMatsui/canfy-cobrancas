@@ -879,7 +879,7 @@ model DoctorReviewEvent {
   doctorId String @map("doctor_id")
   licenseId String @map("license_id")
   actorUserId String @map("actor_user_id")
-  evidenceReference String @map("evidence_reference") @db.VarChar(250)
+  evidenceReference String? @map("evidence_reference") @db.VarChar(250)
   decision String @db.VarChar(16)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   doctor Doctor @relation(fields:[doctorId],references:[id],onDelete:Restrict)
@@ -901,7 +901,7 @@ model IntegrationDoctorPairingEvent {
 
 model DoctorOrganizationLinkEvent {
   id String @id @default(uuid())
-  evidenceReference String @map("evidence_reference") @db.VarChar(250)
+  evidenceReference String? @map("evidence_reference") @db.VarChar(250)
   doctorId String @map("doctor_id")
   organizationId String @map("organization_id") @db.Uuid
   integrationKeyId String @map("integration_key_id")
