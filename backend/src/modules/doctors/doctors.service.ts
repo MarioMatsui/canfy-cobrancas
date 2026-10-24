@@ -87,7 +87,7 @@ export class DoctorsService {
     const [rows,total]=await Promise.all([
       this.db.doctor.findMany({where,skip:(page-1)*limit,take:limit,
         orderBy:{createdAt:'desc'},include:{licenses:{select:{crmNormalized:true,state:true,verificationStatus:true}},
-        financialLinks:{where:{active:true},select:{active:true,status:true,subaccountId:true,subaccount:{select:{active:true,deletedAt:true,walletId:true,asaasId:true}}}}}}),
+        financialLinks:{where:{active:true},select:{active:true,status:true,subaccountId:true,subaccount:{select:{active:true,deletedAt:true,walletId:true,asaasId:true,asaasGeneralStatus:true,asaasStatusCheckedAt:true}}}}}}),
       this.db.doctor.count({where})
     ]);
     const organizationWhere:Prisma.DoctorWhereInput = organizationId?{msgdeskOrganizationId:organizationId}:{};
@@ -106,6 +106,8 @@ export class DoctorsService {
       registrationStatus:d.registrationStatus,provisioningStatus:d.provisioningStatus,
       accessActive:d.accessActive,organizationLinked:!!d.msgdeskOrganizationId,licenses:d.licenses,
       financialStatus:financialStatus(d.financialLinks),
+      financialProviderStatus:d.financialLinks.length===1?d.financialLinks[0].subaccount.asaasGeneralStatus:null,
+      financialStatusCheckedAt:d.financialLinks.length===1?d.financialLinks[0].subaccount.asaasStatusCheckedAt:null,
       createdAt:d.createdAt,updatedAt:d.updatedAt,
     })),pagination:{page,limit,total,totalPages:Math.ceil(total/limit)}};
   }
@@ -156,12 +158,17 @@ export class DoctorsService {
   async detail(id:string,organizationId?:string) {
     const doctor=await this.db.doctor.findUnique({where:{id},include:{
       licenses:true,financialLinks:{include:{subaccount:{
-        select:{id:true,name:true,type:true,active:true,walletId:true,asaasId:true,deletedAt:true}
+        select:{id:true,name:true,type:true,active:true,walletId:true,asaasId:true,asaasGeneralStatus:true,asaasStatusCheckedAt:true,deletedAt:true}
       }}},operations:{select:{id:true,kind:true,status:true,safeErrorCode:true,createdAt:true},
         orderBy:{createdAt:'desc'},take:15}
     }});
     if(!doctor || (organizationId && doctor.msgdeskOrganizationId !== organizationId)) throw new NotFoundException('Médico não encontrado');
-    return {...doctor,financialStatus:financialStatus(doctor.financialLinks)};
+    return {...doctor,financialStatus:financialStatus(doctor.financialLinks),
+      financialProviderStatus:doctor.financialLinks.filter(l=>l.active).length===1
+        ?doctor.financialLinks.find(l=>l.active)?.subaccount.asaasGeneralStatus??null:null,
+      financialStatusCheckedAt:doctor.financialLinks.filter(l=>l.active).length===1
+        ?doctor.financialLinks.find(l=>l.active)?.subaccount.asaasStatusCheckedAt??null:null,
+    };
   }
 
   /** Only clinical-access administration fields cross the organization boundary. */
@@ -170,7 +177,9 @@ export class DoctorsService {
     return {
       id:doctor.id,fullName:doctor.fullName,maskedCpf:maskCpf(doctor.cpfNormalized),
       registrationStatus:doctor.registrationStatus,provisioningStatus:doctor.provisioningStatus,
-      financialStatus:doctor.financialStatus,accessActive:doctor.accessActive,
+      financialStatus:doctor.financialStatus,
+      financialProviderStatus:doctor.financialProviderStatus,financialStatusCheckedAt:doctor.financialStatusCheckedAt,
+      accessActive:doctor.accessActive,
       licenses:doctor.licenses.map(l=>({crmNormalized:l.crmNormalized,state:l.state,verificationStatus:l.verificationStatus})),
       email:doctor.email,mobilePhone:doctor.mobilePhone,msgdeskAuthUserId:doctor.msgdeskAuthUserId,
       msgdeskOrganizationId:doctor.msgdeskOrganizationId,
