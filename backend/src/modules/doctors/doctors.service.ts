@@ -79,6 +79,7 @@ export class DoctorsService {
     const where:Prisma.DoctorWhereInput = {
       ...(organizationId?{msgdeskOrganizationId:organizationId}:{}),
       ...(query.registrationStatus?{registrationStatus:query.registrationStatus}:{}),
+      ...(query.enabled===undefined?{}:{enabled:query.enabled}),
       ...(search?{OR:[
         {fullName:{contains:search,mode:Prisma.QueryMode.insensitive}},
         ...(digits?[{licenses:{some:{crmNormalized:{contains:digits}}}}]:[]),
@@ -91,20 +92,25 @@ export class DoctorsService {
       this.db.doctor.count({where})
     ]);
     const organizationWhere:Prisma.DoctorWhereInput = organizationId?{msgdeskOrganizationId:organizationId}:{};
-    const [statuses,activeForCare,financiallyLinked,withoutOrganization]=await Promise.all([
+    const [statuses,activeForCare,financiallyLinked,withoutOrganization,enabledCount,disabledCount,accessPending]=await Promise.all([
       this.db.doctor.groupBy({by:['registrationStatus'],where:organizationWhere,_count:{_all:true}}),
-      this.db.doctor.count({where:{...organizationWhere,accessActive:true,registrationStatus:'VERIFIED',provisioningStatus:'LINKED'}}),
+      this.db.doctor.count({where:{...organizationWhere,enabled:true,accessActive:true,registrationStatus:'VERIFIED',provisioningStatus:'LINKED'}}),
       this.db.doctor.count({where:{...organizationWhere,financialLinks:{some:{active:true}}}}),
-      organizationId?Promise.resolve(0):this.db.doctor.count({where:{msgdeskOrganizationId:null}})
+      organizationId?Promise.resolve(0):this.db.doctor.count({where:{msgdeskOrganizationId:null}}),
+      this.db.doctor.count({where:{...organizationWhere,enabled:true}}),
+      this.db.doctor.count({where:{...organizationWhere,enabled:false}}),
+      this.db.doctor.count({where:{...organizationWhere,enabled:true,registrationStatus:'VERIFIED',
+        OR:[{msgdeskAuthUserId:null},{provisioningStatus:{not:'LINKED'}},{accessActive:false}]}}),
     ]);
     const counts=Object.fromEntries(statuses.map(s=>[s.registrationStatus,s._count._all])) as Record<string,number>;
     const summary={total:statuses.reduce((acc,s)=>acc+s._count._all,0),verified:counts.VERIFIED||0,
       awaitingReview:counts.PENDING_REVIEW||0,incomplete:counts.DRAFT||0,rejected:counts.REJECTED||0,
-      clinicalActive:activeForCare,withFinancialLink:financiallyLinked,withoutOrganization};
+      clinicalActive:activeForCare,withFinancialLink:financiallyLinked,withoutOrganization,
+      enabled:enabledCount,disabled:disabledCount,accessPending};
     return {summary,data:rows.map(d=>({
       id:d.id,fullName:d.fullName,maskedCpf:maskCpf(d.cpfNormalized),
       registrationStatus:d.registrationStatus,provisioningStatus:d.provisioningStatus,
-      accessActive:d.accessActive,organizationLinked:!!d.msgdeskOrganizationId,licenses:d.licenses,
+      accessActive:d.accessActive,enabled:d.enabled,organizationLinked:!!d.msgdeskOrganizationId,licenses:d.licenses,
       financialStatus:financialStatus(d.financialLinks),
       financialProviderStatus:d.financialLinks.length===1?d.financialLinks[0].subaccount.asaasGeneralStatus:null,
       financialStatusCheckedAt:d.financialLinks.length===1?d.financialLinks[0].subaccount.asaasStatusCheckedAt:null,
@@ -179,7 +185,7 @@ export class DoctorsService {
       registrationStatus:doctor.registrationStatus,provisioningStatus:doctor.provisioningStatus,
       financialStatus:doctor.financialStatus,
       financialProviderStatus:doctor.financialProviderStatus,financialStatusCheckedAt:doctor.financialStatusCheckedAt,
-      accessActive:doctor.accessActive,
+      accessActive:doctor.accessActive,enabled:doctor.enabled,
       licenses:doctor.licenses.map(l=>({crmNormalized:l.crmNormalized,state:l.state,verificationStatus:l.verificationStatus})),
       email:doctor.email,mobilePhone:doctor.mobilePhone,msgdeskAuthUserId:doctor.msgdeskAuthUserId,
       msgdeskOrganizationId:doctor.msgdeskOrganizationId,
@@ -265,7 +271,7 @@ export class DoctorsService {
       }
       const updated=await tx.doctor.updateMany({
         where:{id,registrationStatus:{in:['DRAFT','PENDING_REVIEW','VERIFIED']}},
-        data:{registrationStatus:'VERIFIED',verifiedAt:now},
+        data:{registrationStatus:'VERIFIED',verifiedAt:now,enabled:true},
       });
       if(updated.count!==1) throw new ConflictException('Cadastro alterado simultaneamente; recarregue');
     },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
@@ -362,7 +368,7 @@ export class DoctorsService {
     }
     try {
       await this.db.$transaction(async tx=>{
-        const doctor=await tx.doctor.findUnique({where:{id:doctorId},select:{accessActive:true}});
+        const doctor=await tx.doctor.findUnique({where:{id:doctorId},select:{id:true}});
         if(!doctor)throw new NotFoundException('Médico não encontrado');
         const link=await tx.doctorFinancialLink.findUnique({
           where:{id:linkId},include:{subaccount:true}
@@ -377,8 +383,8 @@ export class DoctorsService {
           where:{subaccountId:sub.id,active:true,id:{not:linkId}}
         });
         if(concurrent)throw new ConflictException('Conta financeira já vinculada a outro profissional');
-        if(dto.decision==='REJECTED'&&doctor.accessActive)
-          throw new ConflictException('Desative o acesso clínico nos dois sistemas antes de rejeitar uma carteira em operação');
+        // Financial-link review must not revoke or require revocation of
+        // independent patient-care authorization.
         await tx.doctorProvisioningOperation.create({data:{
           doctorId,kind:'FINANCIAL_REVIEW',idempotencyKey:key,requestHash,status:'PENDING',
           actorUserId:actorId,evidenceReference:dto.evidenceReference.trim(),
@@ -441,7 +447,7 @@ export class DoctorsService {
   async provisioning(id:string,organizationId?:string) {
     const d=await this.db.doctor.findUnique({where:{id},select:{
       msgdeskOrganizationId:true,
-      id:true,msgdeskAuthUserId:true,provisioningStatus:true,accessActive:true
+      id:true,msgdeskAuthUserId:true,provisioningStatus:true,accessActive:true,enabled:true
     }});
     if(!d || (organizationId && d.msgdeskOrganizationId !== organizationId)) throw new NotFoundException('Médico não encontrado');
     const {msgdeskOrganizationId:_organizationId,...safe}=d;
@@ -466,21 +472,11 @@ export class DoctorsService {
     if(!doctor || !organizationId || doctor.msgdeskOrganizationId!==organizationId)
       throw new NotFoundException('Médico não encontrado');
     if(doctor.msgdeskAuthUserId!==authUserId ||
-      doctor.registrationStatus!=='VERIFIED'||doctor.provisioningStatus!=='LINKED'||
+      !doctor.enabled||doctor.registrationStatus!=='VERIFIED'||doctor.provisioningStatus!=='LINKED'||
       !doctor.licenses.some(l=>l.verificationStatus==='VERIFIED'))
       throw new ConflictException('Médico não elegível para acesso clínico');
-    // Financial eligibility is separate from CRM review. Never activate clinical
-    // access when the wallet is absent, synthetic, disabled or awaiting review.
-    const activeFinance = await this.db.doctorFinancialLink.findFirst({
-      where:{
-        doctorId:id,active:true,status:'VERIFIED',
-        subaccount:{type:'DOCTOR',active:true,deletedAt:null,walletId:{not:null}},
-      },
-      include:{subaccount:{select:{asaasId:true}}},
-    });
-    if (!activeFinance || activeFinance.subaccount.asaasId.startsWith('external_')) {
-      throw new ConflictException('Conta Asaas médica validada é necessária para habilitação clínica');
-    }
+    // Access to patients depends on verified identity and Canfy enablement;
+    // the Asaas wallet affects only new financial operations.
     const requestHash=createHash('sha256').update(stableStringify({id,authUserId,organizationId})).digest('hex');
     const previous=await this.db.doctorProvisioningOperation.findUnique({where:{idempotencyKey:key}});
     if(previous) {
@@ -496,7 +492,7 @@ export class DoctorsService {
         }});
         const updated=await tx.doctor.updateMany({where:{
           id,msgdeskOrganizationId:organizationId,msgdeskAuthUserId:authUserId,
-          registrationStatus:'VERIFIED',provisioningStatus:'LINKED'
+          registrationStatus:'VERIFIED',provisioningStatus:'LINKED',enabled:true
         },data:{accessActive:true}});
         if(updated.count!==1)throw new ConflictException('Revalidação de acesso falhou');
         await tx.doctorProvisioningOperation.update({where:{id:op.id},data:{
@@ -510,7 +506,7 @@ export class DoctorsService {
   async confirmProvisioning(id:string, authUserId:string, rawKey:string, organizationId:string) {
     const key=idempotency(rawKey);
     const doctor=await this.db.doctor.findUnique({where:{id},select:{
-      id:true,msgdeskOrganizationId:true,msgdeskAuthUserId:true,registrationStatus:true
+      id:true,msgdeskOrganizationId:true,msgdeskAuthUserId:true,registrationStatus:true,enabled:true
     }});
     if(!doctor || !organizationId || doctor.msgdeskOrganizationId!==organizationId)
       throw new NotFoundException('Médico não encontrado');
@@ -537,13 +533,7 @@ export class DoctorsService {
       // Any inconsistent partial state requires operator reconciliation.
       throw new ConflictException('Vínculo Auth parcial; reconciliação necessária');
     }
-    const financeForLogin = await this.db.doctorFinancialLink.findFirst({
-      where:{doctorId:id,active:true,status:'VERIFIED',
-        subaccount:{type:'DOCTOR',active:true,deletedAt:null,walletId:{not:null}}},
-      include:{subaccount:{select:{asaasId:true}}},
-    });
-    if (!financeForLogin || financeForLogin.subaccount.asaasId.startsWith('external_'))
-      throw new ConflictException('Vínculo financeiro Asaas validado obrigatório antes da confirmação do login médico');
+    // No Asaas requirement to confirm a physician's Supabase login.
     try {
       await this.db.$transaction(async tx=>{
         const op=await tx.doctorProvisioningOperation.create({
@@ -551,7 +541,7 @@ export class DoctorsService {
         });
         const updated=await tx.doctor.updateMany({
           where:{id,msgdeskOrganizationId:organizationId,msgdeskAuthUserId:doctor.msgdeskAuthUserId},
-          data:{msgdeskAuthUserId:authUserId,provisioningStatus:'LINKED',accessActive:false}
+          data:{msgdeskAuthUserId:authUserId,provisioningStatus:'LINKED',accessActive:doctor.enabled}
         });
         if(updated.count!==1)throw new ConflictException('Cadastro alterado em paralelo; reconciliação necessária');
         await tx.doctorProvisioningOperation.update({where:{id:op.id},data:{status:'COMPLETED',resultDoctorId:id}});
@@ -562,6 +552,50 @@ export class DoctorsService {
       throw error;
     }
     return this.provisioning(id,organizationId);
+  }
+
+  /** Called by an organization-scoped integration AFTER local clinical revocation
+   * on disable. Idempotent; does not edit wallets or historical transactions. */
+  async setOperationalState(id:string,enabled:boolean,rawKey:string,organizationId:string,actorId:string){
+    const key=idempotency(rawKey);
+    const requestHash=createHash('sha256').update(stableStringify({id,enabled,organizationId})).digest('hex');
+    const previous=await this.db.doctorProvisioningOperation.findUnique({where:{idempotencyKey:key}});
+    if(previous){
+      if(previous.kind!=='DOCTOR_OPERATIONAL_STATE'||previous.requestHash!==requestHash||previous.doctorId!==id)
+        throw new ConflictException('Idempotency-Key reutilizada com outro comando');
+      if(previous.status!=='COMPLETED')throw new ConflictException('Transição requer reconciliação');
+      return this.detailForIntegration(id,organizationId);
+    }
+    try{
+      await this.db.$transaction(async tx=>{
+        const doctor=await tx.doctor.findUnique({where:{id},
+          include:{licenses:{select:{verificationStatus:true}}}});
+        if(!doctor||doctor.msgdeskOrganizationId!==organizationId)
+          throw new NotFoundException('Médico não encontrado');
+        if(enabled&&(doctor.registrationStatus!=='VERIFIED'||
+          !doctor.licenses.some(l=>l.verificationStatus==='VERIFIED')))
+          throw new ConflictException('Cadastro profissional não confirmado');
+        const clinical=enabled&&doctor.provisioningStatus==='LINKED'&&!!doctor.msgdeskAuthUserId;
+        await tx.doctorProvisioningOperation.create({data:{
+          doctorId:id,kind:'DOCTOR_OPERATIONAL_STATE',idempotencyKey:key,requestHash,
+          status:'PENDING',actorUserId:actorId,
+        }});
+        const changed=await tx.doctor.updateMany({
+          where:{id,msgdeskOrganizationId:organizationId,enabled:doctor.enabled},
+          data:{enabled,accessActive:clinical},
+        });
+        if(changed.count!==1)throw new ConflictException('Estado modificado simultaneamente');
+        await tx.doctorProvisioningOperation.update({
+          where:{idempotencyKey:key},data:{status:'COMPLETED',resultDoctorId:id},
+        });
+      },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+    }catch(error){
+      if(error instanceof Prisma.PrismaClientKnownRequestError &&
+         ['P2002','P2034'].includes(error.code))
+        throw new ConflictException('Transição concorrente; consulte o estado atual');
+      throw error;
+    }
+    return this.detailForIntegration(id,organizationId);
   }
 
 }

@@ -9,6 +9,7 @@ import {
   SubaccountType,
 } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import {DOCTOR_FINANCIAL_ELIGIBILITY} from '../doctors/doctor-financial-eligibility';
 import {
   ExchangeRateService,
   UsdBrlQuote,
@@ -37,12 +38,7 @@ const SUPPLIER_ELIGIBILITY: Prisma.SubaccountWhereInput = {
   fulfillmentType: { not: null },
 };
 
-const DOCTOR_ELIGIBILITY: Prisma.SubaccountWhereInput = {
-  type: SubaccountType.DOCTOR,
-  active: true,
-  deletedAt: null,
-  walletId: { not: null },
-};
+const DOCTOR_ELIGIBILITY: Prisma.SubaccountWhereInput = DOCTOR_FINANCIAL_ELIGIBILITY;
 
 const COMPLETED_PAYMENT_STATUSES = [
   PaymentStatus.CONFIRMED,

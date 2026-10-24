@@ -50,12 +50,15 @@ describe('audited physician financial ownership review',()=>{
   },key,'admin-1')).rejects.toThrow(ConflictException);
   expect(tx.doctorProvisioningOperation.create).not.toHaveBeenCalled();
  });
- it('refuses financial revocation while the doctor has active clinical access',async()=>{
-  tx.doctor.findUnique.mockResolvedValue({accessActive:true});
-  await expect(service.reviewFinancialLink('doctor-1','link-1',{
+ it('rejects a financial link without revoking an independently active clinical login',async()=>{
+  tx.doctor.findUnique.mockResolvedValue({id:'doctor-1',accessActive:true});
+  await service.reviewFinancialLink('doctor-1','link-1',{
    decision:'REJECTED',evidenceReference:'protocolo-interno-123',
-  },key,'admin-1')).rejects.toThrow(ConflictException);
-  expect(tx.doctorFinancialLink.updateMany).not.toHaveBeenCalled();
+  },key,'admin-1');
+  expect(tx.doctorFinancialLink.updateMany).toHaveBeenCalledWith(
+   expect.objectContaining({data:expect.objectContaining({status:'REJECTED'})}),
+  );
+  expect(tx.doctor.findUnique).toHaveBeenCalled();
  });
  it('reuses completed idempotent review without writing a second time',async()=>{
   db.doctorProvisioningOperation.findUnique.mockResolvedValue({

@@ -44,6 +44,8 @@ export class DoctorListDto {
   @IsOptional() @Type(()=>Number) @IsInt() @Min(1) @Max(100) limit?: number;
   @IsOptional() @IsString() @MaxLength(100) search?: string;
   @IsOptional() @IsEnum(DoctorRegistrationStatus) registrationStatus?: DoctorRegistrationStatus;
+  @IsOptional() @Transform(({value})=>value==="true"?true:value==="false"?false:value)
+  @IsIn([true,false]) enabled?:boolean;
 }
 
 export class DoctorFinancialLinkDto {
@@ -77,4 +79,8 @@ export class DoctorIdentityCandidatesDto {
   @Transform(digits) @IsString() @Matches(/^[0-9]{11}$/) cpfNormalized!:string;
   @IsOptional() @Transform(digits) @Matches(/^[0-9]{1,20}$/) crmNormalized?:string;
   @IsOptional() @Transform(upper) @IsIn(BRAZIL_UFS) state?:string;
+}
+
+export class SetDoctorOperationalStateDto {
+  @IsIn([true,false]) enabled!:boolean;
 }
