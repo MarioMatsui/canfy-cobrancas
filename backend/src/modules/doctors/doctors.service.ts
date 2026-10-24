@@ -87,7 +87,7 @@ export class DoctorsService {
     const [rows,total]=await Promise.all([
       this.db.doctor.findMany({where,skip:(page-1)*limit,take:limit,
         orderBy:{createdAt:'desc'},include:{licenses:{select:{crmNormalized:true,state:true,verificationStatus:true}},
-        financialLinks:{where:{active:true},select:{active:true,status:true,subaccountId:true,subaccount:{select:{active:true,deletedAt:true,walletId:true,asaasId:true}}}}}}}),
+        financialLinks:{where:{active:true},select:{active:true,status:true,subaccountId:true,subaccount:{select:{active:true,deletedAt:true,walletId:true,asaasId:true}}}}}}),
       this.db.doctor.count({where})
     ]);
     const organizationWhere:Prisma.DoctorWhereInput = organizationId?{msgdeskOrganizationId:organizationId}:{};
