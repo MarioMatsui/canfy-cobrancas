@@ -1,0 +1,29 @@
+name: Canfy medical detail verification
+on:
+  pull_request:
+    paths:
+      - 'backend/src/modules/doctors/doctors.service.ts'
+      - 'backend/src/modules/doctors/doctors.integration-detail.spec.ts'
+      - '.github/workflows/medical-detail.yml'
+  push:
+    branches:
+      - 'perf/medical-integration-detail-20261027'
+jobs:
+  integration-detail:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx jest --runInBand src/modules/doctors/doctors.integration-detail.spec.ts
+      - run: npm run build
