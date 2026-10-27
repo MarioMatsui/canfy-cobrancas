@@ -177,16 +177,31 @@ export class DoctorsService {
     };
   }
 
-  /** Only clinical-access administration fields cross the organization boundary. */
+  /** Narrow, tenant-scoped projection for MsgDesk. Do not fetch operations, full financial history, or raw identity documents. */
   async detailForIntegration(id:string,organizationId:string) {
-    const doctor=await this.detail(id,organizationId);
+    const doctor=await this.db.doctor.findFirst({
+      where:{id,msgdeskOrganizationId:organizationId},
+      select:{
+        id:true,fullName:true,cpfNormalized:true,registrationStatus:true,provisioningStatus:true,
+        enabled:true,accessActive:true,email:true,mobilePhone:true,
+        msgdeskAuthUserId:true,msgdeskOrganizationId:true,createdAt:true,updatedAt:true,
+        licenses:{select:{crmNormalized:true,state:true,verificationStatus:true}},
+        financialLinks:{where:{active:true},select:{active:true,status:true,subaccount:{
+          select:{active:true,deletedAt:true,walletId:true,asaasId:true,
+            asaasGeneralStatus:true,asaasStatusCheckedAt:true}
+        }}}
+      }
+    });
+    if(!doctor)throw new NotFoundException('Médico não encontrado');
+    const uniqueLink=doctor.financialLinks.length===1?doctor.financialLinks[0]:null;
     return {
       id:doctor.id,fullName:doctor.fullName,maskedCpf:maskCpf(doctor.cpfNormalized),
       registrationStatus:doctor.registrationStatus,provisioningStatus:doctor.provisioningStatus,
-      financialStatus:doctor.financialStatus,
-      financialProviderStatus:doctor.financialProviderStatus,financialStatusCheckedAt:doctor.financialStatusCheckedAt,
+      financialStatus:financialStatus(doctor.financialLinks),
+      financialProviderStatus:uniqueLink?.subaccount?.asaasGeneralStatus??null,
+      financialStatusCheckedAt:uniqueLink?.subaccount?.asaasStatusCheckedAt??null,
       accessActive:doctor.accessActive,enabled:doctor.enabled,
-      licenses:doctor.licenses.map(l=>({crmNormalized:l.crmNormalized,state:l.state,verificationStatus:l.verificationStatus})),
+      licenses:doctor.licenses,
       email:doctor.email,mobilePhone:doctor.mobilePhone,msgdeskAuthUserId:doctor.msgdeskAuthUserId,
       msgdeskOrganizationId:doctor.msgdeskOrganizationId,
       createdAt:doctor.createdAt,updatedAt:doctor.updatedAt,
