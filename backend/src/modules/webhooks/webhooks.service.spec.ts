@@ -1,7 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bull';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { WebhooksService } from './webhooks.service';
+import { ENQUEUE_TIMEOUT_MS, WebhooksService } from './webhooks.service';
 
 describe('WebhooksService', () => {
   const webhookToken = 'x'.repeat(40);
@@ -100,5 +100,70 @@ describe('WebhooksService', () => {
     ).resolves.toEqual({ received: true, duplicate: true });
 
     expect(queue.add).not.toHaveBeenCalled();
+  });
+
+  describe('quando o Redis não responde', () => {
+    afterEach(() => jest.useRealTimers());
+
+    const payload = {
+      id: 'evt_redis',
+      event: 'PAYMENT_OVERDUE',
+      payment: {
+        id: 'pay_1',
+        status: 'OVERDUE',
+        value: 99,
+        customer: 'cus_1',
+        billingType: 'PIX',
+      },
+    };
+
+    it('responde 200 dentro do tempo limite se queue.add nunca resolve', async () => {
+      jest.useFakeTimers();
+      const { service, prisma, queue } = makeService();
+      prisma.webhookLog.create.mockResolvedValueOnce({ id: 'log_redis' });
+      queue.add.mockReturnValueOnce(new Promise(() => undefined));
+
+      const response = service.handleWebhook(payload, webhookToken);
+      await jest.advanceTimersByTimeAsync(ENQUEUE_TIMEOUT_MS);
+
+      await expect(response).resolves.toEqual({ received: true });
+      expect(prisma.webhookLog.create).toHaveBeenCalled();
+    });
+
+    it('responde 200 se queue.add rejeita', async () => {
+      const { service, prisma, queue } = makeService();
+      prisma.webhookLog.create.mockResolvedValueOnce({ id: 'log_redis' });
+      queue.add.mockRejectedValueOnce(new Error('connect ECONNREFUSED'));
+
+      await expect(
+        service.handleWebhook(payload, webhookToken),
+      ).resolves.toEqual({ received: true });
+    });
+
+    it('responde 200 para o reenvio de um evento ainda pendente com Redis fora', async () => {
+      jest.useFakeTimers();
+      const { service, prisma, queue } = makeService();
+      prisma.webhookLog.create.mockRejectedValueOnce({ code: 'P2002' });
+      prisma.webhookLog.findUnique.mockResolvedValueOnce({
+        id: 'log_redis',
+        status: 'RECEIVED',
+      });
+      queue.add.mockReturnValueOnce(new Promise(() => undefined));
+
+      const response = service.handleWebhook(payload, webhookToken);
+      await jest.advanceTimersByTimeAsync(ENQUEUE_TIMEOUT_MS);
+
+      await expect(response).resolves.toEqual({
+        received: true,
+        duplicate: true,
+      });
+    });
+
+    it('continua recusando token inválido', async () => {
+      const { service } = makeService();
+      await expect(
+        service.handleWebhook(payload, 'token-errado'),
+      ).rejects.toThrow('Token de webhook inválido');
+    });
   });
 });

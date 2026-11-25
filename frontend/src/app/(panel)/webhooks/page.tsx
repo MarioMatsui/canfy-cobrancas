@@ -15,6 +15,8 @@ const statusColors: Record<string, string> = {
   RECEIVED: 'bg-yellow-100 text-yellow-800',
   PROCESSED: 'bg-green-100 text-green-800',
   FAILED: 'bg-red-100 text-red-800',
+  PROCESSING: 'bg-blue-100 text-blue-800',
+  DEAD_LETTER: 'bg-red-200 text-red-900',
 };
 
 export default function WebhooksPage() {

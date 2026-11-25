@@ -24,6 +24,10 @@ type AsaasWebhook = {
   id: string;
   name?: string;
   url?: string;
+  enabled?: boolean;
+  interrupted?: boolean;
+  sendType?: string;
+  events?: string[];
 };
 
 type AsaasWebhookList = {
@@ -53,19 +57,21 @@ export class WebhookRegistrationService implements OnApplicationBootstrap {
 
     // Não bloqueia o boot da API por uma chamada externa. A configuração é
     // idempotente e pode ser refeita no próximo restart se o Asaas estiver fora.
+    // No boot o PUT é sempre enviado (force) para propagar uma troca de
+    // WEBHOOK_SECRET, que o Asaas não devolve na listagem para comparação.
     const timer = setTimeout(() => {
-      void this.reconcileConfiguration();
+      void this.reconcileConfiguration(true);
     }, 1_500);
 
     timer.unref();
   }
 
   @Cron(CronExpression.EVERY_HOUR)
-  async reconcileConfiguration(): Promise<void> {
+  async reconcileConfiguration(force = false): Promise<void> {
     if (!this.autoConfigureEnabled()) return;
 
     try {
-      await this.ensureConfigured();
+      await this.ensureConfigured({ force: force === true });
     } catch {
       this.logger.error(
         'Não foi possível garantir a configuração do webhook no Asaas. ' +
@@ -74,7 +80,9 @@ export class WebhookRegistrationService implements OnApplicationBootstrap {
     }
   }
 
-  async ensureConfigured(): Promise<'skipped' | 'created' | 'updated'> {
+  async ensureConfigured(
+    options: { force?: boolean } = { force: true },
+  ): Promise<'skipped' | 'created' | 'updated' | 'unchanged'> {
     if (!this.autoConfigureEnabled()) {
       return 'skipped';
     }
@@ -107,6 +115,20 @@ export class WebhookRegistrationService implements OnApplicationBootstrap {
     };
 
     if (existing?.id) {
+      if (!options.force && this.matchesDesired(existing, desired.url)) {
+        return 'unchanged';
+      }
+
+      if (existing.interrupted === true) {
+        // A fila foi pausada pelo Asaas por falhas de entrega. Reativá-la faz o
+        // Asaas reenviar o evento da frente da fila; se o endpoint continuar
+        // falhando, ela será pausada de novo. Fica registrado para diagnóstico.
+        this.logger.warn(
+          'A fila do webhook de pagamentos estava pausada (interrupted) no Asaas; reativando. ' +
+            'Se voltar a pausar, verifique os Logs de Webhooks no painel do Asaas.',
+        );
+      }
+
       await this.asaas.put(
         '/webhooks/' + encodeURIComponent(existing.id),
         updatePayload,
@@ -131,6 +153,22 @@ export class WebhookRegistrationService implements OnApplicationBootstrap {
 
     this.logger.log('Webhook de pagamentos do Asaas criado com sucesso.');
     return 'created';
+  }
+
+  private matchesDesired(existing: AsaasWebhook, desiredUrl: string): boolean {
+    if (typeof existing.url !== 'string') return false;
+    if (this.normalizeUrl(existing.url) !== desiredUrl) return false;
+    if (existing.name !== WEBHOOK_NAME) return false;
+    if (existing.enabled !== true) return false;
+    if (existing.interrupted !== false) return false;
+    if (existing.sendType !== 'SEQUENTIALLY') return false;
+    if (!Array.isArray(existing.events)) return false;
+
+    const current = new Set(existing.events);
+    return (
+      current.size === PAYMENT_EVENTS.length &&
+      PAYMENT_EVENTS.every((event) => current.has(event))
+    );
   }
 
   private autoConfigureEnabled(): boolean {
@@ -196,7 +234,13 @@ export class WebhookRegistrationService implements OnApplicationBootstrap {
   private validatePublicUrl(value: string): string | null {
     try {
       const url = new URL(value);
-      if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+      if (url.protocol !== 'https:') {
+        // O Asaas não segue redirecionamentos: uma URL http:// atrás de um
+        // nginx que redireciona para https recebe 301 em toda entrega e a
+        // fila é penalizada. Só aceitamos https.
+        this.logger.warn(
+          'URL do webhook Asaas ignorada: use https:// em ASAAS_WEBHOOK_URL/FRONTEND_URL.',
+        );
         return null;
       }
 

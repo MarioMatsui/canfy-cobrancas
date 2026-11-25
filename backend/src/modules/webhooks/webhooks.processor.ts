@@ -23,6 +23,34 @@ type AsaasSplitDetail = {
   status?: string;
 };
 
+export const WEBHOOK_LOG_STATUS = {
+  RECEIVED: 'RECEIVED',
+  PROCESSING: 'PROCESSING',
+  PROCESSED: 'PROCESSED',
+  FAILED: 'FAILED',
+  /** Falhou MAX_PROCESSING_ATTEMPTS vezes; não é mais reprocessado sozinho. */
+  DEAD_LETTER: 'DEAD_LETTER',
+} as const;
+
+export const MAX_PROCESSING_ATTEMPTS = 10;
+
+/** Reivindicação PROCESSING mais antiga que isso é considerada órfã. */
+export const STALE_CLAIM_MS = 10 * 60_000;
+
+const FAILED_PREFIX = 'PROCESSING_FAILED';
+
+/** Lê o número de tentativas falhas gravado em errorMessage. */
+export function parseFailedAttempts(errorMessage: string | null | undefined): number {
+  if (!errorMessage || !errorMessage.startsWith(FAILED_PREFIX)) return 0;
+  const match = /#(\d+)$/.exec(errorMessage);
+  // Logs antigos gravavam apenas "PROCESSING_FAILED" (uma falha).
+  return match ? Number(match[1]) : 1;
+}
+
+export function formatFailedAttempts(attempts: number): string {
+  return FAILED_PREFIX + '#' + attempts;
+}
+
 type AsaasPaymentDetail = {
   netValue?: number;
   paymentLink?: string | null;
@@ -40,93 +68,168 @@ export class WebhooksProcessor {
 
   @Process('process')
   async handleWebhookEvent(job: Job<QueuedAsaasWebhookPayload>) {
-    const { event, payment, webhookLogId } = job.data;
+    await this.processEvent(job.data);
+  }
+
+  /**
+   * Processa um evento já persistido em webhook_logs. É chamado tanto pelo
+   * worker do Bull quanto pela recuperação periódica (WebhookRecoveryService),
+   * que não depende do Redis. A linha do log é reivindicada de forma atômica
+   * para que os dois caminhos nunca processem o mesmo evento ao mesmo tempo.
+   *
+   * Retorna 'skipped' quando o evento já foi processado ou está em
+   * processamento por outro executor.
+   */
+  async processEvent(
+    data: QueuedAsaasWebhookPayload,
+  ): Promise<'processed' | 'skipped'> {
+    const { event, webhookLogId } = data;
+
+    const claimed = await this.claimLog(webhookLogId);
+    if (!claimed) {
+      this.logger.log('Webhook já processado ou em processamento: ' + event);
+      return 'skipped';
+    }
 
     this.logger.log('Processando webhook: ' + event);
 
     try {
-      // Events may refer to any member of the group, not only the first ID.
-      // Never mark an installment sale paid from one PAYMENT_CONFIRMED.
-      if (payment && [
-        'PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED', 'PAYMENT_OVERDUE',
-        'PAYMENT_REFUNDED', 'PAYMENT_DELETED', 'PAYMENT_RESTORED',
-        'PAYMENT_CREDIT_CARD_CAPTURE_REFUSED', 'PAYMENT_REPROVED_BY_RISK_ANALYSIS',
-        'PAYMENT_SPLIT_DONE',
-      ].includes(event)) {
-        const grouped = await this.prisma.payment.findFirst({
-          where: {
-            provider: 'ASAAS',
-            OR: [
-              { providerPaymentId: payment.id },
-              ...(payment.installment ? [{ providerInstallmentId: payment.installment }] : []),
-              { installmentPayments: { some: { providerPaymentId: payment.id } } },
-            ],
-            providerInstallmentId: { not: null },
-          },
-          select: { id: true, chargeId: true, providerInstallmentId: true },
-        });
-        if (grouped?.providerInstallmentId) {
-          await this.attachLogToPayment(webhookLogId, grouped.id);
-          const result = await reconcileInstallmentGroup(this.prisma, this.asaas, grouped.id);
-          if (result === 'PAID') {
-            await this.cancelAlternativePayments(grouped.chargeId, grouped.id);
-          }
-          await this.prisma.webhookLog.update({
-            where: { id: webhookLogId },
-            data: { status: 'PROCESSED', processedAt: new Date(), errorMessage: null },
-          });
-          return;
-        }
-      }
-
-      switch (event) {
-        case 'PAYMENT_CONFIRMED':
-        case 'PAYMENT_RECEIVED':
-          await this.handlePaymentConfirmed(event, payment, webhookLogId);
-          break;
-        case 'PAYMENT_OVERDUE':
-          await this.handlePaymentOverdue(payment, webhookLogId);
-          break;
-        case 'PAYMENT_REFUNDED':
-          await this.handlePaymentRefunded(payment, webhookLogId);
-          break;
-        case 'PAYMENT_CHARGEBACK_REQUESTED':
-        case 'PAYMENT_CHARGEBACK_DISPUTE':
-        case 'PAYMENT_AWAITING_CHARGEBACK_REVERSAL':
-          await this.handleChargebackProgress(payment, webhookLogId);
-          break;
-        case 'PAYMENT_DELETED':
-          await this.handlePaymentTerminal(payment, webhookLogId, PaymentStatus.CANCELLED);
-          break;
-        case 'PAYMENT_CREDIT_CARD_CAPTURE_REFUSED':
-        case 'PAYMENT_REPROVED_BY_RISK_ANALYSIS':
-          await this.handlePaymentTerminal(payment, webhookLogId, PaymentStatus.FAILED);
-          break;
-        case 'PAYMENT_RESTORED':
-          await this.handlePaymentRestored(payment, webhookLogId);
-          break;
-        default:
-          this.logger.warn('Evento não tratado: ' + event);
-      }
+      await this.dispatch(data);
 
       await this.prisma.webhookLog.update({
         where: { id: webhookLogId },
         data: {
-          status: 'PROCESSED',
+          status: WEBHOOK_LOG_STATUS.PROCESSED,
           processedAt: new Date(),
           errorMessage: null,
         },
       });
+      return 'processed';
     } catch (error) {
-      this.logger.error('Erro ao processar webhook ' + event);
+      const attempts = parseFailedAttempts(claimed.errorMessage) + 1;
+      this.logger.error(
+        'Erro ao processar webhook ' + event + ' (tentativa ' + attempts + ')',
+      );
+      const exhausted = attempts >= MAX_PROCESSING_ATTEMPTS;
+      if (exhausted) {
+        this.logger.error(
+          'Webhook ' + event + ' falhou ' + attempts +
+            ' vezes; marcado como DEAD_LETTER para revisão manual.',
+        );
+      }
       await this.prisma.webhookLog.update({
         where: { id: webhookLogId },
         data: {
-          status: 'FAILED',
-          errorMessage: 'PROCESSING_FAILED',
+          status: exhausted
+            ? WEBHOOK_LOG_STATUS.DEAD_LETTER
+            : WEBHOOK_LOG_STATUS.FAILED,
+          processedAt: null,
+          errorMessage: formatFailedAttempts(attempts),
         },
       });
       throw error;
+    }
+  }
+
+  /**
+   * Marca a linha como PROCESSING apenas se ela ainda estiver pendente
+   * (RECEIVED/FAILED) ou se uma reivindicação anterior ficou órfã (processo
+   * morreu no meio). Enquanto PROCESSING, processedAt guarda o instante da
+   * reivindicação; ao concluir, passa a ser o instante do processamento.
+   */
+  private async claimLog(
+    webhookLogId: string,
+  ): Promise<{ errorMessage: string | null } | null> {
+    const current = await this.prisma.webhookLog.findUnique({
+      where: { id: webhookLogId },
+      select: { errorMessage: true },
+    });
+    if (!current) return null;
+
+    const now = new Date();
+    const result = await this.prisma.webhookLog.updateMany({
+      where: {
+        id: webhookLogId,
+        OR: [
+          {
+            status: {
+              in: [WEBHOOK_LOG_STATUS.RECEIVED, WEBHOOK_LOG_STATUS.FAILED],
+            },
+          },
+          {
+            status: WEBHOOK_LOG_STATUS.PROCESSING,
+            processedAt: { lt: new Date(now.getTime() - STALE_CLAIM_MS) },
+          },
+          { status: WEBHOOK_LOG_STATUS.PROCESSING, processedAt: null },
+        ],
+      },
+      data: { status: WEBHOOK_LOG_STATUS.PROCESSING, processedAt: now },
+    });
+
+    return result.count === 1 ? current : null;
+  }
+
+  private async dispatch(data: QueuedAsaasWebhookPayload): Promise<void> {
+    const { event, payment, webhookLogId } = data;
+
+    // Events may refer to any member of the group, not only the first ID.
+    // Never mark an installment sale paid from one PAYMENT_CONFIRMED.
+    if (payment && [
+      'PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED', 'PAYMENT_OVERDUE',
+      'PAYMENT_REFUNDED', 'PAYMENT_DELETED', 'PAYMENT_RESTORED',
+      'PAYMENT_CREDIT_CARD_CAPTURE_REFUSED', 'PAYMENT_REPROVED_BY_RISK_ANALYSIS',
+      'PAYMENT_SPLIT_DONE',
+    ].includes(event)) {
+      const grouped = await this.prisma.payment.findFirst({
+        where: {
+          provider: 'ASAAS',
+          OR: [
+            { providerPaymentId: payment.id },
+            ...(payment.installment ? [{ providerInstallmentId: payment.installment }] : []),
+            { installmentPayments: { some: { providerPaymentId: payment.id } } },
+          ],
+          providerInstallmentId: { not: null },
+        },
+        select: { id: true, chargeId: true, providerInstallmentId: true },
+      });
+      if (grouped?.providerInstallmentId) {
+        await this.attachLogToPayment(webhookLogId, grouped.id);
+        const result = await reconcileInstallmentGroup(this.prisma, this.asaas, grouped.id);
+        if (result === 'PAID') {
+          await this.cancelAlternativePayments(grouped.chargeId, grouped.id);
+        }
+        return;
+      }
+    }
+
+    switch (event) {
+      case 'PAYMENT_CONFIRMED':
+      case 'PAYMENT_RECEIVED':
+        await this.handlePaymentConfirmed(event, payment, webhookLogId);
+        break;
+      case 'PAYMENT_OVERDUE':
+        await this.handlePaymentOverdue(payment, webhookLogId);
+        break;
+      case 'PAYMENT_REFUNDED':
+        await this.handlePaymentRefunded(payment, webhookLogId);
+        break;
+      case 'PAYMENT_CHARGEBACK_REQUESTED':
+      case 'PAYMENT_CHARGEBACK_DISPUTE':
+      case 'PAYMENT_AWAITING_CHARGEBACK_REVERSAL':
+        await this.handleChargebackProgress(payment, webhookLogId);
+        break;
+      case 'PAYMENT_DELETED':
+        await this.handlePaymentTerminal(payment, webhookLogId, PaymentStatus.CANCELLED);
+        break;
+      case 'PAYMENT_CREDIT_CARD_CAPTURE_REFUSED':
+      case 'PAYMENT_REPROVED_BY_RISK_ANALYSIS':
+        await this.handlePaymentTerminal(payment, webhookLogId, PaymentStatus.FAILED);
+        break;
+      case 'PAYMENT_RESTORED':
+        await this.handlePaymentRestored(payment, webhookLogId);
+        break;
+      default:
+        this.logger.warn('Evento não tratado: ' + event);
     }
   }
 

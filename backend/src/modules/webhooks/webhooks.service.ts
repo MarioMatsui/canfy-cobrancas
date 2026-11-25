@@ -5,6 +5,9 @@ import { Queue } from 'bull';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import * as crypto from 'crypto';
 
+/** Tempo máximo para o Redis aceitar o job antes de responder ao Asaas. */
+export const ENQUEUE_TIMEOUT_MS = 3_000;
+
 export interface AsaasWebhookPayload {
   id?: string;
   event: string;
@@ -100,9 +103,14 @@ export class WebhooksService {
       throw error;
     }
 
-    await this.enqueueWebhook(payload, log.id);
+    const queued = await this.enqueueWebhook(payload, log.id);
 
-    this.logger.log('Webhook recebido e enfileirado: ' + payload.event);
+    this.logger.log(
+      queued
+        ? 'Webhook recebido e enfileirado: ' + payload.event
+        : 'Webhook recebido e persistido; será processado pela recuperação periódica: ' +
+            payload.event,
+    );
     return { received: true };
   }
 
@@ -119,16 +127,36 @@ export class WebhooksService {
     return { data, total, page, limit };
   }
 
+  /**
+   * Tenta colocar o evento na fila do Bull (Redis) sem nunca travar nem
+   * derrubar a resposta ao Asaas.
+   *
+   * A fila de webhooks do Asaas é sequencial: se este endpoint demora (408)
+   * ou falha (500), o mesmo evento é reenviado indefinidamente e todos os
+   * eventos seguintes ficam bloqueados até a fila ser pausada. Como o evento
+   * já está gravado em webhook_logs antes daqui, é seguro responder 200 mesmo
+   * se o Redis estiver indisponível: WebhookRecoveryService processa direto do
+   * banco os logs que ficarem pendentes.
+   */
   private async enqueueWebhook(
     payload: AsaasWebhookPayload,
     webhookLogId: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const queuedPayload: QueuedAsaasWebhookPayload = {
       ...payload,
       webhookLogId,
     };
 
-    await this.webhooksQueue.add('process', queuedPayload, {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error('WEBHOOK_ENQUEUE_TIMEOUT')),
+        ENQUEUE_TIMEOUT_MS,
+      );
+      timer.unref?.();
+    });
+
+    const add = this.webhooksQueue.add('process', queuedPayload, {
       jobId: payload.id
         ? 'asaas:' + payload.id
         : 'asaas-log:' + webhookLogId,
@@ -137,5 +165,28 @@ export class WebhooksService {
       removeOnComplete: true,
       removeOnFail: true,
     });
+    // Se o timeout vencer, a promessa original pode rejeitar depois; evita
+    // "unhandled rejection" sem esconder o erro (já logado abaixo).
+    add.catch(() => undefined);
+
+    try {
+      await Promise.race([add, timeout]);
+      return true;
+    } catch (error) {
+      const reason =
+        error instanceof Error && error.message === 'WEBHOOK_ENQUEUE_TIMEOUT'
+          ? 'timeout de ' + ENQUEUE_TIMEOUT_MS + 'ms'
+          : error instanceof Error
+            ? error.name + ': ' + error.message.slice(0, 200)
+            : 'erro desconhecido';
+      this.logger.error(
+        'Não foi possível enfileirar o webhook no Redis (' +
+          reason +
+          '). Evento mantido em webhook_logs para recuperação.',
+      );
+      return false;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 }

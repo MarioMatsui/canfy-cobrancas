@@ -5,6 +5,12 @@ export class AsaasApiException extends HttpException {
   constructor(
     readonly providerStatus: number | undefined,
     readonly errorCodes: string[] = [],
+    /**
+     * Textos de `errors[].description` devolvidos pelo Asaas. Servem só para
+     * diagnóstico interno (logs e failure_reason); nunca são expostos ao
+     * cliente final no corpo HTTP.
+     */
+    readonly errorDescriptions: string[] = [],
   ) {
     super(
       {
@@ -93,17 +99,51 @@ export class AsaasService {
     return [...new Set(codes)].slice(0, 5);
   }
 
+  private extractErrorDescriptions(error: unknown): string[] {
+    if (!error || typeof error !== 'object') return [];
+
+    const errors = (error as { errors?: unknown }).errors;
+    if (!Array.isArray(errors)) return [];
+
+    const descriptions = errors
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return null;
+        const description = (entry as { description?: unknown }).description;
+        if (typeof description !== 'string') return null;
+
+        // O Asaas pode ecoar dados do cliente na descrição (CPF, e-mail,
+        // telefone). Mascaramos e-mails e sequências numéricas longas, removemos
+        // caracteres de controle e limitamos o tamanho: é só para diagnóstico.
+        const sanitized = description
+          .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+          .replace(/[^\s@]+@[^\s@]+/g, '[email]')
+          .replace(/\d[\d.\-/() ]{3,}\d/g, '[numero]')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 200);
+
+        return sanitized || null;
+      })
+      .filter((description): description is string => Boolean(description));
+
+    return [...new Set(descriptions)].slice(0, 3);
+  }
+
   private providerError(
     providerStatus: number,
     error: unknown,
   ): AsaasApiException {
     const codes = this.extractErrorCodes(error);
+    // A descrição não vai para o log do processo (pode conter dados do
+    // cliente); ela segue mascarada na exceção para quem chamou decidir onde
+    // registrá-la (ex.: payments.failure_reason).
+    const descriptions = this.extractErrorDescriptions(error);
     this.logger.error(
       'Asaas API error: HTTP ' +
         providerStatus +
         (codes.length > 0 ? ' codes=' + codes.join(',') : ''),
     );
-    return new AsaasApiException(providerStatus, codes);
+    return new AsaasApiException(providerStatus, codes, descriptions);
   }
 
   private async fetchWithTimeout(

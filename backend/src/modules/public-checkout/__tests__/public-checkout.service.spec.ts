@@ -659,6 +659,29 @@ describe('PublicCheckoutService', () => {
     );
   });
 
+  it('grava a descricao do Asaas no failure_reason quando a criacao e recusada', async () => {
+    mockStartCharge(startCharge({ orderStatus: 'READY', payments: [] }));
+    asaas.post.mockRejectedValue(
+      new AsaasApiException(400, ['invalid_action'], [
+        'Motivo devolvido pelo Asaas',
+      ]),
+    );
+
+    await expect(
+      service.startPayment(token, { method: 'PIX' }),
+    ).rejects.toThrow(ServiceUnavailableException);
+
+    expect(tx.payment.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'FAILED',
+          failureReason:
+            'ASAAS_HTTP_400_INVALID_ACTION: Motivo devolvido pelo Asaas',
+        }),
+      }),
+    );
+  });
+
   it('reutiliza o Pix original mesmo quando tambem existe Cartao pendente', async () => {
     const card = {
       id: 'payment-card',

@@ -398,9 +398,11 @@ export class PublicCheckoutService {
             }
 
             const failureReason = this.providerFailureReason(error);
+            // Só o código vai para o log do processo; a descrição (mascarada)
+            // fica em payments.failure_reason para diagnóstico.
             this.logger.warn(
               'Falha do provedor ao iniciar uma tentativa de pagamento: ' +
-                failureReason,
+                failureReason.split(':')[0],
             );
             await tx.payment.update({
               where: { id: paymentId },
@@ -1310,10 +1312,16 @@ export class PublicCheckoutService {
       )
       .filter(Boolean);
 
+    // O código continua no início (mesmo formato de antes, usado em filtros);
+    // a descrição do Asaas vem depois de ": " para que o motivo real da
+    // recusa fique registrado em payments.failure_reason.
+    const descriptions = error.errorDescriptions.join(' | ');
+
     return (
       'ASAAS_' +
       status +
-      (codes.length > 0 ? '_' + codes.join('_') : '')
+      (codes.length > 0 ? '_' + codes.join('_') : '') +
+      (descriptions ? ': ' + descriptions : '')
     ).slice(0, 255);
   }
 

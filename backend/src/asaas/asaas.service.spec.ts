@@ -85,9 +85,43 @@ describe('AsaasService', () => {
       'Asaas API error: HTTP 400 codes=invalid_callback',
     );
 
+    expect((thrown as AsaasApiException).errorDescriptions).toEqual([
+      'A URL informada nao pertence ao dominio cadastrado',
+    ]);
+
     const logged = errorSpy.mock.calls.flat().join(' ');
     expect(logged).not.toContain('A URL informada');
     expect(logged).not.toContain('primary-secret-key');
+  });
+
+  it('mascara CPF, telefone e e-mail na descricao do erro do Asaas', async () => {
+    fetchSpy.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          errors: [
+            {
+              code: 'invalid_action',
+              description:
+                'Cliente 123.456.789-01 (fulano@exemplo.com, (11) 98765-4321)\nnao pode receber cobrancas.',
+            },
+          ],
+        }),
+      ),
+    } as unknown as Response);
+
+    const service = createService();
+    const thrown = await service
+      .post('/payments', { billingType: 'PIX' })
+      .catch((error: unknown) => error);
+
+    expect(thrown).toBeInstanceOf(AsaasApiException);
+    const [description] = (thrown as AsaasApiException).errorDescriptions;
+    expect(description).toContain('nao pode receber cobrancas.');
+    expect(description).not.toMatch(/123|789|98765|4321/);
+    expect(description).not.toContain('fulano@exemplo.com');
+    expect(description).not.toContain('\n');
   });
 
   it('nao registra chave customizada nem identificador da URL', async () => {

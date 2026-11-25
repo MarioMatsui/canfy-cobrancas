@@ -4,6 +4,7 @@ import { WebhooksService } from './webhooks.service';
 import { WebhooksController } from './webhooks.controller';
 import { WebhooksProcessor } from './webhooks.processor';
 import { WebhookRegistrationService } from './webhook-registration.service';
+import { WebhookRecoveryService } from './webhook-recovery.service';
 import { AsaasModule } from '../../asaas/asaas.module';
 
 @Module({
@@ -18,6 +19,7 @@ import { AsaasModule } from '../../asaas/asaas.module';
     WebhooksService,
     WebhooksProcessor,
     WebhookRegistrationService,
+    WebhookRecoveryService,
   ],
 })
 export class WebhooksModule {}

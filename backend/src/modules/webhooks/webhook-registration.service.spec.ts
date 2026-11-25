@@ -105,4 +105,73 @@ describe('WebhookRegistrationService', () => {
     expect(asaas.post).not.toHaveBeenCalled();
     expect(asaas.put).not.toHaveBeenCalled();
   });
+
+  const desiredExisting = {
+    id: 'wh_existing',
+    name: 'CanFy - pagamentos',
+    url: 'https://cobranca.canfy.com.br/api/webhooks/asaas',
+    enabled: true,
+    interrupted: false,
+    sendType: 'SEQUENTIALLY',
+    events: [
+      'PAYMENT_CONFIRMED',
+      'PAYMENT_RECEIVED',
+      'PAYMENT_OVERDUE',
+      'PAYMENT_REFUNDED',
+      'PAYMENT_CHARGEBACK_REQUESTED',
+      'PAYMENT_CHARGEBACK_DISPUTE',
+      'PAYMENT_AWAITING_CHARGEBACK_REVERSAL',
+      'PAYMENT_DELETED',
+      'PAYMENT_CREDIT_CARD_CAPTURE_REFUSED',
+      'PAYMENT_REPROVED_BY_RISK_ANALYSIS',
+      'PAYMENT_RESTORED',
+      'PAYMENT_SPLIT_DONE',
+    ],
+  };
+
+  it('nao reescreve o webhook no cron horario quando nada mudou', async () => {
+    const { service, asaas } = makeService(baseConfig);
+    asaas.get.mockResolvedValueOnce({ data: [desiredExisting] });
+
+    await expect(service.ensureConfigured({ force: false })).resolves.toBe('unchanged');
+
+    expect(asaas.put).not.toHaveBeenCalled();
+    expect(asaas.post).not.toHaveBeenCalled();
+  });
+
+  it('reativa no cron horario uma fila pausada pelo Asaas', async () => {
+    const { service, asaas } = makeService(baseConfig);
+    asaas.get.mockResolvedValueOnce({
+      data: [{ ...desiredExisting, interrupted: true }],
+    });
+    asaas.put.mockResolvedValueOnce({ id: 'wh_existing' });
+
+    await expect(service.ensureConfigured({ force: false })).resolves.toBe('updated');
+
+    expect(asaas.put).toHaveBeenCalledWith(
+      '/webhooks/wh_existing',
+      expect.objectContaining({ interrupted: false, enabled: true }),
+    );
+  });
+
+  it('o cron horario nao repassa argumentos e nao forca o PUT', async () => {
+    const { service, asaas } = makeService(baseConfig);
+    asaas.get.mockResolvedValueOnce({ data: [desiredExisting] });
+
+    await service.reconcileConfiguration();
+
+    expect(asaas.put).not.toHaveBeenCalled();
+  });
+
+  it('recusa URL http:// (o Asaas nao segue o redirect 301 para https)', async () => {
+    const { service, asaas } = makeService({
+      ...baseConfig,
+      ASAAS_WEBHOOK_URL: 'http://cobranca.canfy.com.br/api/webhooks/asaas',
+    });
+
+    await expect(service.ensureConfigured()).resolves.toBe('skipped');
+
+    expect(asaas.get).not.toHaveBeenCalled();
+    expect(asaas.put).not.toHaveBeenCalled();
+  });
 });

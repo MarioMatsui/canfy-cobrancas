@@ -50,6 +50,8 @@ describe('WebhooksProcessor', () => {
       },
       webhookLog: {
         update: jest.fn().mockResolvedValue({}),
+        findUnique: jest.fn().mockResolvedValue({ errorMessage: null }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       $transaction: jest.fn(async (operations: Promise<unknown>[]) => Promise.all(operations)),
     };
@@ -379,6 +381,65 @@ describe('WebhooksProcessor', () => {
     expect(prisma.charge.update).toHaveBeenCalledWith({
       where: { id: 'charge-1' },
       data: { orderStatus: 'REFUNDED', status: 'REFUNDED' },
+    });
+  });
+
+  describe('reivindicacao do webhook_log', () => {
+    const overdueJob = {
+      data: {
+        id: 'evt_overdue',
+        webhookLogId: 'log-claim',
+        event: 'PAYMENT_OVERDUE',
+        payment: {
+          id: 'pay_provider',
+          status: 'OVERDUE',
+          value: 110,
+          customer: 'cus_1',
+          billingType: 'PIX',
+        },
+      },
+    } as any;
+
+    it('nao processa um evento ja reivindicado/processado por outro executor', async () => {
+      prisma.webhookLog.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await expect(processor.processEvent(overdueJob.data)).resolves.toBe('skipped');
+
+      expect(prisma.payment.update).not.toHaveBeenCalled();
+      expect(prisma.webhookLog.update).not.toHaveBeenCalled();
+    });
+
+    it('marca PROCESSING atomicamente antes de processar e PROCESSED ao final', async () => {
+      await expect(processor.processEvent(overdueJob.data)).resolves.toBe('processed');
+
+      expect(prisma.webhookLog.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: 'log-claim' }),
+          data: expect.objectContaining({ status: 'PROCESSING' }),
+        }),
+      );
+      expect(prisma.webhookLog.update).toHaveBeenLastCalledWith({
+        where: { id: 'log-claim' },
+        data: expect.objectContaining({ status: 'PROCESSED', errorMessage: null }),
+      });
+    });
+
+    it('conta as tentativas em errorMessage e para em DEAD_LETTER', async () => {
+      prisma.payment.update.mockRejectedValue(new Error('db down'));
+
+      prisma.webhookLog.findUnique.mockResolvedValueOnce({ errorMessage: 'PROCESSING_FAILED#2' });
+      await expect(processor.processEvent(overdueJob.data)).rejects.toThrow('db down');
+      expect(prisma.webhookLog.update).toHaveBeenLastCalledWith({
+        where: { id: 'log-claim' },
+        data: { status: 'FAILED', processedAt: null, errorMessage: 'PROCESSING_FAILED#3' },
+      });
+
+      prisma.webhookLog.findUnique.mockResolvedValueOnce({ errorMessage: 'PROCESSING_FAILED#9' });
+      await expect(processor.processEvent(overdueJob.data)).rejects.toThrow('db down');
+      expect(prisma.webhookLog.update).toHaveBeenLastCalledWith({
+        where: { id: 'log-claim' },
+        data: { status: 'DEAD_LETTER', processedAt: null, errorMessage: 'PROCESSING_FAILED#10' },
+      });
     });
   });
 });
