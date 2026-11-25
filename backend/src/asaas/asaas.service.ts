@@ -1,6 +1,11 @@
 import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+const UUID_PATTERN =
+  /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+const UUID_EXACT =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export class AsaasApiException extends HttpException {
   constructor(
     readonly providerStatus: number | undefined,
@@ -114,10 +119,20 @@ export class AsaasService {
         // O Asaas pode ecoar dados do cliente na descrição (CPF, e-mail,
         // telefone). Mascaramos e-mails e sequências numéricas longas, removemos
         // caracteres de controle e limitamos o tamanho: é só para diagnóstico.
+        // UUIDs (walletId, ids de conta) não são dados pessoais e são
+        // essenciais para o diagnóstico (ex.: "wallet ... está bloqueada"),
+        // então ficam intactos; só o texto entre eles é mascarado.
         const sanitized = description
           .replace(/[\u0000-\u001f\u007f]+/g, ' ')
-          .replace(/[^\s@]+@[^\s@]+/g, '[email]')
-          .replace(/\d[\d.\-/() ]{3,}\d/g, '[numero]')
+          .split(UUID_PATTERN)
+          .map((part) =>
+            UUID_EXACT.test(part)
+              ? part
+              : part
+                  .replace(/[^\s@]+@[^\s@]+/g, '[email]')
+                  .replace(/\d[\d.\-/() ]{3,}\d/g, '[numero]'),
+          )
+          .join('')
           .replace(/\s+/g, ' ')
           .trim()
           .slice(0, 200);

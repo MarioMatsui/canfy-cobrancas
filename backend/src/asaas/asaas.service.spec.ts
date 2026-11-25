@@ -94,6 +94,30 @@ describe('AsaasService', () => {
     expect(logged).not.toContain('primary-secret-key');
   });
 
+  it('preserva o walletId na descricao de split bloqueado', async () => {
+    const description =
+      'Não é possível fazer split para wallet [b0e47e47-c959-4957-bc72-b10a2a33baf5], ' +
+      'pois a mesma está bloqueada. Favor entrar em contato com o Suporte Técnico.';
+    fetchSpy.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: jest.fn().mockResolvedValue(
+        JSON.stringify({ errors: [{ code: 'invalid_action', description }] }),
+      ),
+    } as unknown as Response);
+
+    const thrown = await createService()
+      .post('/payments', { billingType: 'PIX' })
+      .catch((error: unknown) => error);
+
+    expect((thrown as AsaasApiException).errorDescriptions).toEqual([
+      description.slice(0, 200),
+    ]);
+    expect((thrown as AsaasApiException).errorDescriptions[0]).toContain(
+      'b0e47e47-c959-4957-bc72-b10a2a33baf5',
+    );
+  });
+
   it('mascara CPF, telefone e e-mail na descricao do erro do Asaas', async () => {
     fetchSpy.mockResolvedValueOnce({
       ok: false,
